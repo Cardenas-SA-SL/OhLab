@@ -17,6 +17,7 @@ const handlers = (overrides: Partial<AddHandlers> = {}): AddHandlers => ({
   browser: noop,
   web: noop,
   sticky: noop,
+  files: noop,
   dino: noop,
   trigger: noop,
   openFile: noop,
@@ -32,6 +33,7 @@ const allKinds: AddItem['kind'][] = [
   'browser',
   'web',
   'sticky',
+  'files',
   'dino',
   'trigger',
   'open-file',
@@ -60,6 +62,7 @@ describe('contentAddItemsToMenuItems', () => {
       'New browser',
       'New web view…',
       'New sticky note',
+      'New file manager',
       'New dino game',
       'New trigger…',
       'Open file…',
@@ -67,6 +70,14 @@ describe('contentAddItemsToMenuItems', () => {
       'Spawn a team…',
       'New worktree…'
     ])
+  })
+
+  it('hides "New file manager" when the project has no cwd', () => {
+    const items = contentAddItemsToMenuItems(CONTENT_ADD_ITEMS, handlers(), {
+      hasCwd: false,
+      isSshProject: false
+    })
+    expect(items.some((i) => 'label' in i && i.label === 'New file manager')).toBe(false)
   })
 
   // A cwd-less project is a supported, persisted canvas — the folder-shaped rows must degrade
@@ -147,6 +158,7 @@ describe('contentAddItemsToDockRows', () => {
       'browser',
       'web',
       'sticky',
+      'files',
       'dino',
       'trigger',
       'open-file',
@@ -156,6 +168,14 @@ describe('contentAddItemsToDockRows', () => {
     ])
     expect(rows.some((r) => r.kind === 'terminal')).toBe(false)
     expect(rows.some((r) => r.kind === 'remote')).toBe(false)
+  })
+
+  it('hides "files" when there is no cwd', () => {
+    const rows = contentAddItemsToDockRows(CONTENT_ADD_ITEMS, handlers(), {
+      hasCwd: false,
+      isSshProject: false
+    })
+    expect(rows.some((r) => r.kind === 'files')).toBe(false)
   })
 
   it('DISABLES "new-file" with its reason when there is no cwd — the Dock keeps the row too', () => {

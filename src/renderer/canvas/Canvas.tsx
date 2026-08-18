@@ -81,6 +81,7 @@ import { LazyEditorNode, LazyDiffNode } from '../nodes/lazyMonacoNodes'
 import { DinoNode } from '../nodes/DinoNode'
 import { TriggerNode } from '../nodes/TriggerNode'
 import BrowserNode from '../nodes/BrowserNode'
+import { FilesNode } from '../nodes/FilesNode'
 import { normalizeAddress } from '../nodes/browserUrl'
 import VideoNode from '../nodes/VideoNode'
 import WebNode from '../nodes/WebNode'
@@ -490,6 +491,7 @@ import {
   createBrowserNode,
   createDinoNode,
   createTriggerNode,
+  createFilesNode,
   createDiffNode,
   createEditorNode,
   createGroupNode,
@@ -1530,7 +1532,8 @@ export function Canvas() {
       trigger: withNodeBoundary(TriggerNode),
       video: withNodeBoundary(VideoNode),
       web: withNodeBoundary(WebNode),
-      browser: withNodeBoundary(BrowserNode)
+      browser: withNodeBoundary(BrowserNode),
+      files: withNodeBoundary(FilesNode)
     }),
     []
   )
@@ -3944,13 +3947,21 @@ export function Canvas() {
       const d = (e as CustomEvent<{ path: string }>).detail
       if (d?.path) revealProjectFile(d.path)
     }
+    // A file-manager node asking for a terminal in the folder it is showing. Same
+    // no-direct-line-to-the-canvas pattern as the two above.
+    const onTerminal = (e: Event): void => {
+      const d = (e as CustomEvent<{ cwd?: string }>).detail
+      if (d?.cwd) addTerminal(undefined, undefined, undefined, d.cwd)
+    }
     window.addEventListener('nodeterm:open-file', onOpen)
     window.addEventListener('nodeterm:reveal-file', onReveal)
+    window.addEventListener('nodeterm:open-terminal', onTerminal)
     return () => {
       window.removeEventListener('nodeterm:open-file', onOpen)
       window.removeEventListener('nodeterm:reveal-file', onReveal)
+      window.removeEventListener('nodeterm:open-terminal', onTerminal)
     }
-  }, [openFile, revealProjectFile])
+  }, [openFile, revealProjectFile, addTerminal])
 
   // Mic button on a terminal node's header (TerminalNode dispatches this — same
   // no-direct-line-to-canvas pattern as nodeterm:open-file above). Unlike toggleDictation's
@@ -4121,6 +4132,33 @@ export function Canvas() {
       void writeDisk()
     },
     [commitActiveToStore, writeDisk]
+  )
+
+  /**
+   * Open a file-manager node. It starts at the group's worktree cwd if it is being created inside
+   * a bound frame, else the project's own root — for an SSH project that is the REMOTE root, and
+   * the node is stamped `sshFs` so it lists the host rather than this machine (the same pairing
+   * `openFile` makes for an Explorer-opened remote file).
+   *
+   * Refused, rather than opened empty, when the project has no directory at all: a cwd-less canvas
+   * has nothing to browse, and a file manager rooted at `/` by default would be a worse answer
+   * than a sentence saying so.
+   */
+  const addFiles = useCallback(
+    (center?: { x: number; y: number }, groupId?: string, cwdOverride?: string) => {
+      const project = useProjects.getState().getProject(activeProjectId)
+      const cwd = cwdOverride ?? cwdForNewNodeIn(groupId) ?? project?.ssh?.remoteCwd ?? project?.cwd
+      if (!cwd) {
+        setCopyError('This canvas has no folder yet — open one from the project tab first.')
+        return
+      }
+      setNodes((ns) => {
+        const node = createFilesNode(ns.length, cwd, center ?? emptyNodePos(), !!project?.ssh)
+        return [...ns, groupId ? parentInto(node, groupId) : node]
+      })
+      markDirty()
+    },
+    [setNodes, markDirty, activeProjectId, emptyNodePos, cwdForNewNodeIn, parentInto]
   )
 
   const addSticky = useCallback(
@@ -7866,6 +7904,9 @@ export function Canvas() {
         },
         ...agentCreationItems(at, groupId),
         { label: 'New sticky note', icon: <IconNote />, onClick: () => addSticky(at, groupId) },
+        // Inside a worktree-bound frame this roots the manager at the WORKTREE, not the project —
+        // `cwdForNewNodeIn` is what makes a frame per branch also mean a file tree per branch.
+        { label: 'New file manager', icon: <IconExplorer />, onClick: () => addFiles(at, groupId) },
         { type: 'separator' },
         ...(isHidden('colors', useSettings.getState().settings.hiddenNodeMenuItems)
           ? []
@@ -7964,6 +8005,7 @@ export function Canvas() {
       browser: (at) => addBrowser(at),
       web: (at) => void addWebView(at),
       sticky: (at) => addSticky(at),
+      files: (at) => addFiles(at),
       dino: (at) => addDino(at),
       trigger: (at) => addTrigger(at),
       openFile: (at) => void openFileDialog(at),
@@ -7975,6 +8017,7 @@ export function Canvas() {
       addTerminal,
       openRemotePicker,
       addBrowser,
+      addFiles,
       addWebView,
       addSticky,
       addDino,
@@ -11924,6 +11967,17 @@ export function Canvas() {
           })
         ),
       { id: 'new-sticky', label: 'New sticky note', icon: <IconNote />, run: () => addSticky() },
+      // Needs a folder to root itself in, exactly like "New file…" below.
+      ...(newFileHasCwd
+        ? [
+            {
+              id: 'new-files',
+              label: 'New file manager',
+              icon: <IconExplorer />,
+              run: () => addFiles()
+            }
+          ]
+        : []),
       { id: 'new-dino', label: 'New dino game', icon: <IconDino />, run: () => addDino() },
       { id: 'open-file', label: 'Open file…', icon: <IconEditor />, run: () => void openFileDialog() },
       // "New file…" needs a project folder to create into — hidden when the project has no cwd.
@@ -13080,6 +13134,7 @@ export function Canvas() {
         onSpawnTeam={() => setSpawnTeamDialog({})}
         onAddDino={addDino}
         onAddTrigger={addTrigger}
+        onAddFiles={() => addFiles()}
         onAddAgent={(aid, accountId) => addAgentNode(aid, undefined, undefined, accountId)}
         onOpenFile={() => void openFileDialog()}
         onAddRemote={() => openRemotePicker({ x: window.innerWidth / 2, y: window.innerHeight / 2 })}
