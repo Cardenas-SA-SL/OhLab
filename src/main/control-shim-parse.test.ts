@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { CONTROL_SHIM_SCRIPT } from './canvas-control-core'
+import { CONTROL_SHIM_SCRIPT } from '../core/canvas-control-core'
 
 let dir = ''
 

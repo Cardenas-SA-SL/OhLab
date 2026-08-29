@@ -41,7 +41,7 @@ import {
   buildCanvasControlInstructions,
   buildCanvasSkillBody,
   mergeCanvasControlBlock
-} from '../canvas-control-core'
+} from '../../core/canvas-control-core'
 import {
   CONTEXT_SHIM_SCRIPT,
   buildContextLinkSkillBody,

@@ -1166,7 +1166,7 @@ export class WorkspaceStore {
 
   /**
    * Does this project exist on THIS machine, and is it SSH? The `--project` targeting gate
-   * (issue #338, src/main/project-grants.ts) asks main's own store — never the request — before
+   * (issue #338, src/core/project-grants.ts) asks the core store — never the request — before
    * any targeted open is forwarded. Same three-entry-kind scan and same id semantics as
    * `persistedCanvases` (inline keyed by `e.project.id`, ssh/local refs by `e.id`), because the
    * projectId a grant names there must resolve to the same project here. `undefined` = unknown

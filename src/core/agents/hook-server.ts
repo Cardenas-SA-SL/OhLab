@@ -177,7 +177,7 @@ export interface HookEventMeta {
  * fail-closed from day one costs nobody anything.
  *
  * `open-project` (issue #338) is here for the same class of reason as `sticky`: the main-side
- * grant ledger (src/main/project-grants.ts) mints per-caller targeting rights off a successful
+ * grant ledger (src/core/project-grants.ts) mints per-caller targeting rights off a successful
  * `open-project`, and a grant recorded for an unverifiable caller would authorize whoever can
  * name that caller's node id. NEW verb, so fail-closed from day one strands nobody.
  *

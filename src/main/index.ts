@@ -26,7 +26,7 @@ import {
   gateOpenProject,
   PROJECT_TARGETABLE_VERBS,
   OPEN_PROJECT_GRANT_CAP
-} from './project-grants'
+} from '../core/project-grants'
 import { BrowserLeaseManager, BrowserSession } from './browser-lease'
 import { CdpEventBus, type Sendable } from './browser-actions'
 import { RefTable } from './browser-refs'
@@ -63,7 +63,7 @@ import {
   onMessagingAgentEvent,
   setDeliveryQueue,
   type AgentMessagingDeps
-} from './agent-messaging'
+} from '../core/agents/agent-messaging'
 import type { RemoteLogExec } from '../core/board-log'
 import { boardLogRemotePath } from '../core/board-log'
 import { PtyManager } from '../core/pty-manager'
@@ -1596,7 +1596,7 @@ app.whenReady().then(async () => {
 
   // Agent messaging (the `send`/`reply` control verbs). Canvas.tsx forwards the validated verb
   // here; everything that authorizes or performs the delivery reads MAIN's stores. See
-  // src/main/agent-messaging.ts for the whole map.
+  // src/core/agents/agent-messaging.ts for the whole map.
   const messagingDeps: AgentMessagingDeps = {
     paneOwner: (id) => ptyManager.paneOwner(id),
     sendEnvelope: (id, envelope) => ptyManager.sendEnvelope(id, envelope),
@@ -2329,8 +2329,8 @@ app.whenReady().then(async () => {
   // Managed accounts each carry their own settings.json AND skills/ (Claude Code resolves both
   // relative to CLAUDE_CONFIG_DIR) — re-install the hook + canvas skill there too (idempotent),
   // so an app update's new versions reach every account dir. The loop is shared with the Server
-  // Edition's boot (src/core/claude-accounts-service.ts); the canvas skill is the desktop's own
-  // addition, because canvas control is not wired on that shell at all.
+  // Edition's boot (src/core/claude-accounts-service.ts); each shell supplies its own canvas-skill
+  // installer when that control surface is enabled.
   installHooksIntoLocalAccounts(settingsStore.get().claudeAccounts ?? [], installCanvasSkillInto)
   // Fan a normalized agent event to BOTH consumers: the renderer's agentStatus store (canvas badge)
   // and the mobile-facing mirror. Named so the deterministic-approval answer handler below can reuse

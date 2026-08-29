@@ -228,7 +228,7 @@ import {
   answerBrowserResolve,
   type BrowserResolveProject
 } from '../lib/controlRouting'
-import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../lib/stickyWrite'
+import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
 import {
   unavailableRecovery,
   planOpenProject,

@@ -7,13 +7,13 @@ import {
   buildCanvasSkillBody,
   CONTROL_SHIM_SCRIPT,
   CONTROL_UNREACHABLE_MSG
-} from './canvas-control-core'
+} from '../core/canvas-control-core'
 import {
   CODEX_SANDBOX_BLOCKED_LINE,
   CODEX_SANDBOX_RETRY_LINE
 } from '../core/agents/hook-sandbox-hint-sh'
 import { RETRYABLE } from '../core/agents/agent-message-decide'
-import { PROJECT_TARGETABLE_VERBS } from './project-grants'
+import { PROJECT_TARGETABLE_VERBS } from '../core/project-grants'
 import { STRICT_CONTROL_VERBS } from '../core/agents/node-identity-policy'
 import { BROWSER_ACTION_KEYS } from '../core/browser-verb'
 import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from '../core/browser-outcomes'
@@ -500,7 +500,7 @@ describe('open-project + --project docs land with the dispatch (issue #338, spec
   })
 
   it('every --project-targetable verb line documents the flag — walked off the REAL set', () => {
-    // The drift alarm walks PROJECT_TARGETABLE_VERBS (src/main/project-grants.ts) rather than a
+    // The drift alarm walks PROJECT_TARGETABLE_VERBS (src/core/project-grants.ts) rather than a
     // re-typed list: a fourth verb joining the set without its doc line goes red here, and a doc
     // line dropping the flag goes red too.
     for (const [name, body] of bodies) {

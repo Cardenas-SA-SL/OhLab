@@ -34,7 +34,7 @@ export function findProjectByCwd<T extends { cwd?: string }>(
  * pairs have already passed a human decision — creating, adopting, or the lighter first-attach
  * "Allow?" — so an idempotent re-open by the SAME caller does not re-raise the dialog, while a
  * DIFFERENT caller naming the same cwd still asks. DIALOG DEDUPE ONLY: authorization is main's
- * grant ledger (src/main/project-grants.ts), keyed to main's own verified identity verdict; this
+ * grant ledger (src/core/project-grants.ts), keyed to the core's own verified identity verdict; this
  * map decides nothing but whether a dialog is shown. In-memory, per app run — the same lifetime
  * as the grants it mirrors.
  */

@@ -8,14 +8,14 @@
  * real tmux in `agent-message.realtty.test.ts` — this file assumes both and tests only what the
  * service adds.
  */
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   deliverFromControl,
   renderMessageOutcome,
   onMessagingAgentEvent,
   createDeliveryQueue,
   type AgentMessagingDeps
-} from './agent-messaging'
+} from '../core/agents/agent-messaging'
 import type { BoardLogEntry } from '../shared/types'
 import { RETRYABLE, type AgentMessageOutcome } from '../core/agents/agent-message-decide'
 import { resetMessageFlow, FANOUT_PER_TURN } from '../core/agents/agent-message-flow'
@@ -359,6 +359,38 @@ describe('deliver-on-idle wiring (PR 7)', () => {
     expect(outcome.kind).toBe('queued')
     expect(queue.depth('b1')).toBe(1)
     expect(deps.rec.sent).toEqual([]) // queued is NOT delivered — no bytes yet
+  })
+
+  it('the Server Edition explicit queue tap flushes a busy send on the target idle event', async () => {
+    const flushed = vi.fn(async () => ({
+      kind: 'delivered' as const,
+      traceId: 'delivered-trace',
+      traced: 'memory' as const,
+      receipt: 'observed' as const,
+      signal: 'newTurn' as const
+    }))
+    const queue = new DeliveryQueue({
+      now: () => 0,
+      deliver: flushed,
+      trace: async () => ({ traceId: 'queue-trace', traced: 'memory' }),
+      schedule: () => () => {}
+    })
+    const busy: MirrorEntry = {
+      state: 'working',
+      updatedAt: 1,
+      stateVerified: true,
+      clientRevision: MANAGED_SCRIPT_REVISION
+    }
+    const deps = fakeDeps({ mirrorEntry: () => busy, queue })
+    expect((await deliverFromControl(req(), deps)).outcome.kind).toBe('queued')
+    expect(queue.depth('b1')).toBe(1)
+
+    onMessagingAgentEvent(
+      { nodeId: 'b1', state: 'done', verified: true, newTurn: false },
+      queue
+    )
+    await vi.waitFor(() => expect(queue.depth('b1')).toBe(0))
+    expect(flushed).toHaveBeenCalledTimes(1)
   })
 
   it('without a queue, the same busy target is refused `targetBusy` (old behaviour intact)', async () => {

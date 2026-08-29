@@ -12,46 +12,45 @@
  *
  * ── THREE SURFACES ──────────────────────────────────────────────────────────────────────────────
  * - **Desktop (Electron):** wired in `src/main/index.ts` — the only surface with the verbs.
- * - **Server Edition:** never wired; `/control/send` answers `control-unsupported-on-this-edition`
- *   (`src/server/control-unsupported.ts`) for a verified caller and the messaging refusal for an
- *   unverified one. Everything this file imports from `src/core` still ships on both shells.
+ * - **Server Edition:** wired when its canvas-control config flag is enabled; otherwise
+ *   `/control/send` keeps the named edition refusal. Both shells inject their own stores and PTYs.
  * - **Mobile (phone):** never a sender (it drives canvas control over relay→IPC, not `/control/*`);
  *   a phone-spawned node is a valid TARGET and resolves like any other store node.
  */
-import type { NormalizedAgentEvent } from '../shared/agents/normalize'
-import { binariesFor, type PaneOwner } from '../shared/agents/pane-owner-predicate'
-import type { BoardLogEntry } from '../shared/types'
+import type { NormalizedAgentEvent } from '../../shared/agents/normalize'
+import { binariesFor, type PaneOwner } from '../../shared/agents/pane-owner-predicate'
+import type { BoardLogEntry } from '../../shared/types'
 import type {
   AgentMessageDeliverRequest,
   AgentMessageReply
-} from '../shared/agents/agent-messaging'
-import { AGENT_MESSAGE_VERBS, NOTIFY_BODY } from '../shared/agents/agent-messaging'
+} from '../../shared/agents/agent-messaging'
+import { AGENT_MESSAGE_VERBS, NOTIFY_BODY } from '../../shared/agents/agent-messaging'
 import {
   deliverAgentMessage,
   type DeliveryDeps,
   type ReceiptEvent
-} from '../core/agents/agent-message'
+} from './agent-message'
 import {
   RETRYABLE,
   type AgentMessageOutcome,
   type NotPermittedReason
-} from '../core/agents/agent-message-decide'
-import { noteNewTurn, noteSent, reserveFlow } from '../core/agents/agent-message-flow'
-import { recordDelivery } from '../core/agents/agent-message-trace'
-import { resolveDeliveryScope, scopeRefusal } from '../core/agents/agent-message-scope'
+} from './agent-message-decide'
+import { noteNewTurn, noteSent, reserveFlow } from './agent-message-flow'
+import { recordDelivery } from './agent-message-trace'
+import { resolveDeliveryScope, scopeRefusal } from './agent-message-scope'
 import {
   DeliveryQueue,
   type DeliveryQueueDeps,
   type QueuedDeliveryRequest
-} from '../core/agents/delivery-queue'
+} from './delivery-queue'
 import { randomUUID } from 'crypto'
-import { nodeTokenFilePresent } from '../core/agents/node-token-files'
-import { mirrorEntry as coreMirrorEntry, type MirrorEntry } from '../core/agent-status-mirror'
+import { nodeTokenFilePresent } from './node-token-files'
+import { mirrorEntry as coreMirrorEntry, type MirrorEntry } from '../agent-status-mirror'
 import {
   projectCapabilityGrantedFor,
   type CapabilityAckMap
-} from '../core/project-capability-consent'
-import type { ProjectCapability } from '../shared/project-capabilities'
+} from '../project-capability-consent'
+import type { ProjectCapability } from '../../shared/project-capabilities'
 
 /** The little the service needs to know about a stored node. */
 export interface MessagingStoredNode {
@@ -150,11 +149,9 @@ function subscribeBus(cb: (e: ReceiptEvent) => void): () => void {
 
 /**
  * The process-lifetime deliver-on-idle queue (PR 7), wired once by the desktop shell. Held at module
- * scope — not threaded through `AgentMessagingDeps` on the event path — because the flush trigger is
- * the SAME normalized event stream `onMessagingAgentEvent` already taps, and a target going idle is
- * what a flush waits for. Null on the Server Edition and until wired (messaging does not exist
- * there). The verb path still takes the queue through `deps.queue` so a test can drive enqueue in
- * isolation.
+ * scope for the desktop shell. The Server Edition passes its own queue explicitly to
+ * `onMessagingAgentEvent`, which avoids coupling two independently-constructed runtimes in tests.
+ * The verb path also takes the queue through `deps.queue` so either shell can drive enqueue.
  */
 let deliveryQueue: DeliveryQueue | null = null
 
@@ -249,7 +246,8 @@ export function createDeliveryQueue(
  * designed direction) but can never confirm a delivery (fail-closed, the receipt's).
  */
 export function onMessagingAgentEvent(
-  e: Pick<NormalizedAgentEvent, 'nodeId' | 'state' | 'newTurn' | 'verified'>
+  e: Pick<NormalizedAgentEvent, 'nodeId' | 'state' | 'newTurn' | 'verified'>,
+  queue: DeliveryQueue | null = deliveryQueue
 ): void {
   if (!e?.nodeId) return
   if (e.newTurn === true) noteNewTurn(e.nodeId)
@@ -264,7 +262,7 @@ export function onMessagingAgentEvent(
   // re-runs the whole delivery per queued message (the flush-time re-validation), so a `done` that
   // is actually still-not-deliverable (an unverified or inferred idle) simply re-queues — this only
   // needs to be a cheap "maybe now" nudge, not a precise idle verdict.
-  if (e.state === 'done') void deliveryQueue?.onTargetIdle(e.nodeId)
+  if (e.state === 'done') void queue?.onTargetIdle(e.nodeId)
 }
 
 // ── The per-node delivery lock ────────────────────────────────────────────────────────────────

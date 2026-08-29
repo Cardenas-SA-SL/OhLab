@@ -1,16 +1,16 @@
 // Pure core for agent canvas control: the verb model, request validation, and the standalone
 // CLI source. No electron imports, so this module + CONTROL_CLI_SCRIPT are unit-testable.
 // Electron/ipc/server wiring lives in canvas-control.ts + index.ts + hook-server.ts.
-import { HOOK_CURL_HEADERS_SH } from '../core/agents/hook-curl-config-sh'
-import { CODEX_SANDBOX_HINT_SH } from '../core/agents/hook-sandbox-hint-sh'
-import { HOOK_ENDPOINT_FALLBACK_SH, STALE_ENDPOINT_HINT } from '../core/agents/hook-endpoint-failover-sh'
-import { codexSandboxGuidanceLines } from '../core/context-link-core'
-import { NODE_TOKEN_READ_SH } from '../core/agents/node-token-sh'
+import { HOOK_CURL_HEADERS_SH } from './agents/hook-curl-config-sh'
+import { CODEX_SANDBOX_HINT_SH } from './agents/hook-sandbox-hint-sh'
+import { HOOK_ENDPOINT_FALLBACK_SH, STALE_ENDPOINT_HINT } from './agents/hook-endpoint-failover-sh'
+import { codexSandboxGuidanceLines } from './context-link-core'
+import { NODE_TOKEN_READ_SH } from './agents/node-token-sh'
 import { AGENT_CONFIG, AGENT_HOOK_TARGETS, BUILTIN_AGENT_IDS } from '@shared/agents/config'
-import { RETRYABLE } from '../core/agents/agent-message-decide'
-import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from '../core/agents/agent-message-flow'
-import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from '../core/browser-outcomes'
-import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from '../core/browser-verb'
+import { RETRYABLE } from './agents/agent-message-decide'
+import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from './agents/agent-message-flow'
+import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
+import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from './browser-verb'
 
 /**
  * The messaging verbs' retry guidance, RENDERED from `RETRYABLE` — the table is the source, and
@@ -238,7 +238,7 @@ export function parseControlRequest(
   if (v === 'browser' && !args.node) return { error: 'browser: --node <id> is required' }
   // `open-project` requires a cwd; everything else about the argument (absolute, exists, is a
   // directory, resolved once) is validated in MAIN by `validateOpenProjectCwd`
-  // (src/main/project-grants.ts) — the caller's path is hostile input and this presence check is
+  // (src/core/project-grants.ts) — the caller's path is hostile input and this presence check is
   // only the polite half.
   if (v === 'open-project' && !args.cwd) return { error: 'open-project requires --cwd <abs-path>' }
   return { verb: v, args }

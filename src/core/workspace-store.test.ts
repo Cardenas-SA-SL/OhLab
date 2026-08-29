@@ -1823,7 +1823,7 @@ describe('the shared project file carries content, not machine identity', () => 
 })
 
 describe('projectMetaFor (issue #338 PR 1) — target exists / is SSH, from the store alone', () => {
-  // The --project targeting gate (src/main/project-grants.ts) learns "does this project exist,
+  // The --project targeting gate (src/core/project-grants.ts) learns "does this project exist,
   // and is it SSH" from main's OWN store — never from anything the caller sent. Same three
   // entry kinds as persistedCanvases: inline (e.project), ssh (e.ssh), local ref (e.cwd).
   it('answers for all three entry kinds and undefined for an unknown id', async () => {
