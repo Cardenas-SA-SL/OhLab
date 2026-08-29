@@ -1870,6 +1870,19 @@ export class PtyManager {
     return tomb
   }
 
+  /**
+   * Create or attach a node session without a renderer initiating the request.
+   *
+   * Client id 0 is reserved by both shells (ServerPlatform starts real websocket clients at 1;
+   * Electron webContents ids are positive). Keeping the synthetic subscriber in the ordinary
+   * ledger means a browser that opens later takes the proven co-attach path, while output sent to
+   * id 0 is simply dropped by a platform with no such UI. All spawn policy, node-auth env,
+   * account scoping, project env and ownership recording still run through `create` unchanged.
+   */
+  createHeadless(options: PtyCreateOptions): Promise<PtyCreateResult> {
+    return this.create(0, options)
+  }
+
   private async create(clientId: ClientId, options: PtyCreateOptions): Promise<PtyCreateResult> {
     const key = options.persistKey
     if (!key) return this.spawnNew(clientId, options)

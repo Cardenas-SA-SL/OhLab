@@ -6,7 +6,7 @@
  * assertions here are about what the caller can conclude — a stable machine name, and prose that
  * contains the literal "do not retry" — not merely about a status code.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -20,6 +20,7 @@ import {
   CONTROL_UNSUPPORTED_ERROR,
   CONTROL_UNSUPPORTED_SENTENCE,
   controlUnsupportedMessage,
+  createServerEditionControlHandler,
   serverEditionControlHandler
 } from './control-unsupported'
 
@@ -167,6 +168,88 @@ describe('the Server Edition wires it at boot', () => {
     // the null branch is invisible until an agent hits it in production.
     const src = fs.readFileSync(path.resolve(__dirname, 'index.ts'), 'utf8')
     expect(src).toContain('setControlHandler(serverEditionControlHandler)')
+  })
+})
+
+describe('the enabled Server Edition handler parses and dispatches the v1 surface', () => {
+  const actions = () => ({
+    openTerminal: vi.fn(async () => ({ ok: true as const, result: { id: 'term-new' } })),
+    openAgent: vi.fn(async () => ({ ok: true as const, result: { id: 'agent-new' } })),
+    sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
+    deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
+  })
+
+  it('shares parser validation and forwards source identity to an open', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await expect(
+      handler({
+        verb: 'open-terminal',
+        nodeId: 'term-source',
+        args: { count: '2', after: 'term-upstream' },
+        verified: true
+      })
+    ).resolves.toMatchObject({ ok: true })
+    expect(a.openTerminal).toHaveBeenCalledWith(
+      'term-source',
+      { count: '2', after: 'term-upstream' },
+      true
+    )
+
+    await expect(
+      handler({ verb: 'open-agent', nodeId: 'term-source', args: {}, verified: true })
+    ).resolves.toEqual({ ok: false, error: 'open-agent requires --agent <id>' })
+    expect(a.openAgent).not.toHaveBeenCalled()
+  })
+
+  it('routes messaging without trusting a notify body', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await handler({
+      verb: 'send',
+      nodeId: 'term-source',
+      args: { node: 'term-target', text: 'hello' },
+      verified: true
+    })
+    await handler({
+      verb: 'notify',
+      nodeId: 'term-source',
+      args: { node: 'term-target' },
+      verified: true
+    })
+    await handler({
+      verb: 'reply',
+      nodeId: 'term-source',
+      args: { node: 'term-target', text: 'ack' },
+      verified: true
+    })
+    expect(a.deliver).toHaveBeenNthCalledWith(1, {
+      verb: 'send',
+      sourceNodeId: 'term-source',
+      targetNodeId: 'term-target',
+      body: 'hello'
+    })
+    expect(a.deliver).toHaveBeenNthCalledWith(2, {
+      verb: 'notify',
+      sourceNodeId: 'term-source',
+      targetNodeId: 'term-target',
+      body: ''
+    })
+    expect(a.deliver).toHaveBeenNthCalledWith(3, {
+      verb: 'reply',
+      sourceNodeId: 'term-source',
+      targetNodeId: 'term-target',
+      body: 'ack'
+    })
+  })
+
+  it('keeps every deferred or unknown verb a clean permanent edition refusal', async () => {
+    const handler = createServerEditionControlHandler(actions())
+    for (const verb of ['list', 'browser', 'open-project', 'not-a-verb']) {
+      const reply = await handler({ verb, nodeId: 'term-source', args: {}, verified: true })
+      expect(reply, verb).toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
+      expect(reply.message, verb).toContain('do not retry')
+    }
   })
 })
 

@@ -48,6 +48,7 @@ import { registerLogHandlers } from '../core/log-handlers'
 import os from 'os'
 import { hookServer } from '../core/agents/hook-server'
 import { serverEditionControlHandler } from './control-unsupported'
+import { initServerCanvasControl, type ServerCanvasControl } from './canvas-control'
 import { refreshNodeTokens } from '../core/agents/node-token-service'
 import { armServerNodeIdentity } from './node-identity-arm'
 import {
@@ -336,7 +337,7 @@ export async function startServer(
   // Board-log: same CorePlatform registrar as desktop, but the Server Edition has no SSH projects
   // (terminals are local), so the router only ever resolves a local folder cwd or unsupported —
   // an SSH-ref project answers `{ entries: [], unsupported: true }` (v1: no remote board log here).
-  registerBoardLogHandlers(platform, {
+  const boardLog = registerBoardLogHandlers(platform, {
     route: (projectId: string): BoardLogRoute => {
       const cwd = workspaceStore.localCwdForProject(projectId)
       return cwd ? { kind: 'local', cwd } : { kind: 'unsupported' }
@@ -406,7 +407,12 @@ export async function startServer(
   // missing/corrupt file simply yields no block.
   const installMeta = readInstallMeta(config.dataDir)
   setMirrorServerProvider(() => installMeta)
-  const { contextTail, geminiContextTail } = wireAgentStatus(platform)
+  // Set after the initial workspace load when the opt-in flag is on. The status listener is wired
+  // now so the runtime, once present, consumes the exact same normalized stream as the UI/mirror.
+  let canvasControl: ServerCanvasControl | null = null
+  const { contextTail, geminiContextTail } = wireAgentStatus(platform, {
+    onEvent: (event) => canvasControl?.onAgentEvent(event)
+  })
   // The ⌘M chat view + the find-bar's transcript index. Registered HERE rather than with the rest
   // of the handlers because the hook-fed path authority is the tail created just above. No remote
   // leg: the Server Edition runs ON the host whose transcripts it reads, so local resolution is
@@ -519,14 +525,14 @@ export async function startServer(
     }
     // Managed Claude accounts each carry their OWN settings.json (Claude Code resolves it relative
     // to CLAUDE_CONFIG_DIR), so the hook has to be re-installed there as well or a managed account
-    // reports no agent status at all. Same loop the desktop runs, minus the canvas skill: canvas
-    // control is not wired on this edition. Per-account fail-open lives inside the helper.
+    // reports no agent status at all. Canvas-control adds its skill in its own opt-in initializer;
+    // this baseline hook pass stays unchanged when the feature flag is off.
     installHooksIntoLocalAccounts(settingsStore.get().claudeAccounts ?? [])
   }
   await hookServer.start()
-  // Canvas control does not exist on this edition, and saying so BY NAME is the whole point: the
-  // null handler answered `control unavailable`, which reads to an agent like a transient outage,
-  // and an agent retries an outage. See `control-unsupported.ts`.
+  // Safe default and rollback path. The opt-in runtime replaces this handler only after its
+  // workspace-backed services are ready; a failed initialization therefore degrades to the same
+  // named permanent refusal rather than a half-wired execution surface.
   hookServer.setControlHandler(serverEditionControlHandler)
 
   // ---- Node identity (src/core/agents/node-auth-secret.ts) ------------------------------------
@@ -571,6 +577,24 @@ export async function startServer(
   await workspaceStore.load({ sideline: false }).catch((e) => {
     console.warn('[nodeterm-server] context-link initial workspace load failed', e)
   })
+
+  if (config.canvasControl === true) {
+    try {
+      canvasControl = await initServerCanvasControl({
+        workspaceStore,
+        ptyManager,
+        settings: () => settingsStore.get(),
+        boardLog,
+        installAgentIntegrations: config.installHooks !== false
+      })
+      hookServer.setControlHandler(canvasControl.handler)
+    } catch (error) {
+      console.warn(
+        '[nodeterm-server] Server Edition canvas control failed to initialize; keeping it disabled',
+        error
+      )
+    }
+  }
 
   // Session budget (docs/SERVER.md): reap long-idle DETACHED nt- tmux sessions under memory
   // pressure (10%-of-RAM watermark) or past a count cap, on BOTH the local socket and the
@@ -674,6 +698,7 @@ export async function startServer(
         sessionReaper.stop()
         pressure.stop()
         ptyPressure.stop()
+        canvasControl?.stop()
         await contextLink.stop()
         await ptyManager.killAll()
         // Same native hazard as the desktop app: a whisper transcribe still running when the
@@ -729,6 +754,7 @@ export async function startServer(
       sessionReaper.stop()
       pressure.stop()
       ptyPressure.stop()
+      canvasControl?.stop()
       await contextLink.stop()
       await ptyManager.killAll()
       // Same native hazard as the desktop app: a whisper transcribe still running when the node

@@ -296,6 +296,12 @@ export interface PendingLaunch {
   /** Delivered to the node's shell once the wait is over (agent CLI + prompt, or a plain command). */
   command: string
   /**
+   * Which core process owns delivery. Absent is the historical renderer-owned path. Server
+   * Edition headless opens stamp `server`, so a connected browser can render the armed state and
+   * dependency edges without racing the server to type the command into the same pane.
+   */
+  executor?: 'server'
+  /**
    * Also wait for this worktree GROUP's project setup script to finish (`waitForSetup`). Set when
    * the node is opened into a frame whose checkout is still being prepared — running a command in a
    * half-installed worktree is the failure this gate exists to prevent. It names a group id, never
