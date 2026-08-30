@@ -34,6 +34,7 @@ import {
   type ServerEditionControlActions
 } from './control-unsupported'
 import { HeadlessNodeFactory } from './headless-node-factory'
+import { sendSettledEnvelope } from './settled-envelope'
 
 export interface ServerCanvasControlDeps {
   workspaceStore: WorkspaceStore
@@ -145,7 +146,10 @@ export async function initServerCanvasControl(
 
   const messaging: AgentMessagingDeps = {
     paneOwner: (nodeId) => deps.ptyManager.paneOwner(nodeId),
-    sendEnvelope: (nodeId, envelope) => deps.ptyManager.sendEnvelope(nodeId, envelope),
+    // Server delivery has no renderer/xterm echo stream. Capture the headless pane instead and
+    // separate paste from Enter so a fresh TUI cannot swallow the first submit keystroke.
+    sendEnvelope: (nodeId, envelope) =>
+      sendSettledEnvelope(deps.ptyManager, nodeId, envelope),
     hasLiveSession: (nodeId) => deps.ptyManager.hasLiveSession(nodeId),
     mirrorEntry,
     projects: () => deps.workspaceStore.persistedCanvases(),

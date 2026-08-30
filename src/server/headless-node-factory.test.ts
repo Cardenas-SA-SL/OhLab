@@ -202,6 +202,71 @@ describe('HeadlessNodeFactory', () => {
     expect(workspace.projects[0].nodes.find((node) => node.id === id)?.pendingLaunch).toBeUndefined()
   })
 
+  it('holds a fresh dependency through its boot done blip, then releases after working -> done', async () => {
+    const upstreamReply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'produce result' },
+      true
+    )
+    const upstreamId = (upstreamReply.result as { id: string }).id
+    pty.sends.length = 0
+
+    const downstreamReply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume result', after: upstreamId },
+      true
+    )
+    const downstreamId = (downstreamReply.result as { id: string }).id
+    let workspace = await store.load({ sideline: false })
+    expect(workspace.projects[0].nodes.find((node) => node.id === downstreamId)?.pendingLaunch)
+      .toMatchObject({ after: [upstreamId], awaitWorking: [upstreamId] })
+
+    // Fresh Claude briefly idles at its composer before its argv prompt begins. This done is not
+    // terminal evidence because no working turn has been observed since the downstream was armed.
+    states[upstreamId] = 'done'
+    factory.onAgentEvent({ nodeId: upstreamId, state: 'done' })
+    await factory.refreshArmed()
+    expect(pty.sends).toEqual([])
+
+    states[upstreamId] = 'working'
+    factory.onAgentEvent({ nodeId: upstreamId, state: 'working' })
+    await factory.refreshArmed()
+    expect(pty.sends).toEqual([])
+    workspace = await store.load({ sideline: false })
+    expect(workspace.projects[0].nodes.find((node) => node.id === downstreamId)?.pendingLaunch)
+      .not.toHaveProperty('awaitWorking')
+
+    states[upstreamId] = 'done'
+    factory.onAgentEvent({ nodeId: upstreamId, state: 'done' })
+    await factory.refreshArmed()
+    expect(pty.sends).toEqual([{ nodeId: downstreamId, text: "claude 'consume result'" }])
+    workspace = await store.load({ sideline: false })
+    expect(workspace.projects[0].nodes.find((node) => node.id === downstreamId)?.pendingLaunch)
+      .toBeUndefined()
+  })
+
+  it('launches immediately when a fresh dependency is already done at arm time', async () => {
+    const upstreamReply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'produce result' },
+      true
+    )
+    const upstreamId = (upstreamReply.result as { id: string }).id
+    states[upstreamId] = 'done'
+    pty.sends.length = 0
+
+    const downstreamReply = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', prompt: 'consume result', after: upstreamId },
+      true
+    )
+    const downstreamId = (downstreamReply.result as { id: string }).id
+    expect(pty.sends).toEqual([{ nodeId: downstreamId, text: "claude 'consume result'" }])
+    const workspace = await store.load({ sideline: false })
+    expect(workspace.projects[0].nodes.find((node) => node.id === downstreamId)?.pendingLaunch)
+      .toBeUndefined()
+  })
+
   it('creates and updates a persisted sticky with lineage and an accountable byline', async () => {
     const createdReply = await factory.sticky('term-source', {
       node: 'Round status',

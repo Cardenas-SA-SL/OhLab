@@ -4,7 +4,17 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  _resetForTest as resetAgentStatusMirrorForTests,
+  recordAgentEvent
+} from '../core/agent-status-mirror'
 import { resetMessageFlow } from '../core/agents/agent-message-flow'
+import { resetAgentMessageTraceForTests } from '../core/agents/agent-message-trace'
+import { MANAGED_SCRIPT_REVISION } from '../core/agents/hooks/managed-script'
+import {
+  resetNodeTokenFilesForTests,
+  writeNodeTokenFile
+} from '../core/agents/node-token-files'
 import {
   recordFreshSpawnOwner,
   resetPaneOwnershipForTests
@@ -26,12 +36,17 @@ describe('initServerCanvasControl', () => {
     initPlatform(fakePlatform({ userDataDir: dataDir }))
     resetPaneOwnershipForTests()
     resetMessageFlow()
+    resetAgentMessageTraceForTests()
+    resetAgentStatusMirrorForTests()
+    resetNodeTokenFilesForTests()
   })
 
   afterEach(() => {
     runtime?.stop()
     runtime = null
     resetPaneOwnershipForTests()
+    resetAgentStatusMirrorForTests()
+    resetNodeTokenFilesForTests()
     resetPlatformForTests()
     fs.rmSync(dataDir, { recursive: true, force: true })
   })
@@ -126,5 +141,114 @@ describe('initServerCanvasControl', () => {
     })
     expect(paneOwner).not.toHaveBeenCalled()
     expect(sendEnvelope).not.toHaveBeenCalled()
+  })
+
+  it('wires permitted delivery through paste-settle-submit on the first fresh pane message', async () => {
+    const workspace: Workspace = {
+      version: 2,
+      activeProjectId: 'p1',
+      projects: [
+        {
+          id: 'p1',
+          name: 'Project',
+          color: '#0a84ff',
+          viewport: { x: 0, y: 0, zoom: 1 },
+          nodes: [
+            {
+              id: 'source',
+              kind: 'terminal',
+              position: { x: 0, y: 0 },
+              size: { width: 640, height: 440 },
+              title: 'Source',
+              color: '#d97757',
+              group: null,
+              agentId: 'claude'
+            },
+            {
+              id: 'target',
+              kind: 'terminal',
+              position: { x: 700, y: 0 },
+              size: { width: 640, height: 440 },
+              title: 'Target',
+              color: '#d97757',
+              group: null,
+              agentId: 'claude'
+            }
+          ]
+        }
+      ]
+    }
+    const store = {
+      load: vi.fn(async () => workspace),
+      save: vi.fn(async () => undefined),
+      persistedCanvases: () => [{ id: 'p1', nodes: workspace.projects[0].nodes }],
+      capabilityProjectFor: () => ({
+        agentMessaging: true,
+        capabilityAck: { agentMessaging: 'kept' }
+      })
+    } as unknown as WorkspaceStore
+    const writes: Array<{ text: string; enter: boolean | undefined }> = []
+    let pasted = ''
+    const legacySendEnvelope = vi.fn(async () => true)
+    const pty = {
+      createHeadless: vi.fn(async () => ({ sessionId: 'unused', fresh: true })),
+      captureSession: vi.fn(async () =>
+        pasted ? `Claude composer\n${pasted.split('\n').at(-1)}` : 'Claude composer'),
+      sendText: vi.fn(async (_nodeId: string, text: string, opts?: { enter?: boolean }) => {
+        writes.push({ text, enter: opts?.enter })
+        if (text) pasted = text
+        else queueMicrotask(() => runtime?.onAgentEvent({
+          nodeId: 'target',
+          agentId: 'claude',
+          kind: 'state',
+          state: 'working',
+          newTurn: true,
+          verified: true,
+          clientRevision: MANAGED_SCRIPT_REVISION
+        } as never))
+        return true
+      }),
+      paneOwner: vi.fn(async () => ({
+        tty: '/dev/pts/9',
+        panePid: 100,
+        paneId: '%1',
+        command: 'claude',
+        argv: ['claude'],
+        pids: [200]
+      })),
+      sendEnvelope: legacySendEnvelope,
+      hasLiveSession: () => true
+    } as unknown as PtyManager
+
+    recordFreshSpawnOwner('target', 'p1')
+    expect(writeNodeTokenFile('target', 'token')).toBe(true)
+    recordAgentEvent({
+      nodeId: 'target',
+      agentId: 'claude',
+      kind: 'state',
+      state: 'done',
+      verified: true,
+      clientRevision: MANAGED_SCRIPT_REVISION
+    } as never)
+
+    runtime = await initServerCanvasControl({
+      workspaceStore: store,
+      ptyManager: pty,
+      settings: () => ({ ...DEFAULT_SETTINGS }),
+      boardLog: { append: async () => false },
+      installAgentIntegrations: false
+    })
+
+    const reply = await runtime.handler({
+      verb: 'send',
+      nodeId: 'source',
+      args: { node: 'target', text: 'hello' },
+      verified: true
+    })
+    expect(reply).toMatchObject({ ok: true, message: expect.stringContaining('delivered') })
+    expect(writes).toHaveLength(2)
+    expect(writes[0]).toMatchObject({ enter: false })
+    expect(writes[1]).toEqual({ text: '', enter: true })
+    expect(legacySendEnvelope).not.toHaveBeenCalled()
   })
 })

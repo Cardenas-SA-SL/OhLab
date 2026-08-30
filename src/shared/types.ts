@@ -302,6 +302,14 @@ export interface PendingLaunch {
    */
   executor?: 'server'
   /**
+   * Server-owned dependencies whose first real turn has not been observed yet. A freshly spawned
+   * agent can briefly report `done` while its argv prompt is still booting; that idle blip must not
+   * release a downstream launch. The server removes an id only after a verified `working` event,
+   * then requires the ordinary later `done`. Persisted so a server restart cannot forget the gate.
+   * Desktop-owned launches leave this absent; renderer parity is a separate follow-up.
+   */
+  awaitWorking?: string[]
+  /**
    * Also wait for this worktree GROUP's project setup script to finish (`waitForSetup`). Set when
    * the node is opened into a frame whose checkout is still being prepared — running a command in a
    * half-installed worktree is the failure this gate exists to prevent. It names a group id, never

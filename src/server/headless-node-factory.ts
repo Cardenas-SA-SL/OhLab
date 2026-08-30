@@ -198,6 +198,8 @@ function ptyOptions(project: Project, node: CanvasNodeState): PtyCreateOptions {
 export class HeadlessNodeFactory {
   private serial: Promise<unknown> = Promise.resolve()
   private attached = new Set<string>()
+  /** Fresh server-spawned agents that have not emitted their first real working turn yet. */
+  private awaitingFirstWorking = new Set<string>()
   private retryCount = new Map<string, number>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stopped = false
@@ -340,6 +342,19 @@ export class HeadlessNodeFactory {
       const bridges = [...(target.bridges ?? [])]
       const startIndex = target.nodes.length
       const cwd = args.cwd || (target.id === source.project.id ? source.node.cwd : undefined) || target.cwd
+      // Snapshot dependency state at the arm boundary. A `working` state is already positive
+      // evidence that this fresh process made it through its boot composer; a later `done` may
+      // release it. An unknown/waiting fresh spawn needs a working event after this snapshot.
+      const afterStates = new Map(after.map((depId) => [depId, this.deps.stateOf(depId)]))
+      for (const [depId, state] of afterStates) {
+        if (state === 'working') this.awaitingFirstWorking.delete(depId)
+      }
+      const mustWait = after.some((depId) => afterStates.get(depId) !== 'done')
+      const awaitWorking = after.filter((depId) =>
+        afterStates.get(depId) !== 'done' &&
+        afterStates.get(depId) !== 'working' &&
+        this.awaitingFirstWorking.has(depId)
+      )
 
       for (let i = 0; i < count; i++) {
         let command = args.cmd
@@ -378,9 +393,13 @@ export class HeadlessNodeFactory {
         const id = nextId('term')
         // Match the desktop's `armAfter`: if every dependency is already done, launch now rather
         // than persisting a wait that has no future edge left to wake it.
-        const mustWait = after.some((depId) => this.deps.stateOf(depId) !== 'done')
         const pendingLaunch = command && mustWait
-          ? { after, command, executor: 'server' as const }
+          ? {
+              after,
+              command,
+              executor: 'server' as const,
+              ...(awaitWorking.length ? { awaitWorking: [...awaitWorking] } : {})
+            }
           : undefined
         const node: CanvasNodeState = {
           id,
@@ -433,6 +452,7 @@ export class HeadlessNodeFactory {
             failed.push(node.id)
             continue
           }
+          if (verb === 'open-agent' && result.fresh) this.awaitingFirstWorking.add(node.id)
           const command = commands.get(node.id)
           if (command && !(await this.deps.ptyManager.sendText(node.id, command))) failed.push(node.id)
         } catch {
@@ -528,10 +548,12 @@ export class HeadlessNodeFactory {
   }
 
   onAgentEvent(event: Pick<NormalizedAgentEvent, 'nodeId' | 'state'>): void {
-    if (!this.stopped && event?.nodeId && event.state === 'done') void this.refreshArmed()
+    if (this.stopped || !event?.nodeId) return
+    if (event.state === 'working') this.awaitingFirstWorking.delete(event.nodeId)
+    if (event.state === 'working' || event.state === 'done') void this.refreshArmed(event)
   }
 
-  refreshArmed(): Promise<void> {
+  refreshArmed(observed?: Pick<NormalizedAgentEvent, 'nodeId' | 'state'>): Promise<void> {
     return this.runExclusive(async () => {
       if (this.stopped) return
       const workspace = await this.deps.workspaceStore.load({ sideline: false })
@@ -541,6 +563,22 @@ export class HeadlessNodeFactory {
         for (const node of project.nodes) {
           const pending = node.pendingLaunch
           if (!pending || pending.executor !== 'server' || !pending.command) continue
+          const markChanged = (): void => {
+            const list = changedByProject.get(project) ?? []
+            if (!list.includes(node)) list.push(node)
+            changedByProject.set(project, list)
+          }
+          if (observed?.state === 'working' && pending.awaitWorking?.includes(observed.nodeId)) {
+            const remaining = pending.awaitWorking.filter((depId) => depId !== observed.nodeId)
+            pending.awaitWorking = remaining.length ? remaining : undefined
+            // Persist the evidence even if the dependent PTY is temporarily unavailable. Losing
+            // this mutation would strand the arm when the next event is the legitimate `done`.
+            markChanged()
+          }
+          for (const depId of pending.awaitWorking ?? []) {
+            if (!(observed?.state === 'working' && observed.nodeId === depId))
+              this.awaitingFirstWorking.add(depId)
+          }
           try {
             const result = await this.attach(project, node)
             if (!result.sessionId) continue
@@ -551,7 +589,11 @@ export class HeadlessNodeFactory {
 
           const ready = pending.after.every((depId) => {
             const stillExists = project.nodes.some((candidate) => candidate.id === depId)
-            return !stillExists || this.deps.stateOf(depId) === 'done'
+            if (!stillExists) return true
+            if (pending.awaitWorking?.includes(depId)) return false
+            return observed?.nodeId === depId
+              ? observed.state === 'done'
+              : this.deps.stateOf(depId) === 'done'
           })
           if (!ready) continue
           if (!(await this.deps.ptyManager.sendText(node.id, pending.command))) {
@@ -563,11 +605,13 @@ export class HeadlessNodeFactory {
           const timer = this.retryTimers.get(node.id)
           if (timer) (this.deps.clearSchedule ?? clearTimeout)(timer)
           this.retryTimers.delete(node.id)
-          const list = changedByProject.get(project) ?? []
-          list.push(node)
-          changedByProject.set(project, list)
+          markChanged()
         }
       }
+
+      // A working event is definitive for every pending launch in this transaction. Keep the
+      // process-local fresh-spawn index aligned even when several arms named the same dependency.
+      if (observed?.state === 'working') this.awaitingFirstWorking.delete(observed.nodeId)
 
       if (changedByProject.size) {
         await this.deps.workspaceStore.save(workspace)
