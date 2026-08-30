@@ -160,6 +160,20 @@ describe('parseControlRequest', () => {
     expect(isDestructiveVerb('rename')).toBe(false)
   })
 
+  it('color requires --node and --color, and is metadata-only', () => {
+    expect(parseControlRequest('color', {})).toEqual({
+      error: 'color requires --node <id,id>'
+    })
+    expect(parseControlRequest('color', { node: 'n1,n2' })).toEqual({
+      error: 'color requires --color'
+    })
+    expect(parseControlRequest('color', { node: 'n1,n2', color: '#32d74b' })).toEqual({
+      verb: 'color',
+      args: { node: 'n1,n2', color: '#32d74b' }
+    })
+    expect(isDestructiveVerb('color')).toBe(false)
+  })
+
   it('ungroup requires --group; move requires --nodes; neither is destructive', () => {
     expect(parseControlRequest('ungroup', {})).toEqual({ error: 'ungroup requires --group <id>' })
     expect(parseControlRequest('ungroup', { group: 'g1' })).toEqual({ verb: 'ungroup', args: { group: 'g1' } })
@@ -207,9 +221,14 @@ describe('parseControlRequest', () => {
 
   it('instructions cover the verb set and the confirm caveat', () => {
     const body = buildCanvasControlInstructions('/tmp/nodeterm.sh')
-    for (const verb of ['list', 'open-agent', 'spawn-team', 'group', 'ungroup', 'move', 'arrange', 'rename', 'write', 'close', 'board', 'assign']) {
+    for (const verb of ['list', 'open-agent', 'spawn-team', 'group', 'ungroup', 'move', 'arrange', 'rename', 'color', 'write', 'close', 'board', 'assign']) {
       expect(body).toContain(verb)
     }
+    expect(body).toContain('group --nodes <id,id> [--label L] [--color C]')
+    expect(body).toContain('color --node <id,id> --color C')
+    const skill = buildCanvasSkillBody('/tmp/nodeterm.sh')
+    expect(skill).toContain('group --nodes <id,id> [--label "Frontend Team"] [--color C]')
+    expect(skill).toContain('color --node <id,id> --color C')
     expect(body.toLowerCase()).toContain('confirm')
   })
 
@@ -262,10 +281,10 @@ describe('parseControlRequest', () => {
     expect(parseControlRequest('reply', { node: 'n1' })).toEqual({ error: 'reply requires --text' })
   })
 
-  it('the shim maps a bare positional onto arg.node for send/reply/sticky too', () => {
+  it('the shim maps a bare positional onto arg.node for color/send/reply/sticky too', () => {
     // The positional list is a case pattern inside CONTROL_SHIM_SCRIPT; send/reply/sticky take the
-    // same "first bare word is the node" convenience write/close/rename/branch already have.
-    expect(CONTROL_SHIM_SCRIPT).toContain('write|close|rename|branch|send|reply|sticky)')
+    // same "first bare word is the node" convenience write/close/rename/color/branch already have.
+    expect(CONTROL_SHIM_SCRIPT).toContain('write|close|rename|color|branch|send|reply|sticky)')
   })
 
   it('sticky requires --node plus exactly one of --text/--append, and is not destructive', () => {

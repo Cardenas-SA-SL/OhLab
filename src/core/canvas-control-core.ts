@@ -11,6 +11,7 @@ import { RETRYABLE } from './agents/agent-message-decide'
 import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from './agents/agent-message-flow'
 import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
 import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from './browser-verb'
+import { NODE_COLORS } from '@shared/node-colors'
 
 /**
  * The messaging verbs' retry guidance, RENDERED from `RETRYABLE` — the table is the source, and
@@ -115,6 +116,7 @@ export type ControlVerb =
   | 'close-worktree'
   | 'branch'
   | 'rename'
+  | 'color'
   | 'write'
   | 'close'
   | 'board'
@@ -152,6 +154,7 @@ const VERBS: ControlVerb[] = [
   'close-worktree',
   'branch',
   'rename',
+  'color',
   'write',
   'close',
   'board',
@@ -218,6 +221,8 @@ export function parseControlRequest(
   if (v === 'branch' && !args.node) return { error: 'branch requires --node <id>' }
   if (v === 'rename' && !args.node) return { error: 'rename requires --node <id>' }
   if (v === 'rename' && !args.title) return { error: 'rename requires --title' }
+  if (v === 'color' && !args.node) return { error: 'color requires --node <id,id>' }
+  if (v === 'color' && args.color === undefined) return { error: 'color requires --color' }
   if ((v === 'send' || v === 'reply') && !args.node) return { error: `${v} requires --node <id>` }
   if ((v === 'send' || v === 'reply') && !args.text) return { error: `${v} requires --text` }
   if (v === 'notify' && !args.node) return { error: 'notify requires --node <id>' }
@@ -311,7 +316,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `show-image <path>` / `show-video <path>` — open a media file as a node.',
     '- `show-web (--url U | --file P.html | --html "<...>")` — open a web viewer.',
     '- `open-browser --url U` — open a navigable browser node.',
-    '- `group --nodes <id,id> [--label L]` — wrap sibling nodes or sibling groups in a new labeled frame.',
+    '- `group --nodes <id,id> [--label L] [--color C]` — wrap sibling nodes or sibling groups in a new labeled frame.',
     '  Every id must share one container. `ungroup --group <id>` dissolves a frame and promotes its direct',
     '  children into the frame\'s parent. `move --nodes <id,id> [--group <id>]` reparents nodes or groups INTO an',
     '  existing frame (omit `--group`, or pass `top`/`none`, to pull them out to the top level) — this is',
@@ -336,6 +341,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  the user to confirm deletion.',
     '- `branch --node <id>` — branch a Claude node\'s conversation (Claude nodes only).',
     '- `rename --node <id> --title "New Name"` — rename any node (terminals, groups, stickies…).',
+    `- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.`,
     '- `write --node <id> --text "..."` / `close --node <id>` — type into / close a node.',
     '  Desktop asks the user to confirm both. Server Edition close is narrower: only nodes this',
     '  caller opened during the current server run can be closed, and those close without a dialog;',
@@ -448,7 +454,7 @@ nt_verb="list"
 if [ $# -gt 0 ]; then nt_verb="$1"; shift; fi
 
 # Translate \`--flag value\` pairs — plus the one bare positional the show-image/show-video and
-# write/close/rename/branch/send/reply/sticky forms accept — into curl --data-urlencode arguments. The positional
+# write/close/rename/color/branch/send/reply/sticky forms accept — into curl --data-urlencode arguments. The positional
 # list doubles as the accumulator: originals are consumed from the front, translated pairs
 # appended at the back, so "$@" holds exactly the curl args once the loop drains.
 nt_seen_pos=0
@@ -492,7 +498,7 @@ while [ "$nt_i" -lt "$nt_count" ]; do
         nt_seen_pos=1
         case "$nt_verb" in
           show-image|show-video) set -- "$@" --data-urlencode "arg.path=$nt_a" ;;
-          write|close|rename|branch|send|reply|sticky) set -- "$@" --data-urlencode "arg.node=$nt_a" ;;
+          write|close|rename|color|branch|send|reply|sticky) set -- "$@" --data-urlencode "arg.node=$nt_a" ;;
         esac
       fi
       ;;
@@ -650,7 +656,7 @@ Verbs:
   render on the DESKTOP: \`show-image\` and \`show-video\` still work with a host path (the
   file is read/fetched back over the connection), but \`show-web --file/--html\` is refused —
   use \`--url\`, or copy the file to the desktop first.
-- \`group --nodes <id,id> [--label "Frontend Team"]\` — wrap sibling nodes or sibling groups in a
+- \`group --nodes <id,id> [--label "Frontend Team"] [--color C]\` — wrap sibling nodes or sibling groups in a
   new labeled frame. Every id must share one container; an ancestor cannot be grouped with its descendant.
 - \`ungroup --group <id>\` — dissolve a group frame, promoting its direct children into the frame's
   parent (the nodes stay put; only the frame is removed).
@@ -691,6 +697,7 @@ Verbs:
 - \`branch --node <id>\` — branch a Claude node's conversation: the node stays on the new
   branch and a new node opens resuming the original. Target must be a Claude agent node.
 - \`rename --node <id> --title "New Name"\` — rename any node (terminals, groups, stickies…).
+- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id>\` — close a node. Desktop asks the user to confirm. Server Edition closes
   only nodes this caller opened during the current server run, without a dialog; every other
@@ -759,6 +766,7 @@ Typical requests this skill covers:
 - "Move this node into that group" → \`move --nodes <id> --group <targetGroupId>\` (not \`group\`, which only
   wraps loose nodes). "Break up this group" → \`ungroup --group <id>\`.
 - "Rename this node/group" → \`rename\`.
+- "Color these nodes/groups by subject" → \`color --node <id,id> --color <palette value>\`.
 
 ## Nodeterm orchestration ("Build with Nodeterm orchestration")
 

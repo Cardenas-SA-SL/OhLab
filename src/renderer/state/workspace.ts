@@ -25,17 +25,11 @@ import { useSettings } from './settings'
 // reflector.
 export { applyCanvasMutation } from '@shared/canvas-mutations'
 import { sanitizeInboundNode } from '@shared/node-exec'
+import { NODE_COLORS } from '@shared/node-colors'
 
-/** Preset color palette — macOS system colors (dark mode). */
-export const NODE_COLORS = [
-  '#0a84ff', // systemBlue
-  '#32d74b', // systemGreen
-  '#ffd60a', // systemYellow
-  '#ff453a', // systemRed
-  '#bf5af2', // systemPurple
-  '#6ac4dc', // systemTeal
-  '#ff9f0a' // systemOrange
-]
+// Preserve the renderer's long-standing import surface; validation and the palette now live in
+// shared so Server Edition and canvas-control accept exactly what these pickers display.
+export { NODE_COLORS } from '@shared/node-colors'
 
 const TERMINAL_SIZE = { width: 640, height: 440 }
 const STICKY_SIZE = { width: 240, height: 200 }

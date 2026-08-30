@@ -179,6 +179,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     link: vi.fn(async () => ({ ok: true as const, result: { linked: ['term-target'] } })),
     group: vi.fn(async () => ({ ok: true as const, result: { groupId: 'group-new' } })),
     rename: vi.fn(async () => ({ ok: true as const, result: { id: 'renamed' } })),
+    color: vi.fn(async () => ({ ok: true as const, result: { colored: ['term-target'] } })),
     sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
@@ -261,7 +262,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     })
   })
 
-  it('dispatches headless link, group, and rename while preserving link identity', async () => {
+  it('dispatches headless link, group, rename, and color while preserving link identity', async () => {
     const a = actions()
     const handler = createServerEditionControlHandler(a)
     await handler({
@@ -273,7 +274,13 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     await handler({
       verb: 'group',
       nodeId: 'term-source',
-      args: { nodes: 'term-a,term-b', label: 'Pair' },
+      args: { nodes: 'term-a,term-b', label: 'Pair', color: '#bf5af2' },
+      verified: true
+    })
+    await handler({
+      verb: 'color',
+      nodeId: 'term-source',
+      args: { node: 'term-a,term-b', color: '#32d74b' },
       verified: true
     })
     await handler({
@@ -289,9 +296,14 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     )
     expect(a.group).toHaveBeenCalledWith('term-source', {
       nodes: 'term-a,term-b',
-      label: 'Pair'
+      label: 'Pair',
+      color: '#bf5af2'
     })
     expect(a.rename).toHaveBeenCalledWith('term-source', { node: 'term-a', title: 'A' })
+    expect(a.color).toHaveBeenCalledWith('term-source', {
+      node: 'term-a,term-b',
+      color: '#32d74b'
+    })
   })
 
   it('keeps every deferred or unknown verb a clean permanent edition refusal', async () => {

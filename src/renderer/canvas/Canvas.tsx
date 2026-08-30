@@ -387,6 +387,7 @@ import { useReopenHistory } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
 import { planReopen } from '../lib/reopenPlan'
 import { oneLine } from '@shared/one-line'
+import { invalidNodeColorMessage, isNodeColor } from '@shared/node-colors'
 import { parseLenses, verifyLensPrompt, verifySynthesisPrompt } from '../lib/verifyPanel'
 import { useSettings } from '../state/settings'
 import { activePermissionMode, projectPermissionMode } from '../state/permissionMode'
@@ -8758,6 +8759,10 @@ export function Canvas() {
             return
           }
           case 'group': {
+            if (args.color !== undefined && !isNodeColor(args.color)) {
+              reply({ ok: false, error: invalidNodeColorMessage() })
+              return
+            }
             const ids = (args.nodes ?? '').split(',').map((s) => s.trim()).filter(Boolean)
             const live = nodesRef.current as CanvasNode[]
             const resolvable = ids.filter((id) => live.some((node) => node.id === id))
@@ -8775,9 +8780,18 @@ export function Canvas() {
               reply({ ok: false, error: 'group: nodes must be siblings in one container and may not include an ancestor with its descendant' })
               return
             }
-            if (args.label) {
+            if (args.label || args.color) {
               grouped = grouped.map((nd) =>
-                nd.id === groupNode.id ? { ...nd, data: { ...nd.data, title: args.label } } : nd
+                nd.id === groupNode.id
+                  ? {
+                      ...nd,
+                      data: {
+                        ...nd.data,
+                        ...(args.label ? { title: args.label } : {}),
+                        ...(args.color ? { color: args.color } : {})
+                      }
+                    }
+                  : nd
               )
             }
             setNodes(grouped)
@@ -9299,6 +9313,38 @@ export function Canvas() {
               void pushSessionRename(api.pty, id, title)
             }
             reply({ ok: true, message: `renamed ${id} to "${title}"` })
+            return
+          }
+          case 'color': {
+            if (!isNodeColor(args.color)) {
+              reply({ ok: false, error: invalidNodeColorMessage() })
+              return
+            }
+            const ids = [
+              ...new Set((args.node ?? '').split(',').map((id) => id.trim()).filter(Boolean))
+            ]
+            const live = nodesRef.current
+            const colored = ids.filter((id) => live.some((node) => node.id === id))
+            if (!colored.length) {
+              reply({ ok: false, error: 'color: none of the given node ids exist' })
+              return
+            }
+            const selected = new Set(colored)
+            setNodes((nodes) =>
+              nodes.map((node) =>
+                selected.has(node.id)
+                  ? { ...node, data: { ...node.data, color: args.color } }
+                  : node
+              )
+            )
+            markDirty()
+            const skipped = ids.length - colored.length
+            const note = skipped ? ` (${skipped} unknown id(s) skipped)` : ''
+            reply({
+              ok: true,
+              message: `colored ${colored.length} node(s) ${args.color}${note}`,
+              result: { colored, skipped, color: args.color }
+            })
             return
           }
           case 'sticky': {

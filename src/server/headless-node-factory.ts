@@ -3,6 +3,12 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { publishCanvasMutation } from '../core/canvas-sync'
 import { gateProjectTarget } from '../core/project-grants'
 import { planBridges, type LinkEndpoint } from '../shared/canvas-link'
+import {
+  invalidNodeColorMessage,
+  isNodeColor,
+  NODE_COLORS,
+  type NodeColor
+} from '../shared/node-colors'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
@@ -72,7 +78,6 @@ const TERMINAL_LIMIT = 8
 const AGENT_LIMIT = 5
 const TERMINAL_COLS = 120
 const TERMINAL_ROWS = 36
-const NODE_COLORS = ['#0a84ff', '#32d74b', '#ffd60a', '#ff453a', '#bf5af2', '#6ac4dc', '#ff9f0a']
 const TERMINAL_SIZE = { width: 640, height: 440 }
 const STICKY_SIZE = { width: 240, height: 200 }
 const H_GAP = 80
@@ -310,7 +315,8 @@ function groupPersistedNodes(
   nodes: CanvasNodeState[],
   ids: string[],
   groupIndex: number,
-  label: string | undefined
+  label: string | undefined,
+  color: NodeColor | undefined
 ): { nodes: CanvasNodeState[]; groupId: string; changed: CanvasNodeState[] } | null {
   const selected = new Set(ids)
   const members = nodes.filter((node) => selected.has(node.id))
@@ -343,7 +349,7 @@ function groupPersistedNodes(
       height: maxY - minY + GROUP_PAD * 2 + GROUP_HEADER
     },
     title: label || `Group ${groupIndex + 1}`,
-    color: NODE_COLORS[groupIndex % NODE_COLORS.length],
+    color: color ?? NODE_COLORS[groupIndex % NODE_COLORS.length],
     group: null,
     ...(parentId ? { parentId } : {})
   }
@@ -362,6 +368,55 @@ function groupPersistedNodes(
     nodes: next,
     groupId: group.id,
     changed: next.filter((node) => !before.has(node.id) || before.get(node.id) !== node)
+  }
+}
+
+function rootPosition(
+  nodes: readonly CanvasNodeState[],
+  node: CanvasNodeState
+): { x: number; y: number } {
+  const byId = new Map(nodes.map((candidate) => [candidate.id, candidate]))
+  const seen = new Set<string>([node.id])
+  let x = node.position.x
+  let y = node.position.y
+  let parentId = node.parentId
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId)
+    const parent = byId.get(parentId)
+    if (!parent) break
+    x += parent.position.x
+    y += parent.position.y
+    parentId = parent.parentId
+  }
+  return { x, y }
+}
+
+/** Desktop `ungroupNodes` semantics over persisted nodes: direct children move up one level. */
+function ungroupPersistedNodes(
+  nodes: CanvasNodeState[],
+  groupId: string
+): { nodes: CanvasNodeState[]; promoted: CanvasNodeState[] } {
+  const frame = nodes.find((node) => node.id === groupId)
+  if (!frame || frame.kind !== 'group') return { nodes, promoted: [] }
+  const parentId = frame.parentId
+  const parent = parentId ? nodes.find((node) => node.id === parentId && node.kind === 'group') : undefined
+  const parentRoot = parent ? rootPosition(nodes, parent) : { x: 0, y: 0 }
+  const promoted: CanvasNodeState[] = []
+  const moved = nodes.map((node) => {
+    if (node.parentId !== groupId) return node
+    const root = rootPosition(nodes, node)
+    const next: CanvasNodeState = {
+      ...node,
+      position: { x: root.x - parentRoot.x, y: root.y - parentRoot.y }
+    }
+    if (parent) next.parentId = parent.id
+    else delete next.parentId
+    promoted.push(next)
+    return next
+  })
+  return {
+    nodes: groupsFirst(moved.filter((node) => node.id !== groupId)),
+    promoted
   }
 }
 
@@ -410,20 +465,24 @@ export class HeadlessNodeFactory {
     return run
   }
 
-  private publish(project: Project, nodes: readonly CanvasNodeState[]): void {
+  private publishChangeSet(
+    project: Project,
+    nodes: readonly CanvasNodeState[],
+    removedIds: readonly string[]
+  ): void {
     this.deps.publishProject?.(project)
-    const publish = this.deps.publishNode ?? ((projectId: string, node: CanvasNodeState) => {
+    const publishNode = this.deps.publishNode ?? ((projectId: string, node: CanvasNodeState) => {
       publishCanvasMutation(projectId, { op: 'upsert', node })
     })
-    for (const node of nodes) publish(project.id, node)
-  }
-
-  private publishRemovals(project: Project, nodeIds: readonly string[]): void {
-    this.deps.publishProject?.(project)
-    const publish = this.deps.publishRemoval ?? ((projectId: string, nodeId: string) => {
+    const publishRemoval = this.deps.publishRemoval ?? ((projectId: string, nodeId: string) => {
       publishCanvasMutation(projectId, { op: 'remove', id: nodeId })
     })
-    for (const nodeId of nodeIds) publish(project.id, nodeId)
+    for (const node of nodes) publishNode(project.id, node)
+    for (const nodeId of removedIds) publishRemoval(project.id, nodeId)
+  }
+
+  private publish(project: Project, nodes: readonly CanvasNodeState[]): void {
+    this.publishChangeSet(project, nodes, [])
   }
 
   private async attach(project: Project, node: CanvasNodeState): Promise<PtyCreateResult> {
@@ -528,6 +587,7 @@ export class HeadlessNodeFactory {
 
       // Validate the WHOLE list before killing anything. A mixed owned/unowned request is one
       // refusal, never a partial destructive success whose surviving ids the caller must guess.
+      const frameIds = new Set<string>()
       for (const id of ids) {
         const ownership = this.spawnedBy.get(id)
         if (!ownership || ownership.sourceNodeId !== sourceNodeId) {
@@ -536,21 +596,35 @@ export class HeadlessNodeFactory {
             error: `close-not-owner: ${sourceNodeId} did not spawn ${id} during this server run`
           }
         }
+        const project = workspace.projects.find((candidate) => candidate.id === ownership.projectId)
+        if (project?.nodes.find((node) => node.id === id)?.kind === 'group') frameIds.add(id)
       }
 
-      // Kill first: the durable canvas must never lose a node whose session outcome is unknown.
-      // `destroySession` treats a backend already absent as success, which is exactly the cleanup
-      // case for a pane the operator killed directly before asking its owner to close the node.
+      // Kill terminal panes first: the durable canvas must never lose a session whose outcome is
+      // unknown. Frames have no PTY; closing one is the desktop `ungroup` transform followed by
+      // removal of the frame alone, regardless of who owns its members.
       await Promise.all(
-        ids.map((id) => this.deps.ptyManager.destroySession(null, id, { everySocket: true }))
+        ids
+          .filter((id) => !frameIds.has(id))
+          .map((id) => this.deps.ptyManager.destroySession(null, id, { everySocket: true }))
       )
 
       const removedByProject = new Map<Project, string[]>()
+      const changedByProject = new Map<Project, Map<string, CanvasNodeState>>()
       for (const id of ids) {
         const projectId = this.spawnedBy.get(id)!.projectId
         const project = workspace.projects.find((candidate) => candidate.id === projectId)
-        if (!project || !project.nodes.some((node) => node.id === id)) continue
-        project.nodes = project.nodes.filter((node) => node.id !== id)
+        const target = project?.nodes.find((node) => node.id === id)
+        if (!project || !target) continue
+        if (target.kind === 'group') {
+          const ungrouped = ungroupPersistedNodes(project.nodes, id)
+          project.nodes = ungrouped.nodes
+          const changed = changedByProject.get(project) ?? new Map<string, CanvasNodeState>()
+          for (const node of ungrouped.promoted) changed.set(node.id, node)
+          changedByProject.set(project, changed)
+        } else {
+          project.nodes = project.nodes.filter((node) => node.id !== id)
+        }
         if (project.ropes) {
           project.ropes = project.ropes.filter((edge) => edge.source !== id && edge.target !== id)
         }
@@ -564,7 +638,13 @@ export class HeadlessNodeFactory {
 
       if (removedByProject.size) {
         await this.deps.workspaceStore.save(workspace)
-        for (const [project, removed] of removedByProject) this.publishRemovals(project, removed)
+        for (const [project, removed] of removedByProject) {
+          const surviving = project.nodes.map((node) => node.id)
+          const changed = [...(changedByProject.get(project)?.values() ?? [])].filter((node) =>
+            surviving.includes(node.id)
+          )
+          this.publishChangeSet(project, changed, removed)
+        }
       }
 
       for (const id of ids) {
@@ -663,8 +743,13 @@ export class HeadlessNodeFactory {
 
   group(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply> {
     return this.runExclusive(async () => {
-      const flagError = unsupportedFlags(args, new Set(['nodes', 'label']))
+      const flagError = unsupportedFlags(args, new Set(['nodes', 'label', 'color']))
       if (flagError) return { ok: false, error: `group: ${flagError}` }
+      let color: NodeColor | undefined
+      if (args.color !== undefined) {
+        if (!isNodeColor(args.color)) return { ok: false, error: invalidNodeColorMessage() }
+        color = args.color
+      }
       const workspace = await this.deps.workspaceStore.load({ sideline: false })
       const source = sourceProject(workspace, sourceNodeId)
       if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
@@ -681,7 +766,8 @@ export class HeadlessNodeFactory {
         source.project.nodes,
         resolvable,
         source.project.nodes.filter((node) => node.kind === 'group').length,
-        args.label ? oneLine(args.label) : undefined
+        args.label ? oneLine(args.label) : undefined,
+        color
       )
       if (!grouped) {
         return {
@@ -693,6 +779,10 @@ export class HeadlessNodeFactory {
 
       source.project.nodes = grouped.nodes
       await this.deps.workspaceStore.save(workspace)
+      this.spawnedBy.set(grouped.groupId, {
+        sourceNodeId,
+        projectId: source.project.id
+      })
       this.publish(source.project, grouped.changed)
       const skipped = ids.length - resolvable.length
       const note = skipped ? ` (${skipped} unknown id(s) skipped)` : ''
@@ -735,6 +825,41 @@ export class HeadlessNodeFactory {
       // Metadata only. In particular, Server Edition never mirrors `/rename` into the pane.
       this.publish(source.project, [renamed])
       return { ok: true, message: `renamed ${id} to "${title}"` }
+    })
+  }
+
+  color(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['node', 'color']))
+      if (flagError) return { ok: false, error: `color: ${flagError}` }
+      if (!isNodeColor(args.color)) return { ok: false, error: invalidNodeColorMessage() }
+
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+
+      const ids = [...new Set((args.node ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
+      const changed = ids
+        .map((id) => source.project.nodes.find((node) => node.id === id))
+        .filter((node): node is CanvasNodeState => !!node)
+        .map((node) => ({ ...node, color: args.color }))
+      if (!changed.length) {
+        return { ok: false, error: 'color: none of the given node ids exist in the caller project' }
+      }
+      const byId = new Map(changed.map((node) => [node.id, node]))
+      source.project.nodes = source.project.nodes.map((node) => byId.get(node.id) ?? node)
+      await this.deps.workspaceStore.save(workspace)
+      this.publish(source.project, changed)
+      const skipped = ids.length - changed.length
+      const note = skipped ? ` (${skipped} unknown id(s) skipped)` : ''
+      return {
+        ok: true,
+        message: `colored ${changed.length} node(s) ${args.color}${note}`,
+        result: { colored: changed.map((node) => node.id), skipped, color: args.color }
+      }
     })
   }
 
@@ -799,7 +924,7 @@ export class HeadlessNodeFactory {
       for (let i = 0; i < count; i++) {
         let command = args.cmd
         let title = `Terminal ${startIndex + i + 1}`
-        let color = NODE_COLORS[(startIndex + i) % NODE_COLORS.length]
+        let color: string = NODE_COLORS[(startIndex + i) % NODE_COLORS.length]
         let mintedSessionId: string | undefined
         let permissionMode
         if (verb === 'open-agent') {

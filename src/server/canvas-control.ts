@@ -171,6 +171,7 @@ export async function initServerCanvasControl(
     link: (sourceNodeId, args, verified) => factory.link(sourceNodeId, args, verified),
     group: (sourceNodeId, args) => factory.group(sourceNodeId, args),
     rename: (sourceNodeId, args) => factory.rename(sourceNodeId, args),
+    color: (sourceNodeId, args) => factory.color(sourceNodeId, args),
     sticky: (sourceNodeId, args) => factory.sticky(sourceNodeId, args),
     deliver: async (input) => (await deliverFromControl(input, messaging)).reply
   }

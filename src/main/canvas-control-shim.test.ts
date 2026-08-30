@@ -99,6 +99,8 @@ describe('canvas-control shim', () => {
     expect(received.at(-1)?.args).toEqual({ path: '/tmp/a b.png' })
     await callShim(['close', 'node-9'])
     expect(received.at(-1)?.args).toEqual({ node: 'node-9' })
+    await callShim(['color', 'node-9,node-10', '--color', '#bf5af2'])
+    expect(received.at(-1)?.args).toEqual({ node: 'node-9,node-10', color: '#bf5af2' })
   })
 
   it('accepts a trailing flag with no value', async () => {

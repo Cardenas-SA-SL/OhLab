@@ -375,6 +375,200 @@ describe('HeadlessNodeFactory', () => {
     })
   })
 
+  it('lets the creator close a nested frame only, promoting surviving members to its parent', async () => {
+    const outerReply = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      label: 'Outer'
+    })
+    const outerId = (outerReply.result as { groupId: string }).groupId
+    const innerReply = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      label: 'Inner'
+    })
+    const innerId = (innerReply.result as { groupId: string }).groupId
+    const before = (await store.load({ sideline: false })).projects[0]
+    const root = (project: (typeof before), id: string): { x: number; y: number } => {
+      const node = project.nodes.find((candidate) => candidate.id === id)!
+      let x = node.position.x
+      let y = node.position.y
+      let parentId = node.parentId
+      const seen = new Set<string>()
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId)
+        const parent = project.nodes.find((candidate) => candidate.id === parentId)
+        if (!parent) break
+        x += parent.position.x
+        y += parent.position.y
+        parentId = parent.parentId
+      }
+      return { x, y }
+    }
+    const rootsBefore = new Map(
+      ['term-source', 'term-upstream'].map((id) => [id, root(before, id)])
+    )
+    published.length = 0
+    publishedProjects.length = 0
+    removed.length = 0
+
+    await expect(factory.close('term-source', { node: innerId }, true)).resolves.toMatchObject({
+      ok: true,
+      result: { ids: [innerId] }
+    })
+
+    const after = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    expect(after.nodes.some((node) => node.id === innerId)).toBe(false)
+    expect(after.nodes.some((node) => node.id === outerId)).toBe(true)
+    for (const id of ['term-source', 'term-upstream']) {
+      expect(after.nodes.find((node) => node.id === id)?.parentId).toBe(outerId)
+      expect(root(after, id)).toEqual(rootsBefore.get(id))
+    }
+    expect(pty.destroys).toEqual([])
+    expect(removed).toEqual([innerId])
+    expect(published.map((node) => node.id)).toEqual(
+      expect.arrayContaining(['term-source', 'term-upstream'])
+    )
+    expect(publishedProjects.at(-1)?.nodes.some((node) => node.id === innerId)).toBe(false)
+  })
+
+  it('refuses a non-creator that tries to close a headless-created frame', async () => {
+    const grouped = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream'
+    })
+    const groupId = (grouped.result as { groupId: string }).groupId
+    publishedProjects.length = 0
+
+    await expect(factory.close('term-upstream', { node: groupId }, true)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('close-not-owner')
+    })
+    expect((await store.load({ sideline: false })).projects[0].nodes.some(
+      (node) => node.id === groupId
+    )).toBe(true)
+    expect(pty.destroys).toEqual([])
+    expect(removed).toEqual([])
+    expect(publishedProjects).toEqual([])
+  })
+
+  it('closes an owned empty frame after its members were separately closed', async () => {
+    const first = await factory.openTerminal('term-source', {}, true)
+    const second = await factory.openTerminal('term-source', {}, true)
+    const memberIds = [
+      (first.result as { id: string }).id,
+      (second.result as { id: string }).id
+    ]
+    const grouped = await factory.group('term-source', { nodes: memberIds.join(',') })
+    const groupId = (grouped.result as { groupId: string }).groupId
+
+    for (const id of memberIds) {
+      await expect(factory.close('term-source', { node: id }, true)).resolves.toMatchObject({
+        ok: true
+      })
+    }
+    expect((await store.load({ sideline: false })).projects[0].nodes.find(
+      (node) => node.id === groupId
+    )).toMatchObject({ kind: 'group' })
+
+    await expect(factory.close('term-source', { node: groupId }, true)).resolves.toMatchObject({
+      ok: true,
+      result: { ids: [groupId] }
+    })
+    const after = await store.load({ sideline: false })
+    expect(after.projects[0].nodes.some((node) => node.id === groupId)).toBe(false)
+    expect(pty.destroys.map((entry) => entry.nodeId)).toEqual(memberIds)
+    expect(removed).toEqual([...memberIds, groupId])
+  })
+
+  it('applies a validated palette color when creating a group', async () => {
+    const reply = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      label: 'Purple team',
+      color: '#bf5af2'
+    })
+    const groupId = (reply.result as { groupId: string }).groupId
+    const project = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    expect(project.nodes.find((node) => node.id === groupId)).toMatchObject({
+      title: 'Purple team',
+      color: '#bf5af2'
+    })
+    expect(publishedProjects.at(-1)?.nodes.find((node) => node.id === groupId)?.color).toBe(
+      '#bf5af2'
+    )
+    expect(pty.sends).toEqual([])
+  })
+
+  it('recolors a node, frame, and sticky with persistence and fanout but no PTY write', async () => {
+    const grouped = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      label: 'Color targets'
+    })
+    const groupId = (grouped.result as { groupId: string }).groupId
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push({
+      id: 'sticky-color',
+      kind: 'sticky',
+      position: { x: 1200, y: 30 },
+      size: { width: 240, height: 200 },
+      title: 'Color note',
+      color: '#ffd60a',
+      group: null,
+      text: 'ready'
+    })
+    await store.save(workspace)
+    published.length = 0
+    publishedProjects.length = 0
+
+    await expect(factory.color('term-source', {
+      node: `term-upstream,${groupId},sticky-color`,
+      color: '#32d74b'
+    })).resolves.toMatchObject({
+      ok: true,
+      result: {
+        colored: ['term-upstream', groupId, 'sticky-color'],
+        skipped: 0,
+        color: '#32d74b'
+      }
+    })
+    const project = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    for (const id of ['term-upstream', groupId, 'sticky-color']) {
+      expect(project.nodes.find((node) => node.id === id)?.color, id).toBe('#32d74b')
+    }
+    expect(published.map((node) => node.id)).toEqual([
+      'term-upstream',
+      groupId,
+      'sticky-color'
+    ])
+    expect(publishedProjects).toHaveLength(1)
+    expect(pty.sends).toEqual([])
+    expect(pty.destroys).toEqual([])
+    const projectFile = JSON.parse(
+      fs.readFileSync(path.join(projectDir, '.nodeterm', 'project.json'), 'utf8')
+    ) as { nodes: CanvasNodeState[] }
+    expect(projectFile.nodes.find((node) => node.id === 'sticky-color')?.color).toBe('#32d74b')
+  })
+
+  it('refuses invalid group and recolor values by name without persistence or fanout', async () => {
+    await expect(factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      color: 'var(--danger)'
+    })).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('node-color-invalid')
+    })
+    await expect(factory.color('term-source', {
+      node: 'term-source',
+      color: '#ffffff'
+    })).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('node-color-invalid')
+    })
+    const project = (await store.load({ sideline: false })).projects[0]
+    expect(project.nodes.filter((node) => node.kind === 'group')).toEqual([])
+    expect(project.nodes.find((node) => node.id === 'term-source')?.color).toBe('#d97757')
+    expect(published).toEqual([])
+    expect(publishedProjects).toEqual([])
+    expect(pty.sends).toEqual([])
+  })
+
   it('refuses grouping across containers or across an ancestor boundary', async () => {
     const workspace = await store.load({ sideline: false })
     const frame: CanvasNodeState = {
