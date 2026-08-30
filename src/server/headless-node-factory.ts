@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 
 import { publishCanvasMutation } from '../core/canvas-sync'
 import { gateProjectTarget } from '../core/project-grants'
+import { planBridges, type LinkEndpoint } from '../shared/canvas-link'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '../shared/sticky-write'
 import type { WorkspaceStore } from '../core/workspace-store'
 import {
@@ -76,6 +77,8 @@ const TERMINAL_SIZE = { width: 640, height: 440 }
 const STICKY_SIZE = { width: 240, height: 200 }
 const H_GAP = 80
 const V_GAP = 36
+const GROUP_PAD = 28
+const GROUP_HEADER = 34
 const AFTER_RETRY_MS = 500
 const AFTER_RETRY_LIMIT = 5
 const SERVER_AGENTS: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini'])
@@ -84,7 +87,7 @@ function token(): string {
   return randomBytes(4).toString('hex')
 }
 
-function nextId(prefix: 'term' | 'sticky'): string {
+function nextId(prefix: 'term' | 'sticky' | 'group'): string {
   return `${prefix}-${Date.now().toString(36)}-${token()}`
 }
 
@@ -200,6 +203,166 @@ function addEdge(list: BridgeLink[], source: string, target: string, prefix: str
     (edge.source === source && edge.target === target) ||
     (edge.source === target && edge.target === source))) return
   list.push({ id: edgeId(prefix, source, target), source, target })
+}
+
+function nodeProjects(workspace: Workspace, nodeId: string): Project[] {
+  return workspace.projects.filter((project) => project.nodes.some((node) => node.id === nodeId))
+}
+
+function headlessLinkEndpoint(
+  node: CanvasNodeState,
+  runtimeAgentId: ((nodeId: string) => string | undefined) | undefined
+): LinkEndpoint {
+  const agentId = node.kind === 'terminal' ? node.agentId ?? runtimeAgentId?.(node.id) : undefined
+  return {
+    kind: node.kind,
+    contextCapable: !!agentId && canContextLink(agentId as AgentId)
+  }
+}
+
+function isDescendant(
+  nodes: readonly CanvasNodeState[],
+  candidateId: string,
+  ancestorId: string
+): boolean {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const seen = new Set<string>()
+  let current = byId.get(candidateId)
+  while (current?.parentId && !seen.has(current.parentId)) {
+    if (current.parentId === ancestorId) return true
+    seen.add(current.parentId)
+    current = byId.get(current.parentId)
+  }
+  return false
+}
+
+/** Persist frames before their descendants, matching React Flow's hydration requirement. */
+function groupsFirst(nodes: CanvasNodeState[]): CanvasNodeState[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const emitted = new Set<string>()
+  const visiting = new Set<string>()
+  const groups: CanvasNodeState[] = []
+  const emit = (node: CanvasNodeState): void => {
+    if (emitted.has(node.id) || node.kind !== 'group') return
+    if (visiting.has(node.id)) return
+    visiting.add(node.id)
+    const parent = node.parentId ? byId.get(node.parentId) : undefined
+    if (parent?.kind === 'group') emit(parent)
+    visiting.delete(node.id)
+    if (!emitted.has(node.id)) {
+      emitted.add(node.id)
+      groups.push(node)
+    }
+  }
+  nodes.forEach(emit)
+  return [...groups, ...nodes.filter((node) => node.kind !== 'group')]
+}
+
+/** Re-fit one persisted group around its direct children without moving them in parent space. */
+function fitGroupToChildren(
+  nodes: CanvasNodeState[],
+  groupId: string
+): CanvasNodeState[] {
+  const group = nodes.find((node) => node.id === groupId)
+  if (!group || group.kind !== 'group') return nodes
+  const children = nodes.filter((node) => node.parentId === groupId)
+  if (!children.length) return nodes
+  const absoluteX = (child: CanvasNodeState): number => group.position.x + child.position.x
+  const absoluteY = (child: CanvasNodeState): number => group.position.y + child.position.y
+  const minX = Math.min(...children.map(absoluteX))
+  const minY = Math.min(...children.map(absoluteY))
+  const maxX = Math.max(...children.map((child) => absoluteX(child) + child.size.width))
+  const maxY = Math.max(...children.map((child) => absoluteY(child) + child.size.height))
+  const x = minX - GROUP_PAD
+  const y = minY - GROUP_PAD - GROUP_HEADER
+  const size = {
+    width: maxX - minX + GROUP_PAD * 2,
+    height: maxY - minY + GROUP_PAD * 2 + GROUP_HEADER
+  }
+  return nodes.map((node) => {
+    if (node.id === groupId) return { ...node, position: { x, y }, size }
+    if (node.parentId === groupId) {
+      return {
+        ...node,
+        position: { x: absoluteX(node) - x, y: absoluteY(node) - y }
+      }
+    }
+    return node
+  })
+}
+
+function fitAncestorChain(
+  nodes: CanvasNodeState[],
+  groupId: string | undefined
+): CanvasNodeState[] {
+  let next = nodes
+  let currentId = groupId
+  const seen = new Set<string>()
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId)
+    next = fitGroupToChildren(next, currentId)
+    currentId = next.find((node) => node.id === currentId)?.parentId
+  }
+  return next
+}
+
+function groupPersistedNodes(
+  nodes: CanvasNodeState[],
+  ids: string[],
+  groupIndex: number,
+  label: string | undefined
+): { nodes: CanvasNodeState[]; groupId: string; changed: CanvasNodeState[] } | null {
+  const selected = new Set(ids)
+  const members = nodes.filter((node) => selected.has(node.id))
+  if (!members.length || new Set(members.map((node) => node.parentId ?? null)).size !== 1) {
+    return null
+  }
+  if (
+    members.some((member) =>
+      members.some(
+        (other) => other.id !== member.id && isDescendant(nodes, other.id, member.id)
+      )
+    )
+  ) {
+    return null
+  }
+
+  const minX = Math.min(...members.map((node) => node.position.x))
+  const minY = Math.min(...members.map((node) => node.position.y))
+  const maxX = Math.max(...members.map((node) => node.position.x + node.size.width))
+  const maxY = Math.max(...members.map((node) => node.position.y + node.size.height))
+  const x = minX - GROUP_PAD
+  const y = minY - GROUP_PAD - GROUP_HEADER
+  const parentId = members[0].parentId
+  const group: CanvasNodeState = {
+    id: nextId('group'),
+    kind: 'group',
+    position: { x, y },
+    size: {
+      width: maxX - minX + GROUP_PAD * 2,
+      height: maxY - minY + GROUP_PAD * 2 + GROUP_HEADER
+    },
+    title: label || `Group ${groupIndex + 1}`,
+    color: NODE_COLORS[groupIndex % NODE_COLORS.length],
+    group: null,
+    ...(parentId ? { parentId } : {})
+  }
+  const before = new Map(nodes.map((node) => [node.id, node]))
+  const updated = nodes.map((node) =>
+    selected.has(node.id)
+      ? {
+          ...node,
+          parentId: group.id,
+          position: { x: node.position.x - x, y: node.position.y - y }
+        }
+      : node
+  )
+  const next = groupsFirst(fitAncestorChain(groupsFirst([group, ...updated]), parentId))
+  return {
+    nodes: next,
+    groupId: group.id,
+    changed: next.filter((node) => !before.has(node.id) || before.get(node.id) !== node)
+  }
 }
 
 function ptyOptions(project: Project, node: CanvasNodeState): PtyCreateOptions {
@@ -418,6 +581,160 @@ export class HeadlessNodeFactory {
         message: `closed ${ids.length} owned node(s): ${ids.join(', ')}`,
         result: { ids, id: ids[0] }
       }
+    })
+  }
+
+  link(
+    sourceNodeId: string,
+    args: Record<string, string>,
+    verified: boolean
+  ): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['from', 'to']))
+      if (flagError) return { ok: false, error: `link: ${flagError}` }
+      if (!verified) {
+        return {
+          ok: false,
+          error: 'link-identity-refused: Server Edition link requires verified node identity'
+        }
+      }
+
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+
+      const from = (args.from ?? sourceNodeId).trim()
+      const targets = (args.to ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+      if (!targets.length) return { ok: false, error: 'link requires --to <id,id>' }
+
+      // An arbitrary `--from` is allowed, but every endpoint still belongs to the caller's one
+      // project. Refuse the whole request before appending anything if a named id resolves across
+      // that boundary (or ambiguously in more than one saved project).
+      for (const id of [from, ...targets]) {
+        const projects = nodeProjects(workspace, id)
+        if (projects.length && (projects.length !== 1 || projects[0].id !== source.project.id)) {
+          return {
+            ok: false,
+            error: `link-project-refused: ${id} is not exclusively in the caller's project`
+          }
+        }
+      }
+
+      const byId = new Map(source.project.nodes.map((node) => [node.id, node]))
+      if (!byId.has(from)) {
+        return { ok: false, error: `link: --from names no existing node (${from})` }
+      }
+      const existing = [...(source.project.bridges ?? [])]
+      const plan = planBridges(
+        from,
+        targets,
+        (id) => {
+          const node = byId.get(id)
+          return node ? headlessLinkEndpoint(node, this.deps.agentIdOf) : null
+        },
+        existing
+      )
+      if (!plan.edges.length) {
+        return {
+          ok: false,
+          error: `link: nothing linked — ${plan.skipped
+            .map((skipped) => `${skipped.id}: ${skipped.why}`)
+            .join('; ')}`
+        }
+      }
+
+      source.project.bridges = [...existing, ...plan.edges]
+      await this.deps.workspaceStore.save(workspace)
+      // An edge-only change has no node mutation to publish; the full-project event is the fanout.
+      this.publish(source.project, [])
+      const note = plan.skipped.length
+        ? ` (skipped ${plan.skipped.map((skipped) => `${skipped.id}: ${skipped.why}`).join('; ')})`
+        : ''
+      return {
+        ok: true,
+        message: `linked ${from} ↔ ${plan.linked.join(', ')}${note}`,
+        result: { from, linked: plan.linked, skipped: plan.skipped }
+      }
+    })
+  }
+
+  group(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['nodes', 'label']))
+      if (flagError) return { ok: false, error: `group: ${flagError}` }
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+
+      const ids = (args.nodes ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+      const resolvable = ids.filter((id) => source.project.nodes.some((node) => node.id === id))
+      if (!resolvable.length) {
+        return { ok: false, error: 'group: none of the given node ids exist' }
+      }
+      const grouped = groupPersistedNodes(
+        source.project.nodes,
+        resolvable,
+        source.project.nodes.filter((node) => node.kind === 'group').length,
+        args.label ? oneLine(args.label) : undefined
+      )
+      if (!grouped) {
+        return {
+          ok: false,
+          error:
+            'group: nodes must be siblings in one container and may not include an ancestor with its descendant'
+        }
+      }
+
+      source.project.nodes = grouped.nodes
+      await this.deps.workspaceStore.save(workspace)
+      this.publish(source.project, grouped.changed)
+      const skipped = ids.length - resolvable.length
+      const note = skipped ? ` (${skipped} unknown id(s) skipped)` : ''
+      return {
+        ok: true,
+        message: `grouped ${resolvable.length} node(s) into ${grouped.groupId}${note}`,
+        result: { groupId: grouped.groupId, grouped: resolvable, skipped }
+      }
+    })
+  }
+
+  rename(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['node', 'title']))
+      if (flagError) return { ok: false, error: `rename: ${flagError}` }
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+
+      const id = (args.node ?? '').trim()
+      const projects = nodeProjects(workspace, id)
+      if (projects.length && (projects.length !== 1 || projects[0].id !== source.project.id)) {
+        return {
+          ok: false,
+          error: `rename-project-refused: ${id} is not exclusively in the caller's project`
+        }
+      }
+      const target = source.project.nodes.find((node) => node.id === id)
+      if (!target) return { ok: false, error: `rename: no node with id ${id}` }
+
+      const title = oneLine(args.title ?? '')
+      const renamed = { ...target, title, titleAuto: false }
+      source.project.nodes = source.project.nodes.map((node) =>
+        node.id === id ? renamed : node
+      )
+      await this.deps.workspaceStore.save(workspace)
+      // Metadata only. In particular, Server Edition never mirrors `/rename` into the pane.
+      this.publish(source.project, [renamed])
+      return { ok: true, message: `renamed ${id} to "${title}"` }
     })
   }
 

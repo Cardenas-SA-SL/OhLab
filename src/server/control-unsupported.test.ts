@@ -176,6 +176,9 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     openTerminal: vi.fn(async () => ({ ok: true as const, result: { id: 'term-new' } })),
     openAgent: vi.fn(async () => ({ ok: true as const, result: { id: 'agent-new' } })),
     close: vi.fn(async () => ({ ok: true as const, result: { id: 'closed' } })),
+    link: vi.fn(async () => ({ ok: true as const, result: { linked: ['term-target'] } })),
+    group: vi.fn(async () => ({ ok: true as const, result: { groupId: 'group-new' } })),
+    rename: vi.fn(async () => ({ ok: true as const, result: { id: 'renamed' } })),
     sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
@@ -258,9 +261,42 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     })
   })
 
+  it('dispatches headless link, group, and rename while preserving link identity', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+    await handler({
+      verb: 'link',
+      nodeId: 'term-source',
+      args: { from: 'term-a', to: 'term-b' },
+      verified: true
+    })
+    await handler({
+      verb: 'group',
+      nodeId: 'term-source',
+      args: { nodes: 'term-a,term-b', label: 'Pair' },
+      verified: true
+    })
+    await handler({
+      verb: 'rename',
+      nodeId: 'term-source',
+      args: { node: 'term-a', title: 'A' },
+      verified: true
+    })
+    expect(a.link).toHaveBeenCalledWith(
+      'term-source',
+      { from: 'term-a', to: 'term-b' },
+      true
+    )
+    expect(a.group).toHaveBeenCalledWith('term-source', {
+      nodes: 'term-a,term-b',
+      label: 'Pair'
+    })
+    expect(a.rename).toHaveBeenCalledWith('term-source', { node: 'term-a', title: 'A' })
+  })
+
   it('keeps every deferred or unknown verb a clean permanent edition refusal', async () => {
     const handler = createServerEditionControlHandler(actions())
-    for (const verb of ['list', 'browser', 'open-project', 'not-a-verb']) {
+    for (const verb of ['list', 'browser', 'open-project', 'write', 'not-a-verb']) {
       const reply = await handler({ verb, nodeId: 'term-source', args: {}, verified: true })
       expect(reply, verb).toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
       expect(reply.message, verb).toContain('do not retry')

@@ -79,6 +79,13 @@ export interface ServerEditionControlActions {
     args: Record<string, string>,
     verified: boolean
   ): Promise<ServerControlReply>
+  link(
+    sourceNodeId: string,
+    args: Record<string, string>,
+    verified: boolean
+  ): Promise<ServerControlReply>
+  group(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
+  rename(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   sticky(sourceNodeId: string, args: Record<string, string>): Promise<ServerControlReply>
   deliver(input: {
     verb: 'send' | 'reply' | 'notify'
@@ -92,6 +99,9 @@ const SERVER_V1_VERBS: ReadonlySet<string> = new Set([
   'open-terminal',
   'open-agent',
   'close',
+  'link',
+  'group',
+  'rename',
   'send',
   'reply',
   'notify',
@@ -137,6 +147,12 @@ export function createServerEditionControlHandler(actions: ServerEditionControlA
         return actions.openAgent(nodeId, command.args, verified)
       case 'close':
         return actions.close(nodeId, command.args, verified)
+      case 'link':
+        return actions.link(nodeId, command.args, verified)
+      case 'group':
+        return actions.group(nodeId, command.args)
+      case 'rename':
+        return actions.rename(nodeId, command.args)
       case 'sticky':
         return actions.sticky(nodeId, command.args)
       case 'send':

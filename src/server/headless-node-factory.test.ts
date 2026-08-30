@@ -257,6 +257,214 @@ describe('HeadlessNodeFactory', () => {
     expect(pty.destroys).toEqual([])
   })
 
+  it('links the caller to an existing node, persists the read graph, and fans out without writing to a pane', async () => {
+    const reply = await factory.link('term-source', { to: 'term-upstream' }, true)
+
+    expect(reply).toMatchObject({
+      ok: true,
+      result: { from: 'term-source', linked: ['term-upstream'], skipped: [] }
+    })
+    expect(pty.sends).toEqual([])
+    const workspace = await new WorkspaceStore().load({ sideline: false })
+    expect(workspace.projects[0].bridges).toEqual([
+      {
+        id: 'bridge-term-source-term-upstream',
+        source: 'term-source',
+        target: 'term-upstream'
+      }
+    ])
+    const projectFile = JSON.parse(
+      fs.readFileSync(path.join(projectDir, '.nodeterm', 'project.json'), 'utf8')
+    ) as { bridges?: Array<{ source: string; target: string }> }
+    expect(projectFile.bridges).toEqual([
+      expect.objectContaining({ source: 'term-source', target: 'term-upstream' })
+    ])
+    expect(published).toEqual([])
+    expect(publishedProjects.at(-1)?.bridges).toEqual(workspace.projects[0].bridges)
+  })
+
+  it('links two arbitrary existing nodes in the caller project', async () => {
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push(terminal('term-third', 'Third', 'gemini', 900))
+    await store.save(workspace)
+
+    await expect(
+      factory.link('term-source', { from: 'term-upstream', to: 'term-third' }, true)
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { from: 'term-upstream', linked: ['term-third'] }
+    })
+    expect((await store.load({ sideline: false })).projects[0].bridges).toEqual([
+      expect.objectContaining({ source: 'term-upstream', target: 'term-third' })
+    ])
+    expect(pty.sends).toEqual([])
+  })
+
+  it('refuses unverified and cross-project link endpoints without a partial graph edit', async () => {
+    await expect(factory.link('term-source', { to: 'term-upstream' }, false)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('link-identity-refused')
+    })
+
+    const workspace = await store.load({ sideline: false })
+    const otherDir = path.join(dataDir, 'other-project')
+    fs.mkdirSync(otherDir, { recursive: true })
+    workspace.projects.push({
+      id: 'project-2',
+      name: 'Other',
+      color: '#32d74b',
+      cwd: otherDir,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [terminal('term-other-project', 'Elsewhere', 'claude')],
+      bridges: [],
+      ropes: []
+    })
+    await store.save(workspace)
+
+    await expect(
+      factory.link('term-source', { to: 'term-upstream,term-other-project' }, true)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('link-project-refused')
+    })
+    expect((await store.load({ sideline: false })).projects[0].bridges).toEqual([])
+    expect(publishedProjects).toEqual([])
+    expect(pty.sends).toEqual([])
+  })
+
+  it('wraps loose nodes in a labeled persisted group and fans out every structural mutation', async () => {
+    const before = (await store.load({ sideline: false })).projects[0]
+    const beforePositions = new Map(before.nodes.map((node) => [node.id, node.position]))
+    const reply = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      label: 'Director team'
+    })
+    expect(reply).toMatchObject({
+      ok: true,
+      result: {
+        groupId: expect.stringMatching(/^group-/),
+        grouped: ['term-source', 'term-upstream'],
+        skipped: 0
+      }
+    })
+    const groupId = (reply.result as { groupId: string }).groupId
+    const project = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    const group = project.nodes.find((node) => node.id === groupId)!
+    expect(project.nodes[0]).toMatchObject({ id: groupId, kind: 'group' })
+    expect(group.title).toBe('Director team')
+    for (const id of ['term-source', 'term-upstream']) {
+      const child = project.nodes.find((node) => node.id === id)!
+      expect(child.parentId).toBe(groupId)
+      expect({
+        x: group.position.x + child.position.x,
+        y: group.position.y + child.position.y
+      }).toEqual(beforePositions.get(id))
+    }
+    expect(published.map((node) => node.id)).toEqual(
+      expect.arrayContaining([groupId, 'term-source', 'term-upstream'])
+    )
+    expect(publishedProjects.at(-1)?.nodes.find((node) => node.id === groupId)?.title).toBe(
+      'Director team'
+    )
+    const projectFile = JSON.parse(
+      fs.readFileSync(path.join(projectDir, '.nodeterm', 'project.json'), 'utf8')
+    ) as { nodes: CanvasNodeState[] }
+    expect(projectFile.nodes.find((node) => node.id === groupId)).toMatchObject({
+      kind: 'group',
+      title: 'Director team'
+    })
+  })
+
+  it('refuses grouping across containers or across an ancestor boundary', async () => {
+    const workspace = await store.load({ sideline: false })
+    const frame: CanvasNodeState = {
+      id: 'group-existing',
+      kind: 'group',
+      position: { x: 700, y: 20 },
+      size: { width: 760, height: 560 },
+      title: 'Existing frame',
+      color: '#32d74b',
+      group: null
+    }
+    const child = terminal('term-inside', 'Inside', 'gemini', 40)
+    child.parentId = frame.id
+    workspace.projects[0].nodes.unshift(frame)
+    workspace.projects[0].nodes.push(child)
+    await store.save(workspace)
+
+    for (const nodes of ['term-inside,term-source', 'group-existing,term-inside']) {
+      await expect(factory.group('term-source', { nodes })).resolves.toMatchObject({
+        ok: false,
+        error: expect.stringContaining('siblings in one container')
+      })
+    }
+    const after = await store.load({ sideline: false })
+    expect(after.projects[0].nodes.filter((node) => node.kind === 'group')).toHaveLength(1)
+    expect(after.projects[0].nodes.find((node) => node.id === 'term-inside')?.parentId).toBe(
+      'group-existing'
+    )
+    expect(publishedProjects).toEqual([])
+  })
+
+  it('renames a node, group, and sticky durably without ever writing into their panes', async () => {
+    const grouped = await factory.group('term-source', {
+      nodes: 'term-source,term-upstream',
+      label: 'Old group'
+    })
+    const groupId = (grouped.result as { groupId: string }).groupId
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push({
+      id: 'sticky-status',
+      kind: 'sticky',
+      position: { x: 1200, y: 30 },
+      size: { width: 240, height: 200 },
+      title: 'Old note',
+      color: '#ffd60a',
+      group: null,
+      text: 'ready'
+    })
+    await store.save(workspace)
+    published.length = 0
+    publishedProjects.length = 0
+
+    await expect(
+      factory.rename('term-source', { node: 'term-upstream', title: 'Reviewed\nUpstream' })
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      factory.rename('term-source', { node: groupId, title: 'Director group' })
+    ).resolves.toMatchObject({ ok: true })
+    await expect(
+      factory.rename('term-source', { node: 'sticky-status', title: 'Round status' })
+    ).resolves.toMatchObject({ ok: true })
+
+    const project = (await new WorkspaceStore().load({ sideline: false })).projects[0]
+    expect(project.nodes.find((node) => node.id === 'term-upstream')).toMatchObject({
+      title: 'Reviewed Upstream',
+      titleAuto: false
+    })
+    expect(project.nodes.find((node) => node.id === groupId)).toMatchObject({
+      title: 'Director group',
+      titleAuto: false
+    })
+    expect(project.nodes.find((node) => node.id === 'sticky-status')).toMatchObject({
+      title: 'Round status',
+      titleAuto: false
+    })
+    expect(published.map((node) => node.id)).toEqual([
+      'term-upstream',
+      groupId,
+      'sticky-status'
+    ])
+    expect(publishedProjects).toHaveLength(3)
+    expect(pty.sends).toEqual([])
+    const projectFile = JSON.parse(
+      fs.readFileSync(path.join(projectDir, '.nodeterm', 'project.json'), 'utf8')
+    ) as { nodes: CanvasNodeState[] }
+    expect(projectFile.nodes.find((node) => node.id === 'sticky-status')?.title).toBe(
+      'Round status'
+    )
+  })
+
   it('places repeated spawns in the first free deterministic slots without overlapping busy nodes', async () => {
     const workspace = await store.load({ sideline: false })
     // Slot zero to the right of the source is already busy before any control request arrives.
