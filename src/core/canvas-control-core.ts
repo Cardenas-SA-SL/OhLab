@@ -337,7 +337,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `branch --node <id>` — branch a Claude node\'s conversation (Claude nodes only).',
     '- `rename --node <id> --title "New Name"` — rename any node (terminals, groups, stickies…).',
     '- `write --node <id> --text "..."` / `close --node <id>` — type into / close a node.',
-    '  Both ask the user to confirm a dialog and may be denied.',
+    '  Desktop asks the user to confirm both. Server Edition close is narrower: only nodes this',
+    '  caller opened during the current server run can be closed, and those close without a dialog;',
+    '  every other target receives a named ownership refusal.',
     '- `send --node <id> --text "..."` / `reply --node <id> --text "..."` — deliver a message into',
     '  another AGENT node in this project (no confirm dialog: verified-only, gated by the project\'s',
     '  agent-messaging switch — off by default — and rate-limited). A busy target is not interrupted',
@@ -690,7 +692,9 @@ Verbs:
   branch and a new node opens resuming the original. Target must be a Claude agent node.
 - \`rename --node <id> --title "New Name"\` — rename any node (terminals, groups, stickies…).
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
-- \`close --node <id>\` — close a node. (Asks the user to confirm.)
+- \`close --node <id>\` — close a node. Desktop asks the user to confirm. Server Edition closes
+  only nodes this caller opened during the current server run, without a dialog; every other
+  target receives a named ownership refusal.
 - \`send --node <id> --text "..."\` — deliver a message INTO another agent node's session, in this
   project only. No confirm dialog; instead it is verified-only, gated by the project's
   agent-messaging switch (Settings → Agents, OFF by default), and rate-limited. Delivery lands when
@@ -733,7 +737,8 @@ ${messagingGuidanceLines().join('\n')}
 ${browserGuidanceLines().join('\n')}
 
 Notes:
-- \`write\` and \`close\` require the user to approve a confirmation dialog; they may be denied.
+- \`write\` requires the user to approve a confirmation dialog. Desktop \`close\` does too;
+  Server Edition uses the process-local ownership rule described above instead.
 - \`board\` and \`assign\` act on the CURRENTLY OPEN project's board — the same one you see when you
   toggle the kanban view. They need no confirmation.
 - If the CLI says canvas control is unavailable, you are not in a controllable nodeterm session — do not retry.

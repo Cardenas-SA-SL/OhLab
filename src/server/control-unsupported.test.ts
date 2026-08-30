@@ -175,6 +175,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
   const actions = () => ({
     openTerminal: vi.fn(async () => ({ ok: true as const, result: { id: 'term-new' } })),
     openAgent: vi.fn(async () => ({ ok: true as const, result: { id: 'agent-new' } })),
+    close: vi.fn(async () => ({ ok: true as const, result: { id: 'closed' } })),
     sticky: vi.fn(async () => ({ ok: true as const, result: { id: 'sticky-new' } })),
     deliver: vi.fn(async () => ({ ok: true as const, message: 'queued' }))
   })
@@ -200,6 +201,20 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
       handler({ verb: 'open-agent', nodeId: 'term-source', args: {}, verified: true })
     ).resolves.toEqual({ ok: false, error: 'open-agent requires --agent <id>' })
     expect(a.openAgent).not.toHaveBeenCalled()
+
+    await expect(
+      handler({
+        verb: 'close',
+        nodeId: 'term-source',
+        args: { node: 'term-new,term-other' },
+        verified: true
+      })
+    ).resolves.toMatchObject({ ok: true })
+    expect(a.close).toHaveBeenCalledWith(
+      'term-source',
+      { node: 'term-new,term-other' },
+      true
+    )
   })
 
   it('routes messaging without trusting a notify body', async () => {

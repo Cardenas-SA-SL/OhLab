@@ -167,6 +167,7 @@ export async function initServerCanvasControl(
     openTerminal: (sourceNodeId, args, verified) =>
       factory.openTerminal(sourceNodeId, args, verified),
     openAgent: (sourceNodeId, args, verified) => factory.openAgent(sourceNodeId, args, verified),
+    close: (sourceNodeId, args, verified) => factory.close(sourceNodeId, args, verified),
     sticky: (sourceNodeId, args) => factory.sticky(sourceNodeId, args),
     deliver: async (input) => (await deliverFromControl(input, messaging)).reply
   }

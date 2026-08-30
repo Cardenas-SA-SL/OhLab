@@ -295,11 +295,10 @@ export function buildRealApi(
     onMigrated: (cb) => client.subscribe(IPC.workspaceMigrated, cb as Listener),
     // REAL: core broadcasts IPC.workspaceCorruptRecovered from the load path (workspace-store.ts).
     onCorruptRecovered: (cb) => client.subscribe(IPC.workspaceCorruptRecovered, cb as Listener),
-    // The server still does not run WorkspaceWatcher (outside edits remain reload-on-demand), but
-    // core-originated mutations do broadcast this channel: remote-node adoption already did, and
-    // Server Edition canvas control uses it for persisted bridge/rope changes that are wider than
-    // the node-only canvas:mut vocabulary. Subscribe to what actually exists instead of dropping
-    // those updates just because the filesystem-watcher producer is absent.
+    // Server Edition runs the shared WorkspaceWatcher and broadcasts outside file edits here.
+    // Core-originated mutations use the same channel: remote-node adoption already did, and Server
+    // Edition canvas control uses it for persisted bridge/rope changes that are wider than the
+    // node-only canvas:mut vocabulary.
     onExternalChange: (cb) => client.subscribe(IPC.workspaceExternalChange, cb as Listener)
   }
 

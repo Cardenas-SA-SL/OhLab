@@ -98,6 +98,7 @@ describe('initServerCanvasControl', () => {
     const pty = {
       createHeadless: vi.fn(async () => ({ sessionId: 'unused', fresh: true })),
       sendText: vi.fn(async () => true),
+      destroySession: vi.fn(async () => undefined),
       paneOwner,
       sendEnvelope,
       hasLiveSession: () => true
@@ -208,6 +209,7 @@ describe('initServerCanvasControl', () => {
         } as never))
         return true
       }),
+      destroySession: vi.fn(async () => undefined),
       paneOwner: vi.fn(async () => ({
         tty: '/dev/pts/9',
         panePid: 100,

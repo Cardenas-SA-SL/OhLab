@@ -40,6 +40,11 @@ export interface ServerControlReply {
 export interface HeadlessPty {
   createHeadless(options: PtyCreateOptions): Promise<PtyCreateResult>
   sendText(nodeId: string, text: string, opts?: { enter?: boolean }): Promise<boolean>
+  destroySession(
+    clientId: number | null,
+    persistKey: string,
+    opts?: { everySocket?: boolean }
+  ): Promise<void>
 }
 
 /** WorkspaceStore's mutation surface, also narrow so tests can use the real store or a fake. */
@@ -56,6 +61,7 @@ export interface HeadlessNodeFactoryDeps {
   env?: Record<string, string | undefined>
   now?: () => number
   publishNode?: (projectId: string, node: CanvasNodeState) => void
+  publishRemoval?: (projectId: string, nodeId: string) => void
   publishProject?: (project: Project) => void
   schedule?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>
   clearSchedule?: (timer: ReturnType<typeof setTimeout>) => void
@@ -151,16 +157,40 @@ function absolutePosition(project: Project, node: CanvasNodeState): { x: number;
 function placeRight(
   project: Project,
   source: CanvasNodeState,
-  index: number,
-  size: { width: number; height: number }
+  size: { width: number; height: number },
+  reserved: readonly CanvasNodeState[] = []
 ): { x: number; y: number } {
   const origin = absolutePosition(project, source)
   const sourceWidth = source.size?.width || TERMINAL_SIZE.width
-  const column = Math.floor(index / 3)
-  const row = index % 3
-  return {
-    x: origin.x + sourceWidth + H_GAP + column * (size.width + H_GAP),
-    y: origin.y + row * (size.height + V_GAP)
+  const occupied = [...project.nodes, ...reserved].map((node) => {
+    const position = absolutePosition(project, node)
+    return {
+      x: position.x,
+      y: position.y,
+      width: Math.max(1, node.size?.width || TERMINAL_SIZE.width),
+      height: Math.max(1, node.size?.height || TERMINAL_SIZE.height)
+    }
+  })
+
+  // Keep the existing compact three-row grid, but scan it rather than assuming this request's
+  // local index is globally free. Repeated requests therefore continue into the first available
+  // row/column instead of returning to slot zero and stacking nodes on top of one another.
+  for (let slot = 0; ; slot++) {
+    const column = Math.floor(slot / 3)
+    const row = slot % 3
+    const candidate = {
+      x: origin.x + sourceWidth + H_GAP + column * (size.width + H_GAP),
+      y: origin.y + row * (size.height + V_GAP),
+      width: size.width,
+      height: size.height
+    }
+    const collides = occupied.some((rect) =>
+      candidate.x < rect.x + rect.width &&
+      candidate.x + candidate.width > rect.x &&
+      candidate.y < rect.y + rect.height &&
+      candidate.y + candidate.height > rect.y
+    )
+    if (!collides) return { x: candidate.x, y: candidate.y }
   }
 }
 
@@ -198,6 +228,8 @@ function ptyOptions(project: Project, node: CanvasNodeState): PtyCreateOptions {
 export class HeadlessNodeFactory {
   private serial: Promise<unknown> = Promise.resolve()
   private attached = new Set<string>()
+  /** Process-local proof that a caller created a node during THIS Server Edition run. */
+  private spawnedBy = new Map<string, { sourceNodeId: string; projectId: string }>()
   /** Fresh server-spawned agents that have not emitted their first real working turn yet. */
   private awaitingFirstWorking = new Set<string>()
   private retryCount = new Map<string, number>()
@@ -221,6 +253,14 @@ export class HeadlessNodeFactory {
       publishCanvasMutation(projectId, { op: 'upsert', node })
     })
     for (const node of nodes) publish(project.id, node)
+  }
+
+  private publishRemovals(project: Project, nodeIds: readonly string[]): void {
+    this.deps.publishProject?.(project)
+    const publish = this.deps.publishRemoval ?? ((projectId: string, nodeId: string) => {
+      publishCanvasMutation(projectId, { op: 'remove', id: nodeId })
+    })
+    for (const nodeId of nodeIds) publish(project.id, nodeId)
   }
 
   private async attach(project: Project, node: CanvasNodeState): Promise<PtyCreateResult> {
@@ -296,6 +336,89 @@ export class HeadlessNodeFactory {
     verified: boolean
   ): Promise<ServerControlReply> {
     return this.open(sourceNodeId, 'open-agent', args, verified)
+  }
+
+  close(
+    sourceNodeId: string,
+    args: Record<string, string>,
+    verified: boolean
+  ): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['node']))
+      if (flagError) return { ok: false, error: `close: ${flagError}` }
+      if (!verified) {
+        return {
+          ok: false,
+          error: 'close-identity-refused: Server Edition close requires verified node identity'
+        }
+      }
+
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+
+      const ids = [...new Set((args.node ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
+      if (!ids.length) return { ok: false, error: 'close requires --node <id>' }
+
+      // Validate the WHOLE list before killing anything. A mixed owned/unowned request is one
+      // refusal, never a partial destructive success whose surviving ids the caller must guess.
+      for (const id of ids) {
+        const ownership = this.spawnedBy.get(id)
+        if (!ownership || ownership.sourceNodeId !== sourceNodeId) {
+          return {
+            ok: false,
+            error: `close-not-owner: ${sourceNodeId} did not spawn ${id} during this server run`
+          }
+        }
+      }
+
+      // Kill first: the durable canvas must never lose a node whose session outcome is unknown.
+      // `destroySession` treats a backend already absent as success, which is exactly the cleanup
+      // case for a pane the operator killed directly before asking its owner to close the node.
+      await Promise.all(
+        ids.map((id) => this.deps.ptyManager.destroySession(null, id, { everySocket: true }))
+      )
+
+      const removedByProject = new Map<Project, string[]>()
+      for (const id of ids) {
+        const projectId = this.spawnedBy.get(id)!.projectId
+        const project = workspace.projects.find((candidate) => candidate.id === projectId)
+        if (!project || !project.nodes.some((node) => node.id === id)) continue
+        project.nodes = project.nodes.filter((node) => node.id !== id)
+        if (project.ropes) {
+          project.ropes = project.ropes.filter((edge) => edge.source !== id && edge.target !== id)
+        }
+        if (project.bridges) {
+          project.bridges = project.bridges.filter((edge) => edge.source !== id && edge.target !== id)
+        }
+        const removed = removedByProject.get(project) ?? []
+        removed.push(id)
+        removedByProject.set(project, removed)
+      }
+
+      if (removedByProject.size) {
+        await this.deps.workspaceStore.save(workspace)
+        for (const [project, removed] of removedByProject) this.publishRemovals(project, removed)
+      }
+
+      for (const id of ids) {
+        this.spawnedBy.delete(id)
+        this.attached.delete(id)
+        this.awaitingFirstWorking.delete(id)
+        this.retryCount.delete(id)
+        const timer = this.retryTimers.get(id)
+        if (timer) (this.deps.clearSchedule ?? clearTimeout)(timer)
+        this.retryTimers.delete(id)
+      }
+      return {
+        ok: true,
+        message: `closed ${ids.length} owned node(s): ${ids.join(', ')}`,
+        result: { ids, id: ids[0] }
+      }
+    })
   }
 
   private open(
@@ -404,7 +527,7 @@ export class HeadlessNodeFactory {
         const node: CanvasNodeState = {
           id,
           kind: 'terminal',
-          position: placeRight(target, source.node, i, nodeSize),
+          position: placeRight(target, source.node, nodeSize, created),
           size: { ...nodeSize },
           title,
           ...(verb === 'open-agent' ? { titleAuto: true } : {}),
@@ -442,6 +565,9 @@ export class HeadlessNodeFactory {
       target.ropes = ropes
       target.bridges = bridges
       await this.deps.workspaceStore.save(workspace)
+      for (const node of created) {
+        this.spawnedBy.set(node.id, { sourceNodeId, projectId: target.id })
+      }
       this.publish(target, created)
 
       const failed: string[] = []
@@ -508,7 +634,7 @@ export class HeadlessNodeFactory {
         node = {
           id: nextId('sticky'),
           kind: 'sticky',
-          position: placeRight(source.project, source.node, 0, STICKY_SIZE),
+          position: placeRight(source.project, source.node, STICKY_SIZE),
           size: { ...STICKY_SIZE },
           title: oneLine(parsed.ref) || 'Note',
           color: '#ffd60a',
@@ -533,6 +659,9 @@ export class HeadlessNodeFactory {
       node.textUpdatedAt = (this.deps.now ?? Date.now)()
       node.textUpdatedBy = source.node.title || source.node.id
       await this.deps.workspaceStore.save(workspace)
+      if (created) {
+        this.spawnedBy.set(node.id, { sourceNodeId, projectId: source.project.id })
+      }
       this.publish(source.project, [node])
       return {
         ok: true,
@@ -637,5 +766,6 @@ export class HeadlessNodeFactory {
     this.stopped = true
     for (const timer of this.retryTimers.values()) (this.deps.clearSchedule ?? clearTimeout)(timer)
     this.retryTimers.clear()
+    this.spawnedBy.clear()
   }
 }

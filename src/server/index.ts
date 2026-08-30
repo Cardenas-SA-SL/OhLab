@@ -88,6 +88,7 @@ import { presenceHub } from '../core/presence/hub'
 import { initCanvasSync } from '../core/canvas-sync'
 import { wireAgentStatus } from './agent-status'
 import { initServerContextLink } from './context-link'
+import { createServerWorkspaceWatcher } from './workspace-external-watch'
 import { registerTranscriptIpc } from '../core/transcript-ipc'
 import { IPC } from '@shared/ipc'
 import { WhisperModelStore } from '../core/speech/whisper-models'
@@ -564,9 +565,12 @@ export async function startServer(
     canvases: () => workspaceStore.persistedCanvases(),
     installAgentIntegrations: config.installHooks !== false
   })
+  const workspaceWatcher = createServerWorkspaceWatcher(workspaceStore)
   // Every load()/save() is a canvas change as far as links are concerned: a browser drawing a
-  // bridge edge reaches us as the workspace save it triggers.
+  // bridge edge reaches us as the workspace save it triggers. It also refreshes the local-ref
+  // watcher set, so projects added or removed while the server runs get the same hand-edit path.
   workspaceStore.onPersist = () => {
+    workspaceWatcher.sync()
     contextLink.refresh()
     refreshNodeTokens()
   }
@@ -699,6 +703,7 @@ export async function startServer(
         pressure.stop()
         ptyPressure.stop()
         canvasControl?.stop()
+        workspaceWatcher.dispose()
         await contextLink.stop()
         await ptyManager.killAll()
         // Same native hazard as the desktop app: a whisper transcribe still running when the
@@ -755,6 +760,7 @@ export async function startServer(
       pressure.stop()
       ptyPressure.stop()
       canvasControl?.stop()
+      workspaceWatcher.dispose()
       await contextLink.stop()
       await ptyManager.killAll()
       // Same native hazard as the desktop app: a whisper transcribe still running when the node
