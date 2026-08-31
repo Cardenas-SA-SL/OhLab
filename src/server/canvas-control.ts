@@ -16,11 +16,12 @@ import {
 } from '../core/agent-status-mirror'
 import type { BoardLogHandlers } from '../core/board-log-handlers'
 import {
-  CONTROL_SHIM_SCRIPT,
+  buildControlShimScript,
   buildCanvasControlInstructions,
   buildCanvasSkillBody,
   mergeCanvasControlBlock
 } from '../core/canvas-control-core'
+import { codexThreadIdentityRoot } from '../core/codex-identity-proxy'
 import { claudeCliCaps, type ClaudeCliCaps } from '../core/claude-cli'
 import { installHooksIntoLocalAccounts } from '../core/claude-accounts-service'
 import { platform } from '../core/platform'
@@ -68,7 +69,7 @@ function skillPathIn(configDir: string): string {
 function writeShim(): void {
   const dir = canvasControlDir()
   fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(shimPath(), CONTROL_SHIM_SCRIPT, 'utf8')
+  fs.writeFileSync(shimPath(), buildControlShimScript(codexThreadIdentityRoot()), 'utf8')
   try {
     fs.chmodSync(shimPath(), 0o755)
   } catch {

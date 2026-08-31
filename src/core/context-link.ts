@@ -5,7 +5,9 @@
 // document per node (linked nodes' titles, transcript paths learned from hooks, cwds, tmux
 // session names) and answers reads over the hook server's /context-link/ route. A POSIX-sh shim
 // (context.sh) is the client; a globally-installed Claude skill (plus instruction blocks for the
-// agents that have no skill system) tells the agent how + when to call it.
+// agents that have no skill system) tells the agent how + when to call it. The local shim is built
+// with the shared-Codex thread resolver before its node-id gate; the SSH installer keeps the
+// machine-neutral body because this machine's ownership-record path is meaningless on the host.
 //
 // The reading and parsing happen HERE, on the desktop, not in the CLI. That is what lets an SSH
 // project's remote agent use the feature at all: its transcripts live on the host, reachable over
@@ -21,7 +23,7 @@ import type { ContextLinkMap } from '../shared/types'
 import { type PtyManager } from './pty-manager'
 import { TMUX_SOCKET } from './tmux-naming'
 import {
-  CONTEXT_SHIM_SCRIPT,
+  buildContextShimScript,
   buildContextLinkSkillBody,
   buildLinkDoc,
   buildLinkedContextInstructions,
@@ -31,6 +33,7 @@ import {
   type LinkDoc,
   type LinkDocEntry
 } from './context-link-core'
+import { codexThreadIdentityRoot } from './codex-identity-proxy'
 import {
   CONTEXT_LINK_VERBS,
   renderContextLink,
@@ -58,7 +61,7 @@ function skillPath(): string {
 function writeCliFiles(): void {
   const d = contextLinkDir()
   fs.mkdirSync(d, { recursive: true })
-  fs.writeFileSync(cliShimPath(), CONTEXT_SHIM_SCRIPT)
+  fs.writeFileSync(cliShimPath(), buildContextShimScript(codexThreadIdentityRoot()))
   try {
     fs.chmodSync(cliShimPath(), 0o755)
   } catch {

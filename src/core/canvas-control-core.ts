@@ -12,6 +12,7 @@ import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from './agents/agent-message-fl
 import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
 import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from './browser-verb'
 import { NODE_COLORS } from '@shared/node-colors'
+import { codexThreadIdentityResolverSh } from './codex-thread-identity-sh'
 
 /**
  * The messaging verbs' retry guidance, RENDERED from `RETRYABLE` — the table is the source, and
@@ -421,8 +422,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
  *  verbatim and the parity test holds the two ends together (issue #367). */
 export const CONTROL_UNREACHABLE_MSG = 'Could not reach nodeterm (control endpoint unreachable).'
 
-export const CONTROL_SHIM_SCRIPT = `#!/bin/sh
-# nodeterm canvas-control CLI (auto-generated — do not edit).
+const CONTROL_SHIM_BODY = `# nodeterm canvas-control CLI (auto-generated — do not edit).
 
 if [ -z "$NODETERM_CANVAS_CONTROL" ]; then
   echo "Canvas control is not available in this session (not a nodeterm agent node)." >&2
@@ -589,6 +589,23 @@ if [ -z "$nt_code" ] || [ "$nt_code" = "000" ]; then
 fi
 exit 1
 `
+
+/**
+ * Build the local canvas-control shim. A Codex tool shell is forked by the account-scoped shared
+ * app-server, not by its pane, so it carries CODEX_THREAD_ID but none of the NODETERM_* identity
+ * variables. The signed thread-ownership record is the only safe way to recover that identity,
+ * and the resolver must run before the shim's early NODETERM_CANVAS_CONTROL gate.
+ *
+ * `identityRoot` stays optional because the same machine-neutral script is copied to SSH hosts;
+ * the desktop's local ownership-record path must never be baked into a remote client.
+ */
+export function buildControlShimScript(identityRoot?: string): string {
+  const identityPrelude = identityRoot ? `${codexThreadIdentityResolverSh(identityRoot)}\n` : ''
+  return `#!/bin/sh\n${identityPrelude}${CONTROL_SHIM_BODY}`
+}
+
+/** Machine-neutral variant used by SSH installation and legacy tests. */
+export const CONTROL_SHIM_SCRIPT = buildControlShimScript()
 
 /** The manage-nodeterm-canvas SKILL.md body, pointing at the shim at `shimPath`.
  *  Parameterized because the same skill is installed twice with different paths: into the
