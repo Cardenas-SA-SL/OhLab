@@ -21,6 +21,7 @@ import {
   buildCanvasSkillBody,
   mergeCanvasControlBlock
 } from '../core/canvas-control-core'
+import { codexIdentityCaps } from '../core/codex-identity-caps'
 import { codexThreadIdentityRoot } from '../core/codex-identity-proxy'
 import { claudeCliCaps, type ClaudeCliCaps } from '../core/claude-cli'
 import { installHooksIntoLocalAccounts } from '../core/claude-accounts-service'
@@ -43,6 +44,8 @@ export interface ServerCanvasControlDeps {
   settings(): Settings
   boardLog: BoardLogHandlers
   cliCaps?: () => Promise<ClaudeCliCaps>
+  /** Test seam for the boot-populated shared Codex capability answer. */
+  codexSharedIdentity?: () => Promise<boolean>
   /** The server's installHooks gate. False keeps every real agent config directory untouched. */
   installAgentIntegrations?: boolean
 }
@@ -140,6 +143,8 @@ export async function initServerCanvasControl(
     ptyManager: deps.ptyManager,
     settings: deps.settings,
     cliCaps: deps.cliCaps ?? claudeCliCaps,
+    codexSharedIdentity:
+      deps.codexSharedIdentity ?? (() => codexIdentityCaps().then((caps) => caps.shared)),
     stateOf: nodeState,
     agentIdOf: (nodeId) => mirrorEntry(nodeId)?.agentId,
     publishProject: (project: Project) => platform().broadcast(IPC.workspaceExternalChange, project)

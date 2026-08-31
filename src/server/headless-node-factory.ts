@@ -62,6 +62,8 @@ export interface HeadlessNodeFactoryDeps {
   ptyManager: HeadlessPty
   settings(): Settings
   cliCaps(): Promise<ClaudeCliCaps>
+  /** Whether this host's Codex launcher + shared app-server identity spine are ready. */
+  codexSharedIdentity(): Promise<boolean>
   /** Hook-mirror lookups. A stored agentId wins; these cover a plain terminal running an agent. */
   stateOf(nodeId: string): AgentState | undefined
   agentIdOf?(nodeId: string): string | undefined
@@ -899,6 +901,13 @@ export class HeadlessNodeFactory {
           error: 'open-agent: Server Edition v1 supports --agent claude|codex|gemini'
         }
       }
+      // The Server shell owns the same shared Codex app-server spine as desktop. Ask its boot-time
+      // capability probe at the launch boundary: true routes through `nodeterm-codex`; every
+      // unavailable/failed case stays on the safe bare command supplied by the shared assembler.
+      const codexSharedIdentity =
+        verb === 'open-agent' && agentId === 'codex'
+          ? await this.deps.codexSharedIdentity().catch(() => false)
+          : false
 
       const count = parseCount(args.count, verb === 'open-terminal' ? TERMINAL_LIMIT : AGENT_LIMIT)
       const created: CanvasNodeState[] = []
@@ -948,7 +957,7 @@ export class HeadlessNodeFactory {
               sessionId: mintedSessionId,
               sessionIdFlagSupported,
               launchCmdOverride: settings.agentLaunchCommands?.[agentId as BuiltinAgentId],
-              sharedIdentity: false,
+              sharedIdentity: codexSharedIdentity,
               model: args.model
             },
             this.deps.env ?? process.env

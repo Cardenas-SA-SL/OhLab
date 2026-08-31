@@ -84,6 +84,7 @@ describe('HeadlessNodeFactory', () => {
   let removed: string[]
   let publishedProjects: Workspace['projects']
   let factory: HeadlessNodeFactory
+  let codexSharedIdentity: boolean
 
   const settings = (): Settings => ({
     ...DEFAULT_SETTINGS,
@@ -103,6 +104,7 @@ describe('HeadlessNodeFactory', () => {
     published = []
     removed = []
     publishedProjects = []
+    codexSharedIdentity = false
     const initial: Workspace = {
       version: 2,
       activeProjectId: 'project-1',
@@ -130,6 +132,7 @@ describe('HeadlessNodeFactory', () => {
         fullscreenTui: false,
         sessionIdFlag: false
       }),
+      codexSharedIdentity: async () => codexSharedIdentity,
       stateOf: (id) => states[id],
       publishNode: (_projectId, node) => published.push(node),
       publishRemoval: (_projectId, nodeId) => removed.push(nodeId),
@@ -706,6 +709,23 @@ describe('HeadlessNodeFactory', () => {
       agentId: agent
     })
     expect(pty.sends.at(-1)).toEqual({ nodeId: id, text: command })
+  })
+
+  it('routes a Codex launch through the managed launcher when Server shared identity is ready', async () => {
+    codexSharedIdentity = true
+
+    const reply = await factory.openAgent(
+      'term-source',
+      { agent: 'codex', prompt: 'do work' },
+      true
+    )
+
+    expect(reply.ok).toBe(true)
+    const id = (reply.result as { id: string }).id
+    expect(pty.sends.at(-1)).toEqual({
+      nodeId: id,
+      text: "nodeterm-codex 'do work' --ask-for-approval untrusted"
+    })
   })
 
   it('persists --after without launching, then flushes exactly once on the idle state', async () => {

@@ -95,9 +95,10 @@ describe('initServerCanvasControl', () => {
     } as unknown as WorkspaceStore
     const paneOwner = vi.fn(async () => null)
     const sendEnvelope = vi.fn(async () => true)
+    const sendText = vi.fn(async (_nodeId: string, _text: string) => true)
     const pty = {
       createHeadless: vi.fn(async () => ({ sessionId: 'unused', fresh: true })),
-      sendText: vi.fn(async () => true),
+      sendText,
       destroySession: vi.fn(async () => undefined),
       paneOwner,
       sendEnvelope,
@@ -116,6 +117,7 @@ describe('initServerCanvasControl', () => {
         fullscreenTui: false,
         sessionIdFlag: false
       }),
+      codexSharedIdentity: async () => true,
       installAgentIntegrations: false
     })
 
@@ -130,6 +132,17 @@ describe('initServerCanvasControl', () => {
     expect(
       fs.readFileSync(path.join(accountDir, 'skills', 'manage-nodeterm-canvas', 'SKILL.md'), 'utf8')
     ).toContain(shim)
+
+    const opened = await runtime.handler({
+      verb: 'open-agent',
+      nodeId: 'source',
+      args: { agent: 'codex', prompt: 'identity proof' },
+      verified: true
+    })
+    expect(opened).toMatchObject({ ok: true })
+    expect(sendText.mock.calls.at(-1)?.[1]).toBe(
+      "nodeterm-codex 'identity proof' --ask-for-approval on-request"
+    )
 
     // Prove ownership so the next gate reached is specifically the per-project capability switch.
     recordFreshSpawnOwner('target', 'p1')

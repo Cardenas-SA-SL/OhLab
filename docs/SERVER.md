@@ -568,8 +568,9 @@ account-management IPC — that surface is desktop-driven over SSH.
   `setCodexThreadIdentityAuthSecret(...)` with it, so a managed Codex account's thread→node→account
   ownership records can **sign and verify on a headless host**. Headless Linux has no OS keychain, so
   the secret is 32 **raw bytes** at `node-auth-key.bin`, mode `0600` — the same both-shells channel the
-  desktop seals via `safeStorage`. This only makes the record layer *able to sign*; it is orthogonal to
-  the shared-app-server degrade (Codex nodes still launch bare here, exactly as before).
+  desktop seals via `safeStorage`. When the managed runtime and launcher are available, headless
+  canvas-control launches route through `nodeterm-codex` and claim that signed node identity; an
+  unavailable capability still degrades to the bare `codex` command.
 - **Does NOT host the account-management verbs.** `initCodexAccounts` registers its IPC over Electron's
   `ipcMain` with WebContents-owner authorization, which the headless bridge does not provide, so
   `startServer` never calls it. This is **not** a silent gap: managed Codex logins **on an SSH host**
