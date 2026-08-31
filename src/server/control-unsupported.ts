@@ -64,6 +64,11 @@ export async function serverEditionControlHandler({ verb }: { verb: string }): P
 }
 
 export interface ServerEditionControlActions {
+  openProject(
+    sourceNodeId: string,
+    args: Record<string, string>,
+    verified: boolean
+  ): Promise<ServerControlReply>
   openTerminal(
     sourceNodeId: string,
     args: Record<string, string>,
@@ -97,6 +102,7 @@ export interface ServerEditionControlActions {
 }
 
 const SERVER_V1_VERBS: ReadonlySet<string> = new Set([
+  'open-project',
   'open-terminal',
   'open-agent',
   'close',
@@ -143,6 +149,8 @@ export function createServerEditionControlHandler(actions: ServerEditionControlA
     if ('error' in command) return { ok: false, error: command.error }
 
     switch (command.verb) {
+      case 'open-project':
+        return actions.openProject(nodeId, command.args, verified)
       case 'open-terminal':
         return actions.openTerminal(nodeId, command.args, verified)
       case 'open-agent':

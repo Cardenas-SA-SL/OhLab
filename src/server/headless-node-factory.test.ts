@@ -182,6 +182,96 @@ describe('HeadlessNodeFactory', () => {
     })
   })
 
+  it('re-grants an exact saved local project after a Server restart before cross-project open', async () => {
+    const targetDir = path.join(dataDir, 'loop-project')
+    fs.mkdirSync(targetDir, { recursive: true })
+    const workspace = await store.load({ sideline: false })
+    workspace.projects.push({
+      id: 'project-loop',
+      name: 'Loop',
+      color: '#6ac4dc',
+      cwd: targetDir,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [],
+      bridges: [],
+      ropes: []
+    })
+    await store.save(workspace)
+
+    await expect(
+      factory.openAgent(
+        'term-source',
+        { agent: 'claude', project: 'project-loop', prompt: 'resume loop' },
+        true
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('project-target-refused')
+    })
+
+    await expect(
+      factory.openProject('term-source', { cwd: targetDir }, true)
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        projectId: 'project-loop',
+        cwd: targetDir,
+        created: false,
+        serverExistingOnly: true
+      }
+    })
+
+    // A grant belongs to the exact verified caller. Another agent in the same source project may
+    // not consume it merely because it learned the returned project id.
+    await expect(
+      factory.openAgent(
+        'term-upstream',
+        { agent: 'claude', project: 'project-loop', prompt: 'steal grant' },
+        true
+      )
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('project-target-refused')
+    })
+
+    const opened = await factory.openAgent(
+      'term-source',
+      { agent: 'claude', project: 'project-loop', prompt: 'resume loop' },
+      true
+    )
+    expect(opened.ok).toBe(true)
+    const id = (opened.result as { id: string }).id
+    expect(pty.creates.at(-1)).toMatchObject({
+      persistKey: id,
+      ownerProjectId: 'project-loop',
+      cwd: targetDir
+    })
+    expect((await store.load({ sideline: false })).projects
+      .find((project) => project.id === 'project-loop')?.nodes
+      .some((node) => node.id === id)).toBe(true)
+  })
+
+  it('never creates or enumerates a project through Server open-project', async () => {
+    const missing = path.join(dataDir, 'not-registered')
+    fs.mkdirSync(missing, { recursive: true })
+
+    await expect(
+      factory.openProject('term-source', { cwd: missing }, true)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('server-existing-only')
+    })
+    await expect(
+      factory.openProject('term-source', { cwd: projectDir }, false)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('identity-refused')
+    })
+
+    const reloaded = await store.load({ sideline: false })
+    expect(reloaded.projects).toHaveLength(1)
+  })
+
   it('lets a verified caller close its own spawn, killing the pane before persisted edge removal and fanout', async () => {
     const opened = await factory.openAgent(
       'term-source',

@@ -314,6 +314,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  confirm (your first open of an already-registered project asks once too) and may be denied —',
     '  a denial is final, do not retry it. Local only (refused from an SSH project), and it never',
     '  focuses the new project\'s tab. The returned id is what `--project` accepts.',
+    '  Server Edition is narrower: it can only re-open an exact local project already saved in its',
+    '  workspace (pass `--cwd` only); it never creates, adds, renames, recolors, or focuses one.',
     '- `show-image <path>` / `show-video <path>` — open a media file as a node.',
     '- `show-web (--url U | --file P.html | --html "<...>")` — open a web viewer.',
     '- `open-browser --url U` — open a navigable browser node.',
@@ -665,6 +667,9 @@ Verbs:
   already-registered project asks once too) and may be denied — a denial is final, do not retry
   it. Local only (refused from an SSH project), and it never focuses the new project's tab: use
   the returned id with \`--project\` to open sessions there.
+  On Server Edition this is a restart-recovery operation only: pass \`--cwd\` for an exact local
+  project already saved in that Server workspace. It never creates, adds, renames, recolors, or
+  focuses a project; register a missing project in the UI first.
 - \`show-image <path>\` — open an image file as a node.
 - \`show-video <path>\` — open a video file as a player node.
 - \`show-web (--url U | --file P.html | --html "<...>")\` — open a web viewer (live URL or local HTML you wrote).

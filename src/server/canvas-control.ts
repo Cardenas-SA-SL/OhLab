@@ -170,6 +170,8 @@ export async function initServerCanvasControl(
   messaging.queue = queue
 
   const actions: ServerEditionControlActions = {
+    openProject: (sourceNodeId, args, verified) =>
+      factory.openProject(sourceNodeId, args, verified),
     openTerminal: (sourceNodeId, args, verified) =>
       factory.openTerminal(sourceNodeId, args, verified),
     openAgent: (sourceNodeId, args, verified) => factory.openAgent(sourceNodeId, args, verified),

@@ -1,7 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto'
+import path from 'node:path'
 
 import { publishCanvasMutation } from '../core/canvas-sync'
-import { gateProjectTarget } from '../core/project-grants'
+import { gateProjectTarget, GRANT_CAP } from '../core/project-grants'
 import { planBridges, type LinkEndpoint } from '../shared/canvas-link'
 import {
   invalidNodeColorMessage,
@@ -452,6 +453,13 @@ export class HeadlessNodeFactory {
   private spawnedBy = new Map<string, { sourceNodeId: string; projectId: string }>()
   /** Fresh server-spawned agents that have not emitted their first real working turn yet. */
   private awaitingFirstWorking = new Set<string>()
+  /**
+   * Server-local `open-project` grants. The browser shell's grant ledger is process-local too,
+   * but Server Edition has its own process and handler. A service restart deliberately clears
+   * this map; `openProject()` can re-establish a grant only for an exact, already-saved local
+   * project path, so a surviving agent session is never stranded after that restart.
+   */
+  private projectGrants = new Map<string, Set<string>>()
   private retryCount = new Map<string, number>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stopped = false
@@ -487,6 +495,18 @@ export class HeadlessNodeFactory {
     this.publishChangeSet(project, nodes, [])
   }
 
+  private projectGranted(sourceNodeId: string, projectId: string): boolean {
+    return this.projectGrants.get(sourceNodeId)?.has(projectId) ?? false
+  }
+
+  private grantProject(sourceNodeId: string, projectId: string): boolean {
+    const grants = this.projectGrants.get(sourceNodeId) ?? new Set<string>()
+    if (!grants.has(projectId) && grants.size >= GRANT_CAP) return false
+    grants.add(projectId)
+    this.projectGrants.set(sourceNodeId, grants)
+    return true
+  }
+
   private async attach(project: Project, node: CanvasNodeState): Promise<PtyCreateResult> {
     if (this.attached.has(node.id)) {
       return { sessionId: node.id, fresh: false }
@@ -511,8 +531,7 @@ export class HeadlessNodeFactory {
       targetProjectId: args.project || undefined,
       callerProjectId: source.project.id,
       targetIsSsh: target ? !!target.ssh : undefined,
-      // `open-project` is not part of Server Edition v1, so this runtime never mints a grant.
-      granted: false
+      granted: this.projectGranted(source.node.id, targetId)
     })
     if (gate !== 'allow') return { ok: false, error: gate.refuse }
     if (!target) return { ok: false, error: 'project-target-refused: target project is unavailable' }
@@ -552,6 +571,81 @@ export class HeadlessNodeFactory {
     verified: boolean
   ): Promise<ServerControlReply> {
     return this.open(sourceNodeId, 'open-terminal', args, verified)
+  }
+
+  /**
+   * Re-open one exact local project that is already present in the Server workspace and mint a
+   * process-local targeting grant for this verified caller. Server Edition still cannot create,
+   * add, rename, recolor, or focus projects: those operations require the browser UI's explicit
+   * confirmation. This narrow existing-only form is the restart recovery path for long-lived
+   * agent nodes whose tmux sessions survive the Server process.
+   */
+  openProject(
+    sourceNodeId: string,
+    args: Record<string, string>,
+    verified: boolean
+  ): Promise<ServerControlReply> {
+    return this.runExclusive(async () => {
+      const flagError = unsupportedFlags(args, new Set(['cwd']))
+      if (flagError) return { ok: false, error: `open-project: ${flagError}` }
+      if (!verified) {
+        return {
+          ok: false,
+          error: 'open-project-identity-refused: Server Edition open-project requires verified node identity'
+        }
+      }
+
+      const workspace = await this.deps.workspaceStore.load({ sideline: false })
+      const source = sourceProject(workspace, sourceNodeId)
+      if (!source) return { ok: false, error: 'source node is not in exactly one saved project' }
+      if (!sourceCanControl(source.node, this.deps.agentIdOf)) {
+        return { ok: false, error: 'source node is not a control-capable agent' }
+      }
+      if (source.project.ssh) {
+        return {
+          ok: false,
+          error: 'open-project-local-only: open-project is not available from an SSH project — do not retry'
+        }
+      }
+
+      const rawCwd = args.cwd ?? ''
+      if (!path.isAbsolute(rawCwd)) {
+        return {
+          ok: false,
+          error: 'open-project-cwd-invalid: --cwd must be an absolute path to an existing saved local project'
+        }
+      }
+      const cwd = path.resolve(rawCwd)
+      const target = workspace.projects.find(
+        (project) => !project.ssh && !!project.cwd && path.resolve(project.cwd) === cwd
+      )
+      if (!target) {
+        return {
+          ok: false,
+          error:
+            'open-project-server-existing-only: Server Edition can only re-open an exact saved ' +
+            'local project path; add the project in the UI first — do not retry this path'
+        }
+      }
+      if (!this.grantProject(sourceNodeId, target.id)) {
+        return {
+          ok: false,
+          error: 'open-project-grant-cap: this session already holds the maximum number of project grants'
+        }
+      }
+
+      return {
+        ok: true,
+        message: `re-opened saved local project ${target.id}; cross-project grant restored`,
+        result: {
+          projectId: target.id,
+          name: target.name,
+          cwd,
+          created: false,
+          serverExistingOnly: true
+        }
+      }
+    })
   }
 
   async openAgent(
@@ -1218,5 +1312,6 @@ export class HeadlessNodeFactory {
     for (const timer of this.retryTimers.values()) (this.deps.clearSchedule ?? clearTimeout)(timer)
     this.retryTimers.clear()
     this.spawnedBy.clear()
+    this.projectGrants.clear()
   }
 }

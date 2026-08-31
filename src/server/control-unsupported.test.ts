@@ -100,10 +100,10 @@ describe('the Server Edition refuses canvas control by name', () => {
     expect(text).toContain('do not retry')
   })
 
-  it('`open-project` is unreachable on this edition — the P8 pin for issue #338', async () => {
-    // No server code changed for #338 and none may need to: the SE registers this handler for
-    // ALL verbs, so open-project (and any --project-carrying open) answers the same permanent
-    // named refusal. Pinned by name so the contract cannot drift silently.
+  it('`open-project` stays unreachable when Server canvas control is disabled', async () => {
+    // The feature-off rollback handler refuses every verb. The enabled handler below exposes the
+    // narrow existing-local-project recovery form, but a disabled deployment must still answer a
+    // permanent named refusal rather than pretending the operation succeeded.
     expect(await serverEditionControlHandler({ verb: 'open-project' })).toEqual({
       ok: false,
       error: CONTROL_UNSUPPORTED_ERROR,
@@ -173,6 +173,7 @@ describe('the Server Edition wires it at boot', () => {
 
 describe('the enabled Server Edition handler parses and dispatches the v1 surface', () => {
   const actions = () => ({
+    openProject: vi.fn(async () => ({ ok: true as const, result: { projectId: 'project-loop' } })),
     openTerminal: vi.fn(async () => ({ ok: true as const, result: { id: 'term-new' } })),
     openAgent: vi.fn(async () => ({ ok: true as const, result: { id: 'agent-new' } })),
     close: vi.fn(async () => ({ ok: true as const, result: { id: 'closed' } })),
@@ -205,6 +206,20 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
       handler({ verb: 'open-agent', nodeId: 'term-source', args: {}, verified: true })
     ).resolves.toEqual({ ok: false, error: 'open-agent requires --agent <id>' })
     expect(a.openAgent).not.toHaveBeenCalled()
+
+    await expect(
+      handler({
+        verb: 'open-project',
+        nodeId: 'term-source',
+        args: { cwd: '/srv/loop' },
+        verified: true
+      })
+    ).resolves.toMatchObject({ ok: true })
+    expect(a.openProject).toHaveBeenCalledWith(
+      'term-source',
+      { cwd: '/srv/loop' },
+      true
+    )
 
     await expect(
       handler({
@@ -308,7 +323,7 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
 
   it('keeps every deferred or unknown verb a clean permanent edition refusal', async () => {
     const handler = createServerEditionControlHandler(actions())
-    for (const verb of ['list', 'browser', 'open-project', 'write', 'not-a-verb']) {
+    for (const verb of ['list', 'browser', 'write', 'not-a-verb']) {
       const reply = await handler({ verb, nodeId: 'term-source', args: {}, verified: true })
       expect(reply, verb).toMatchObject({ ok: false, error: CONTROL_UNSUPPORTED_ERROR })
       expect(reply.message, verb).toContain('do not retry')
