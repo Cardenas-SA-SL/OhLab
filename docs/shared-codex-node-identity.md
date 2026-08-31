@@ -119,9 +119,16 @@ Ownership resolution reuses the merged fail-closed posture (`pane-ownership.ts`,
 
 ## The POSIX-sh resolver
 
-`codexThreadIdentityResolverSh(root)` is prepended to every managed hook script. A shared-app-server
-tool shell inherits `CODEX_THREAD_ID` but not the pane's `NODETERM_*` (see probe U5,
-`docs/superpowers/probes/2026-08-codex-tool-shell-env.md`), so this prelude recovers the binding:
+`codexThreadIdentityResolverSh(root)` is prepended to every managed hook script and to both LOCAL
+agent shims (`nodeterm.sh` and `context.sh`) before their early environment gates. A
+shared-app-server tool shell inherits `CODEX_THREAD_ID` but not the pane's `NODETERM_*` (see probe
+U5, `docs/superpowers/probes/2026-08-codex-tool-shell-env.md`), so this prelude recovers the binding.
+Without it, Codex hook status worked while canvas control and linked-context reads misdiagnosed the
+same first-class node as being outside nodeterm. The machine-neutral shim constants copied to SSH
+hosts deliberately omit the local record path; each local installer builds its own copy with its
+own `codexThreadIdentityRoot()`.
+
+The resolver:
 
 - reads `NODETERM_CODEX_ACCOUNT_ID` from the daemon env to pick the scope;
 - a known safe account id ⇒ reads **only** that account's record, and requires the record's

@@ -181,6 +181,13 @@ that file advertises presents nothing forever when the file is old or unreadable
 hook script alone could heal itself, the same node proved itself through one client and was refused
 through another for the life of the session.
 
+**Local generated sh clients recover shared-Codex identity before their env gate.** A Codex tool
+shell is forked by the account-scoped app-server, so it has `CODEX_THREAD_ID` but not the pane's
+`NODETERM_*`. Managed hooks, local `nodeterm.sh`, and local `context.sh` must prepend
+`codexThreadIdentityResolverSh(codexThreadIdentityRoot())` before checking `NODETERM_NODE_ID` or
+`NODETERM_CANVAS_CONTROL`. Keep the SSH shim constants machine-neutral: baking the desktop/server
+record path into a remote host is both wrong and a local-layout leak.
+
 **A stream error is not a throw you can catch.** When a write to `process.stdout`/`stderr` fails —
 `EPIPE` down a closed pipe, `EIO` after macOS revokes a closed terminal's tty — node reports it by
 emitting `'error'` on the stream a tick later, and the default for an unhandled `'error'` event is

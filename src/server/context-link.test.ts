@@ -3,7 +3,14 @@
 // parsing, the local/remote split) are core's and are covered by src/core/context-link.handler.test.ts —
 // what is tested here is the wiring that was missing server-side.
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest'
-import { existsSync, mkdtempSync, promises as fsPromises, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  promises as fsPromises,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deriveLinkMap, initServerContextLink } from './context-link'
@@ -150,6 +157,9 @@ describe('initServerContextLink', () => {
     // Without this registration the hook server answers every read with
     // "Context link is unavailable in this session." — the whole desktop-only symptom.
     expect(registered).toBe(true)
+    const shimBody = readFileSync(join(dir, 'context-links', 'context.sh'), 'utf8')
+    expect(shimBody).toContain('CODEX_THREAD_ID')
+    expect(shimBody).toContain(join(dir, 'codex-thread-nodes'))
     await link.refresh()
     const out = await handler({ verb: 'list', nodeId: 'term-a', args: {} })
     expect(out).toContain('Beta')

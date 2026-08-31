@@ -1076,6 +1076,14 @@ else, and its context links must keep classifying across restarts).
     layout by construction on all three surfaces) and then the well-known data dirs; it is monotone
     — advertised dir first, keyed by node-id filename in every candidate, and a foreign instance's
     dir yields a foreign `kid` = `legacy` = exactly what presenting nothing already gave.
+  - **Every LOCAL generated sh client recovers shared-Codex identity before its env gate.** A tool
+    shell forked by the account-scoped app-server carries `CODEX_THREAD_ID`, not the pane's
+    `NODETERM_*`. Managed hooks, local `nodeterm.sh`, and local `context.sh` therefore prepend
+    `codexThreadIdentityResolverSh(codexThreadIdentityRoot())` before testing
+    `NODETERM_NODE_ID`/`NODETERM_CANVAS_CONTROL`. Before this was shared, status hooks recovered the
+    node while both user-facing shims declared that same first-class Codex session outside
+    nodeterm. The SSH constants remain machine-neutral: the local record root is not valid on a
+    remote host and must never be baked into its copy.
   - **Every generated sh client walks the SAME endpoint failover** (`nt_candidates`/`nt_adopt`,
     `core/agents/hook-endpoint-failover-sh.ts`) — issue #445, the endpoint-level twin of #384: a
     session is pinned for life to the endpoint PATH it got at tmux creation, so an app
