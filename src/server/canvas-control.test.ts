@@ -140,16 +140,30 @@ describe('initServerCanvasControl', () => {
       verified: true
     })
     expect(opened).toMatchObject({ ok: true })
+    const openedId = (opened.result as { id: string }).id
     expect(sendText.mock.calls.at(-1)?.[1]).toBe(
       "nodeterm-codex 'identity proof' --ask-for-approval on-request"
     )
 
-    // Prove ownership so the next gate reached is specifically the per-project capability switch.
-    recordFreshSpawnOwner('target', 'p1')
+    const unowned = await runtime.handler({
+      verb: 'send',
+      nodeId: 'source',
+      args: { node: 'target', text: 'must not land' },
+      verified: true
+    })
+    expect(unowned).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('caller-not-owner')
+    })
+    expect(paneOwner).not.toHaveBeenCalled()
+
+    // Prove pane ownership for the caller's own spawn so the next gate reached is specifically the
+    // per-project capability switch.
+    recordFreshSpawnOwner(openedId, 'p1')
     const reply = await runtime.handler({
       verb: 'send',
       nodeId: 'source',
-      args: { node: 'target', text: 'hello' },
+      args: { node: openedId, text: 'hello' },
       verified: true
     })
     expect(reply).toMatchObject({
@@ -211,11 +225,11 @@ describe('initServerCanvasControl', () => {
       createHeadless: vi.fn(async () => ({ sessionId: 'unused', fresh: true })),
       captureSession: vi.fn(async () =>
         pasted ? `Claude composer\n${pasted.split('\n').at(-1)}` : 'Claude composer'),
-      sendText: vi.fn(async (_nodeId: string, text: string, opts?: { enter?: boolean }) => {
+      sendText: vi.fn(async (nodeId: string, text: string, opts?: { enter?: boolean }) => {
         writes.push({ text, enter: opts?.enter })
         if (text) pasted = text
         else queueMicrotask(() => runtime?.onAgentEvent({
-          nodeId: 'target',
+          nodeId,
           agentId: 'claude',
           kind: 'state',
           state: 'working',
@@ -238,17 +252,6 @@ describe('initServerCanvasControl', () => {
       hasLiveSession: () => true
     } as unknown as PtyManager
 
-    recordFreshSpawnOwner('target', 'p1')
-    expect(writeNodeTokenFile('target', 'token')).toBe(true)
-    recordAgentEvent({
-      nodeId: 'target',
-      agentId: 'claude',
-      kind: 'state',
-      state: 'done',
-      verified: true,
-      clientRevision: MANAGED_SCRIPT_REVISION
-    } as never)
-
     runtime = await initServerCanvasControl({
       workspaceStore: store,
       ptyManager: pty,
@@ -257,10 +260,31 @@ describe('initServerCanvasControl', () => {
       installAgentIntegrations: false
     })
 
+    const opened = await runtime.handler({
+      verb: 'open-agent',
+      nodeId: 'source',
+      args: { agent: 'claude', prompt: 'owned target' },
+      verified: true
+    })
+    expect(opened).toMatchObject({ ok: true })
+    const targetId = (opened.result as { id: string }).id
+    writes.length = 0
+    pasted = ''
+    recordFreshSpawnOwner(targetId, 'p1')
+    expect(writeNodeTokenFile(targetId, 'token')).toBe(true)
+    recordAgentEvent({
+      nodeId: targetId,
+      agentId: 'claude',
+      kind: 'state',
+      state: 'done',
+      verified: true,
+      clientRevision: MANAGED_SCRIPT_REVISION
+    } as never)
+
     const reply = await runtime.handler({
       verb: 'send',
       nodeId: 'source',
-      args: { node: 'target', text: 'hello' },
+      args: { node: targetId, text: 'hello' },
       verified: true
     })
     expect(reply).toMatchObject({ ok: true, message: expect.stringContaining('delivered') })

@@ -292,6 +292,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     'starts with `--` (`--cmd=--version`); written as two tokens, a leading `--` is read as the next',
     'flag. A flag with no value is allowed anywhere on the line.',
     '',
+    'Server Edition ownership is fail-closed: every request requires verified node identity, and',
+    'a caller may mutate or message only nodes it opened during the current server run.',
+    'Restarting the server clears that creator proof; persisted nodes and queued launches are never',
+    'auto-adopted, relaunched, or controlled at boot. An unowned target receives a named refusal.',
+    '',
     'Verbs:',
     '- `list` — current nodes (id, kind, title). Start here when you need a node id.',
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]` — open N plain terminals.',
@@ -331,7 +336,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `link --to <id,id> [--from <id>]` — context-link nodes so each can READ the other\'s transcript',
     '  on demand (nodeterm linked-context CLI). `--from` defaults to you; nothing is pushed into the',
     '  linked sessions. Agent sessions you open are linked to you automatically — use `link` for nodes',
-    '  you did not open, or to link two OTHER nodes together.',
+    '  you did not open, or to link two OTHER nodes together. On Server Edition the ownership rule',
+    '  is stricter: every endpoint must be a node you opened during this server run.',
     '- `verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--synthesis off]` — open a',
     '  review panel over that node\'s work: one reviewer per lens, each armed behind the target and linked',
     '  to it, plus a judge armed behind the panel that merges the findings into one verdict. Reviewers are',
@@ -346,11 +352,12 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `rename --node <id> --title "New Name"` — rename any node (terminals, groups, stickies…).',
     `- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.`,
     '- `write --node <id> --text "..."` / `close --node <id>` — type into / close a node.',
-    '  Desktop asks the user to confirm both. Server Edition close is narrower: only nodes this',
-    '  caller opened during the current server run can be closed, and those close without a dialog;',
-    '  every other target receives a named ownership refusal.',
+    '  Desktop asks the user to confirm both. Server Edition is narrower: close requires a node this',
+    '  caller opened during the current server run, and all node-mutating verbs (link/group/rename/',
+    '  color/sticky update) accept only current-run creations; every other',
+    '  target receives a named ownership refusal before any partial mutation.',
     '- `send --node <id> --text "..."` / `reply --node <id> --text "..."` — deliver a message into',
-    '  another AGENT node in this project (no confirm dialog: verified-only, gated by the project\'s',
+    '  an AGENT node the caller opened this run (no confirm dialog: verified-only, gated by the project\'s',
     '  agent-messaging switch — off by default — and rate-limited). A busy target is not interrupted',
     '  and does not lose the message: it is queued (bounded, TTL\'d) and delivered when the target',
     '  next goes idle. An incoming message is framed `--- NODETERM MESSAGE <nonce> ---` with a `reply-to:`',
@@ -637,6 +644,11 @@ starts with \`--\` (\`--cmd=--version\`); written as two tokens, a leading \`--\
 next flag, so \`--text --oops\` sends an empty \`--text\` plus a stray \`--oops\`. A flag with no
 value is allowed anywhere on the line, not only at the end.
 
+Server Edition ownership is fail-closed: every request requires verified node identity, and a
+caller may mutate or message only nodes it opened during the current server run. Restarting
+the server clears that creator proof; persisted nodes and queued launches are never auto-adopted,
+relaunched, or controlled at boot. An unowned target receives a named refusal.
+
 Verbs:
 - \`list\` — list current nodes (id, kind, title). Start here when you need a node id.
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]\` — open N plain terminals (default 1).
@@ -698,6 +710,8 @@ Verbs:
   pushed into the linked sessions — reading is on demand, so linking never interrupts anyone.
   Agent sessions you open (\`open-claude\`/\`open-agent\`/\`spawn-team\`) are linked to you
   automatically; use \`link\` for nodes you did not open, or to link two OTHER nodes together.
+  On Server Edition the ownership rule is stricter: every endpoint must be a node you opened
+  during this server run.
 - \`verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--agent <id>] [--synthesis off] [--label L]\` —
   open a review PANEL over that node's work: one reviewer per lens, each armed behind the target
   (they start when it goes idle) and linked to it so they can read what it actually did, plus a
@@ -722,10 +736,11 @@ Verbs:
 - \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id>\` — close a node. Desktop asks the user to confirm. Server Edition closes
-  only nodes this caller opened during the current server run, without a dialog; every other
-  target receives a named ownership refusal.
-- \`send --node <id> --text "..."\` — deliver a message INTO another agent node's session, in this
-  project only. No confirm dialog; instead it is verified-only, gated by the project's
+  only nodes this caller opened during the current server run, without a dialog. Its other
+  node-mutating verbs (link/group/rename/color/sticky update) likewise accept only current-run
+  creations, and refuse the whole request before any partial mutation.
+- \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
+  this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's
   agent-messaging switch (Settings → Agents, OFF by default), and rate-limited. Delivery lands when
   the target is idle at its prompt; a BUSY target is never interrupted and does not lose the
   message — it is held in a bounded, TTL'd per-target queue and delivered when the target next goes

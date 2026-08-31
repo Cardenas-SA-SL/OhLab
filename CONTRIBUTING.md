@@ -107,6 +107,19 @@ reporting "no sessions" on a host running thirty.
 never a substituted nearest match. A hand-editable value that is unrecognised must yield the safe
 default, never something more destructive than the default.
 
+**A Server Edition agent owns only nodes it freshly opened in this server run.** The
+creator ledger is process-local and must never be rebuilt from `.nodeterm/project.json`, titles,
+hook history, or a surviving tmux name: all are writable or stale. A restart therefore clears
+ownership, performs no node/session adoption, and leaves durable queued launches dormant. Metadata
+mutations and message delivery validate every target before writing anything; missing proof is a
+named refusal. Validate Server upgrades against a disposable data directory and port. Restarting a
+shared live service is
+an explicit operator action, never a test or an automatic repair step.
+
+**A plain terminal is not a Claude node.** It may carry the generic node/endpoint wiring needed for
+a hand-launched agent to report hooks, but it gets no `NODETERM_AGENT_ID` and no
+`NODETERM_CANVAS_CONTROL` until the serialized node explicitly names an agent.
+
 **Re-validate hand-editable values at the point of use**, not by their TypeScript type. Settings
 come from git-shared JSON and can end up interpolated into a shell command line.
 

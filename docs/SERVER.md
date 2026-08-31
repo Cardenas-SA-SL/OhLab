@@ -480,24 +480,22 @@ Consequences worth knowing:
   announces a new link cannot quote the shim path. The boot-installed instructions cover
   discovery independently.
 
-**Deliberate scope skips (Phase 3b):**
+**Deliberate scope and feature-gate differences:**
 
 - The SDK **chat node** is still **deferred** — it is not wired into the server bridge.
-- **Canvas-control** (`agent:control`, the Claude-only `nodeterm` CLI verbs) is **not
-  wired** over the server, and since the strict-verb work it says so **by name**:
-  `/control/<verb>` answers HTTP 400 with `error: control-unsupported-on-this-edition`
-  and a sentence containing the literal *"do not retry"*. The old generic
-  `control unavailable` read to an agent like a transient outage, and an agent retries an
-  outage. `browser` additionally names why it is **structural** rather than unimplemented —
+- **Canvas-control** (`agent:control`) is opt-in on the Server Edition. With the feature disabled,
+  `/control/<verb>` answers HTTP 400 with `error: control-unsupported-on-this-edition` and a
+  sentence containing the literal *"do not retry"*. With it enabled, only the bounded v1 verbs
+  described below are wired; every other verb receives the same named permanent refusal.
+  `browser` additionally names why it is **structural** rather than unimplemented —
   a browser node on this edition renders in the **viewer's own** browser tab, which this
   server has no debugger for, and never can. The whole `browser` drive set shipped over
   S8 (nav/read/click/type/press/scroll/wait/screenshot/cookies) is therefore **desktop-only**:
   it needs Electron's `<webview>` + CDP, which this edition has none of, so there is no
   browser driving here at all. See `src/server/control-unsupported.ts`.
-  The agent-messaging verbs (`send`/`reply`/`notify`) are additionally **verified-only at
-  the route** on every edition, so on this one an unverified caller gets the flat 403
-  messaging refusal and a verified caller gets the same
-  `control-unsupported-on-this-edition` — both terminal, neither an invitation to retry.
+  The agent-messaging verbs (`send`/`reply`/`notify`) are verified-only. When Server control is
+  enabled they additionally require process-local proof that the caller spawned the target in this
+  run; with control disabled they receive `control-unsupported-on-this-edition`.
 - The **`ptyDestroy` tail-teardown** — *resolved in Phase 3c.* Phase 3b left this skipped
   (agent tails self-cleared only on `SessionEnd`, so a node closed *without* one left an
   idle file-tail); the server now untracks agent tails on node close, at desktop parity.
@@ -522,12 +520,33 @@ desktop parity on agent-tail cleanup and first-connect behavior:
   boots the app into a broken/blank state — the bridge shows the standard reconnect overlay
   and the app reloads on reopen, so first-load failure now behaves like a mid-session drop.
 
-**Still deferred** (unchanged from Phase 3b): the SDK **chat node**, **canvas-control**
-(`agent:control` / the `nodeterm` CLI verbs — now a *named, non-retryable* refusal rather
-than a generic failure, see above), full **two-master flow-control coordination**
+**Still deferred:** the SDK **chat node**, full
+**two-master flow-control coordination**
 (the server still re-asserts its WS backpressure pause on each send rather than co-managing
 a single actuator with the renderer), and the web folder picker's **hardcoded start
 directory**.
+
+### Opt-in canvas control and creator ownership
+
+Server canvas control is disabled by default. Set `NODETERM_SERVER_CANVAS_CONTROL=1` (or pass
+`--canvas-control`) to install the Server-local shim and enable its `/control/*` implementation.
+Every enabled request requires verified node identity.
+
+Ownership is intentionally narrower than the desktop confirmation UI: an agent may mutate, message,
+or close only a node it opened during the current Server process run. Link, group, rename, color,
+sticky updates, dependency targets, message delivery, and close validate their complete target set
+before any write or PTY kill; an unowned member refuses the whole operation. Queued messages repeat
+the creator check at flush time in addition to the existing verified and per-project switch gates.
+
+The creator ledger is memory-only and is never reconstructed from a project file, title, hook
+record, or tmux session name. After a service restart it is empty, and boot performs no canvas-node
+or terminal-session adoption: it does not attach-or-create missing backends and does not send a
+persisted queued command even when a tmux backend survived. A later explicit owner open or browser
+view is the only cold-spawn path. Plain terminals carry no agent identity or canvas-control grant;
+missing `agentId` never means Claude.
+
+Validate upgrades with a disposable `NODETERM_DATA_DIR` and port. Restarting a shared live Server
+service is an explicit operator action; it is not part of a test, repair, or boot-rescue flow.
 
 ### Managed Claude accounts
 

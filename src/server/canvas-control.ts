@@ -163,6 +163,8 @@ export async function initServerCanvasControl(
     messagingEnabled: messagingEnabledVia((projectId) =>
       deps.workspaceStore.capabilityProjectFor(projectId)),
     paneOwnerProject,
+    callerOwnsTarget: (sourceNodeId, targetNodeId) =>
+      factory.ownsSpawn(sourceNodeId, targetNodeId),
     customAgents: () => deps.settings().customAgents,
     appendBoardLog: (projectId, entry) => deps.boardLog.append(projectId, entry)
   }
@@ -181,10 +183,13 @@ export async function initServerCanvasControl(
     rename: (sourceNodeId, args) => factory.rename(sourceNodeId, args),
     color: (sourceNodeId, args) => factory.color(sourceNodeId, args),
     sticky: (sourceNodeId, args) => factory.sticky(sourceNodeId, args),
+    // `runDelivery` applies caller→target creator proof before any pane probe or write, and
+    // re-applies it when a queued delivery flushes.
     deliver: async (input) => (await deliverFromControl(input, messaging)).reply
   }
 
-  // Re-adopt any durable server-owned `--after` launch with no browser connected.
+  // Boot deliberately performs no canvas/session adoption. Creator proof is process-local and a
+  // restart clears it, so an owner request or browser view is the only cold-spawn authority.
   await factory.start()
 
   return {

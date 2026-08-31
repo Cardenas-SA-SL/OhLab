@@ -16,7 +16,12 @@ import {
   type Settings,
   type Workspace
 } from '../shared/types'
-import { HeadlessNodeFactory, type HeadlessPty } from './headless-node-factory'
+import {
+  createHeadlessNodeOwnership,
+  HeadlessNodeFactory,
+  type HeadlessNodeOwnership,
+  type HeadlessPty
+} from './headless-node-factory'
 
 class FakePty implements HeadlessPty {
   readonly creates: PtyCreateOptions[] = []
@@ -34,6 +39,10 @@ class FakePty implements HeadlessPty {
     this.creates.push(options)
     if (options.persistKey) this.live.add(options.persistKey)
     return { sessionId: `pty-${options.persistKey}`, fresh: true, persistent: true }
+  }
+
+  async sessionExists(persistKey: string): Promise<boolean> {
+    return this.live.has(persistKey)
   }
 
   async sendText(nodeId: string, text: string): Promise<boolean> {
@@ -84,6 +93,7 @@ describe('HeadlessNodeFactory', () => {
   let removed: string[]
   let publishedProjects: Workspace['projects']
   let factory: HeadlessNodeFactory
+  let ownership: HeadlessNodeOwnership
   let codexSharedIdentity: boolean
 
   const settings = (): Settings => ({
@@ -105,6 +115,15 @@ describe('HeadlessNodeFactory', () => {
     removed = []
     publishedProjects = []
     codexSharedIdentity = false
+    ownership = createHeadlessNodeOwnership()
+    ownership.record('term-upstream', {
+      sourceNodeId: 'term-source',
+      projectId: 'project-1'
+    })
+    ownership.record('term-owned', {
+      sourceNodeId: 'term-source',
+      projectId: 'project-1'
+    })
     const initial: Workspace = {
       version: 2,
       activeProjectId: 'project-1',
@@ -115,7 +134,11 @@ describe('HeadlessNodeFactory', () => {
           color: '#0a84ff',
           cwd: projectDir,
           viewport: { x: 0, y: 0, zoom: 1 },
-          nodes: [terminal('term-source', 'Director'), terminal('term-upstream', 'Upstream', 'codex', 80)],
+          nodes: [
+            terminal('term-source', 'Director'),
+            terminal('term-upstream', 'Upstream', 'codex', 80),
+            terminal('term-owned', 'Owned', 'gemini', 900)
+          ],
           bridges: [],
           ropes: []
         }
@@ -133,6 +156,7 @@ describe('HeadlessNodeFactory', () => {
         sessionIdFlag: false
       }),
       codexSharedIdentity: async () => codexSharedIdentity,
+      ownership,
       stateOf: (id) => states[id],
       publishNode: (_projectId, node) => published.push(node),
       publishRemoval: (_projectId, nodeId) => removed.push(nodeId),
@@ -350,36 +374,98 @@ describe('HeadlessNodeFactory', () => {
     expect(pty.destroys).toEqual([])
   })
 
-  it('links the caller to an existing node, persists the read graph, and fans out without writing to a pane', async () => {
+  it('refuses every node mutation against an unowned target without a partial write or spawn', async () => {
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push(
+      terminal('term-foreign', 'Foreign', 'claude', 900),
+      {
+        id: 'sticky-foreign',
+        kind: 'sticky',
+        position: { x: 1200, y: 30 },
+        size: { width: 240, height: 200 },
+        title: 'Foreign note',
+        color: '#ffd60a',
+        group: null,
+        text: 'do not touch'
+      }
+    )
+    await store.save(workspace)
+    const before = structuredClone((await store.load({ sideline: false })).projects[0])
+
+    const replies = [
+      await factory.link('term-source', { to: 'term-foreign' }, true),
+      await factory.group('term-source', { nodes: 'term-source,term-foreign' }),
+      await factory.rename('term-source', { node: 'term-foreign', title: 'Stolen' }),
+      await factory.color('term-source', { node: 'term-foreign', color: '#32d74b' }),
+      await factory.sticky('term-source', { node: 'sticky-foreign', append: 'stolen' }),
+      await factory.openAgent(
+        'term-source',
+        { agent: 'claude', after: 'term-foreign', prompt: 'wait on foreign work' },
+        true
+      )
+    ]
+
+    expect(replies.map((reply) => reply.ok)).toEqual([false, false, false, false, false, false])
+    expect(replies.map((reply) => reply.error)).toEqual([
+      expect.stringContaining('link-not-owner'),
+      expect.stringContaining('group-not-owner'),
+      expect.stringContaining('rename-not-owner'),
+      expect.stringContaining('color-not-owner'),
+      expect.stringContaining('sticky-not-owner'),
+      expect.stringContaining('open-agent-not-owner')
+    ])
+    expect((await store.load({ sideline: false })).projects[0]).toEqual(before)
+    expect(pty.creates).toEqual([])
+    expect(pty.sends).toEqual([])
+    expect(published).toEqual([])
+    expect(publishedProjects).toEqual([])
+  })
+
+  it('refuses to close an owned frame if doing so would reparent an unowned child', async () => {
+    const opened = await factory.openTerminal('term-source', {}, true)
+    const ownedId = (opened.result as { id: string }).id
+    const grouped = await factory.group('term-source', { nodes: ownedId })
+    const groupId = (grouped.result as { groupId: string }).groupId
+    const workspace = await store.load({ sideline: false })
+    const foreign = terminal('term-foreign-child', 'Foreign child')
+    foreign.parentId = groupId
+    workspace.projects[0].nodes.push(foreign)
+    await store.save(workspace)
+    pty.destroys.length = 0
+
+    await expect(factory.close('term-source', { node: groupId }, true)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('close-not-owner')
+    })
+    expect(pty.destroys).toEqual([])
+    const after = (await store.load({ sideline: false })).projects[0]
+    expect(after.nodes.find((node) => node.id === groupId)).toBeDefined()
+    expect(after.nodes.find((node) => node.id === 'term-foreign-child')?.parentId).toBe(groupId)
+  })
+
+  it('refuses a default link endpoint because the caller did not spawn its own node', async () => {
     const reply = await factory.link('term-source', { to: 'term-upstream' }, true)
 
     expect(reply).toMatchObject({
-      ok: true,
-      result: { from: 'term-source', linked: ['term-upstream'], skipped: [] }
+      ok: false,
+      error: expect.stringContaining('link-not-owner')
     })
     expect(pty.sends).toEqual([])
     const workspace = await new WorkspaceStore().load({ sideline: false })
-    expect(workspace.projects[0].bridges).toEqual([
-      {
-        id: 'bridge-term-source-term-upstream',
-        source: 'term-source',
-        target: 'term-upstream'
-      }
-    ])
+    expect(workspace.projects[0].bridges).toEqual([])
     const projectFile = JSON.parse(
       fs.readFileSync(path.join(projectDir, '.nodeterm', 'project.json'), 'utf8')
     ) as { bridges?: Array<{ source: string; target: string }> }
-    expect(projectFile.bridges).toEqual([
-      expect.objectContaining({ source: 'term-source', target: 'term-upstream' })
-    ])
+    expect(projectFile.bridges).toEqual([])
     expect(published).toEqual([])
-    expect(publishedProjects.at(-1)?.bridges).toEqual(workspace.projects[0].bridges)
+    expect(publishedProjects).toEqual([])
   })
 
   it('links two arbitrary existing nodes in the caller project', async () => {
     const workspace = await store.load({ sideline: false })
     workspace.projects[0].nodes.push(terminal('term-third', 'Third', 'gemini', 900))
     await store.save(workspace)
+    ownership.record('term-third', { sourceNodeId: 'term-source', projectId: 'project-1' })
 
     await expect(
       factory.link('term-source', { from: 'term-upstream', to: 'term-third' }, true)
@@ -429,14 +515,14 @@ describe('HeadlessNodeFactory', () => {
     const before = (await store.load({ sideline: false })).projects[0]
     const beforePositions = new Map(before.nodes.map((node) => [node.id, node.position]))
     const reply = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       label: 'Director team'
     })
     expect(reply).toMatchObject({
       ok: true,
       result: {
         groupId: expect.stringMatching(/^group-/),
-        grouped: ['term-source', 'term-upstream'],
+        grouped: ['term-upstream', 'term-owned'],
         skipped: 0
       }
     })
@@ -445,7 +531,7 @@ describe('HeadlessNodeFactory', () => {
     const group = project.nodes.find((node) => node.id === groupId)!
     expect(project.nodes[0]).toMatchObject({ id: groupId, kind: 'group' })
     expect(group.title).toBe('Director team')
-    for (const id of ['term-source', 'term-upstream']) {
+    for (const id of ['term-upstream', 'term-owned']) {
       const child = project.nodes.find((node) => node.id === id)!
       expect(child.parentId).toBe(groupId)
       expect({
@@ -454,7 +540,7 @@ describe('HeadlessNodeFactory', () => {
       }).toEqual(beforePositions.get(id))
     }
     expect(published.map((node) => node.id)).toEqual(
-      expect.arrayContaining([groupId, 'term-source', 'term-upstream'])
+      expect.arrayContaining([groupId, 'term-upstream', 'term-owned'])
     )
     expect(publishedProjects.at(-1)?.nodes.find((node) => node.id === groupId)?.title).toBe(
       'Director team'
@@ -470,12 +556,12 @@ describe('HeadlessNodeFactory', () => {
 
   it('lets the creator close a nested frame only, promoting surviving members to its parent', async () => {
     const outerReply = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       label: 'Outer'
     })
     const outerId = (outerReply.result as { groupId: string }).groupId
     const innerReply = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       label: 'Inner'
     })
     const innerId = (innerReply.result as { groupId: string }).groupId
@@ -497,7 +583,7 @@ describe('HeadlessNodeFactory', () => {
       return { x, y }
     }
     const rootsBefore = new Map(
-      ['term-source', 'term-upstream'].map((id) => [id, root(before, id)])
+      ['term-upstream', 'term-owned'].map((id) => [id, root(before, id)])
     )
     published.length = 0
     publishedProjects.length = 0
@@ -511,21 +597,21 @@ describe('HeadlessNodeFactory', () => {
     const after = (await new WorkspaceStore().load({ sideline: false })).projects[0]
     expect(after.nodes.some((node) => node.id === innerId)).toBe(false)
     expect(after.nodes.some((node) => node.id === outerId)).toBe(true)
-    for (const id of ['term-source', 'term-upstream']) {
+    for (const id of ['term-upstream', 'term-owned']) {
       expect(after.nodes.find((node) => node.id === id)?.parentId).toBe(outerId)
       expect(root(after, id)).toEqual(rootsBefore.get(id))
     }
     expect(pty.destroys).toEqual([])
     expect(removed).toEqual([innerId])
     expect(published.map((node) => node.id)).toEqual(
-      expect.arrayContaining(['term-source', 'term-upstream'])
+      expect.arrayContaining(['term-upstream', 'term-owned'])
     )
     expect(publishedProjects.at(-1)?.nodes.some((node) => node.id === innerId)).toBe(false)
   })
 
   it('refuses a non-creator that tries to close a headless-created frame', async () => {
     const grouped = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream'
+      nodes: 'term-upstream,term-owned'
     })
     const groupId = (grouped.result as { groupId: string }).groupId
     publishedProjects.length = 0
@@ -573,7 +659,7 @@ describe('HeadlessNodeFactory', () => {
 
   it('applies a validated palette color when creating a group', async () => {
     const reply = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       label: 'Purple team',
       color: '#bf5af2'
     })
@@ -591,7 +677,7 @@ describe('HeadlessNodeFactory', () => {
 
   it('recolors a node, frame, and sticky with persistence and fanout but no PTY write', async () => {
     const grouped = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       label: 'Color targets'
     })
     const groupId = (grouped.result as { groupId: string }).groupId
@@ -607,6 +693,7 @@ describe('HeadlessNodeFactory', () => {
       text: 'ready'
     })
     await store.save(workspace)
+    ownership.record('sticky-color', { sourceNodeId: 'term-source', projectId: 'project-1' })
     published.length = 0
     publishedProjects.length = 0
 
@@ -641,7 +728,7 @@ describe('HeadlessNodeFactory', () => {
 
   it('refuses invalid group and recolor values by name without persistence or fanout', async () => {
     await expect(factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       color: 'var(--danger)'
     })).resolves.toMatchObject({
       ok: false,
@@ -678,8 +765,10 @@ describe('HeadlessNodeFactory', () => {
     workspace.projects[0].nodes.unshift(frame)
     workspace.projects[0].nodes.push(child)
     await store.save(workspace)
+    ownership.record('group-existing', { sourceNodeId: 'term-source', projectId: 'project-1' })
+    ownership.record('term-inside', { sourceNodeId: 'term-source', projectId: 'project-1' })
 
-    for (const nodes of ['term-inside,term-source', 'group-existing,term-inside']) {
+    for (const nodes of ['term-inside,term-upstream', 'group-existing,term-inside']) {
       await expect(factory.group('term-source', { nodes })).resolves.toMatchObject({
         ok: false,
         error: expect.stringContaining('siblings in one container')
@@ -695,7 +784,7 @@ describe('HeadlessNodeFactory', () => {
 
   it('renames a node, group, and sticky durably without ever writing into their panes', async () => {
     const grouped = await factory.group('term-source', {
-      nodes: 'term-source,term-upstream',
+      nodes: 'term-upstream,term-owned',
       label: 'Old group'
     })
     const groupId = (grouped.result as { groupId: string }).groupId
@@ -711,6 +800,7 @@ describe('HeadlessNodeFactory', () => {
       text: 'ready'
     })
     await store.save(workspace)
+    ownership.record('sticky-status', { sourceNodeId: 'term-source', projectId: 'project-1' })
     published.length = 0
     publishedProjects.length = 0
 
@@ -799,6 +889,65 @@ describe('HeadlessNodeFactory', () => {
       agentId: agent
     })
     expect(pty.sends.at(-1)).toEqual({ nodeId: id, text: command })
+  })
+
+  it('never cold-spawns a persisted arm during boot reconciliation', async () => {
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push({
+      ...terminal('term-dormant', 'Dormant'),
+      pendingLaunch: {
+        after: [],
+        command: "claude 'must stay dormant'",
+        executor: 'server'
+      }
+    })
+    await store.save(workspace)
+
+    const load = vi.spyOn(store, 'load')
+    await factory.start()
+
+    expect(load).not.toHaveBeenCalled()
+    expect(pty.creates).toEqual([])
+    expect(pty.sends).toEqual([])
+    load.mockRestore()
+    expect((await store.load({ sideline: false })).projects[0].nodes
+      .find((node) => node.id === 'term-dormant')?.pendingLaunch).toBeDefined()
+  })
+
+  it('does not adopt or control a persisted arm even when its backend survived', async () => {
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push({
+      ...terminal('term-survivor', 'Survivor'),
+      pendingLaunch: {
+        after: [],
+        command: "claude 'resume owned work'",
+        executor: 'server'
+      }
+    })
+    await store.save(workspace)
+    pty.live.add('term-survivor')
+
+    await factory.start()
+
+    expect(pty.creates).toEqual([])
+    expect(pty.sends).toEqual([])
+    expect((await store.load({ sideline: false })).projects[0].nodes
+      .find((node) => node.id === 'term-survivor')?.pendingLaunch).toBeDefined()
+  })
+
+  it('does not grant a plain shell Claude control authority by default', async () => {
+    const workspace = await store.load({ sideline: false })
+    workspace.projects[0].nodes.push({
+      ...terminal('term-plain', 'Plain shell'),
+      agentId: undefined
+    })
+    await store.save(workspace)
+
+    await expect(factory.openTerminal('term-plain', {}, true)).resolves.toEqual({
+      ok: false,
+      error: 'source node is not a control-capable agent'
+    })
+    expect(pty.creates).toEqual([])
   })
 
   it('routes a Codex launch through the managed launcher when Server shared identity is ready', async () => {

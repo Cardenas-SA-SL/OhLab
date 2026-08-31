@@ -47,6 +47,8 @@ export interface ServerControlReply {
 /** The PtyManager surface the headless factory uses, kept narrow for deterministic tests. */
 export interface HeadlessPty {
   createHeadless(options: PtyCreateOptions): Promise<PtyCreateResult>
+  /** Probe only. Boot reconciliation must never turn absence into a fresh session. */
+  sessionExists(persistKey: string): Promise<boolean>
   sendText(nodeId: string, text: string, opts?: { enter?: boolean }): Promise<boolean>
   destroySession(
     clientId: number | null,
@@ -75,6 +77,35 @@ export interface HeadlessNodeFactoryDeps {
   publishProject?: (project: Project) => void
   schedule?: (cb: () => void, ms: number) => ReturnType<typeof setTimeout>
   clearSchedule?: (timer: ReturnType<typeof setTimeout>) => void
+  /** Injectable only so tests can seed creator facts; production uses a fresh process-local ledger. */
+  ownership?: HeadlessNodeOwnership
+}
+
+export interface HeadlessNodeOwner {
+  sourceNodeId: string
+  projectId: string
+}
+
+export interface HeadlessNodeOwnership {
+  ownerOf(nodeId: string): HeadlessNodeOwner | undefined
+  record(nodeId: string, owner: HeadlessNodeOwner): void
+  forget(nodeId: string): void
+  clear(): void
+}
+
+/**
+ * Creator proof for Server Edition canvas mutations. Deliberately process-local: after a service
+ * restart, a git-shared/hand-editable project file cannot reassert who created a node. Unknown
+ * ownership therefore fails closed until this server run records a fresh agent-requested spawn.
+ */
+export function createHeadlessNodeOwnership(): HeadlessNodeOwnership {
+  const owners = new Map<string, HeadlessNodeOwner>()
+  return {
+    ownerOf: (nodeId) => owners.get(nodeId),
+    record: (nodeId, owner) => owners.set(nodeId, owner),
+    forget: (nodeId) => owners.delete(nodeId),
+    clear: () => owners.clear()
+  }
 }
 
 const TERMINAL_LIMIT = 8
@@ -138,15 +169,17 @@ function sourceProject(workspace: Workspace, nodeId: string): { project: Project
 function effectiveAgentId(
   node: CanvasNodeState,
   runtimeAgentId: ((nodeId: string) => string | undefined) | undefined
-): AgentId {
-  return (node.agentId || runtimeAgentId?.(node.id) || 'claude') as AgentId
+): AgentId | undefined {
+  const id = node.agentId || runtimeAgentId?.(node.id)
+  return id ? (id as AgentId) : undefined
 }
 
 function sourceCanControl(
   node: CanvasNodeState,
   runtimeAgentId: ((nodeId: string) => string | undefined) | undefined
 ): boolean {
-  return canControlCanvas(effectiveAgentId(node, runtimeAgentId))
+  const agentId = effectiveAgentId(node, runtimeAgentId)
+  return !!agentId && canControlCanvas(agentId)
 }
 
 function absolutePosition(project: Project, node: CanvasNodeState): { x: number; y: number } {
@@ -450,7 +483,7 @@ export class HeadlessNodeFactory {
   private serial: Promise<unknown> = Promise.resolve()
   private attached = new Set<string>()
   /** Process-local proof that a caller created a node during THIS Server Edition run. */
-  private spawnedBy = new Map<string, { sourceNodeId: string; projectId: string }>()
+  private ownership: HeadlessNodeOwnership
   /** Fresh server-spawned agents that have not emitted their first real working turn yet. */
   private awaitingFirstWorking = new Set<string>()
   /**
@@ -464,7 +497,9 @@ export class HeadlessNodeFactory {
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private stopped = false
 
-  constructor(private readonly deps: HeadlessNodeFactoryDeps) {}
+  constructor(private readonly deps: HeadlessNodeFactoryDeps) {
+    this.ownership = deps.ownership ?? createHeadlessNodeOwnership()
+  }
 
   private runExclusive<T>(work: () => Promise<T>): Promise<T> {
     const run = this.serial.then(work, work)
@@ -493,6 +528,30 @@ export class HeadlessNodeFactory {
 
   private publish(project: Project, nodes: readonly CanvasNodeState[]): void {
     this.publishChangeSet(project, nodes, [])
+  }
+
+  /** Literal creator ownership: a caller may act only on nodes it freshly spawned this run. */
+  ownsSpawn(sourceNodeId: string, nodeId: string): boolean {
+    return this.ownership.ownerOf(nodeId)?.sourceNodeId === sourceNodeId
+  }
+
+  /** A verified caller may mutate only a node it freshly created during this server run. */
+  private ownsMutation(sourceNodeId: string, nodeId: string): boolean {
+    return this.ownsSpawn(sourceNodeId, nodeId)
+  }
+
+  /** All-or-nothing ownership gate: validate every id before any canvas or session mutation. */
+  private unownedMutation(sourceNodeId: string, nodeIds: readonly string[]): string | undefined {
+    return nodeIds.find((nodeId) => !this.ownsMutation(sourceNodeId, nodeId))
+  }
+
+  private ownershipRefusal(verb: string, sourceNodeId: string, nodeId: string): ServerControlReply {
+    return {
+      ok: false,
+      error:
+        `${verb}-not-owner: ${sourceNodeId} may modify only nodes it spawned during this server ` +
+        `run; ${nodeId} was not spawned by this caller`
+    }
   }
 
   private projectGranted(sourceNodeId: string, projectId: string): boolean {
@@ -555,7 +614,7 @@ export class HeadlessNodeFactory {
       const node = project.nodes.find((candidate) => candidate.id === id)
       if (!node) return { ok: false, error: `${verb}: --after names no existing node (${id})` }
       const agentId = effectiveAgentId(node, this.deps.agentIdOf)
-      if (!hasHooks(agentId)) {
+      if (!agentId || !hasHooks(agentId)) {
         return {
           ok: false,
           error: `${verb}: --after ${id} is not an agent session that reports when it is done`
@@ -685,7 +744,7 @@ export class HeadlessNodeFactory {
       // refusal, never a partial destructive success whose surviving ids the caller must guess.
       const frameIds = new Set<string>()
       for (const id of ids) {
-        const ownership = this.spawnedBy.get(id)
+        const ownership = this.ownership.ownerOf(id)
         if (!ownership || ownership.sourceNodeId !== sourceNodeId) {
           return {
             ok: false,
@@ -693,7 +752,15 @@ export class HeadlessNodeFactory {
           }
         }
         const project = workspace.projects.find((candidate) => candidate.id === ownership.projectId)
-        if (project?.nodes.find((node) => node.id === id)?.kind === 'group') frameIds.add(id)
+        const target = project?.nodes.find((node) => node.id === id)
+        if (target?.kind === 'group') {
+          const unownedChild = this.unownedMutation(
+            sourceNodeId,
+            project!.nodes.filter((node) => node.parentId === id).map((node) => node.id)
+          )
+          if (unownedChild) return this.ownershipRefusal('close', sourceNodeId, unownedChild)
+          frameIds.add(id)
+        }
       }
 
       // Kill terminal panes first: the durable canvas must never lose a session whose outcome is
@@ -708,7 +775,7 @@ export class HeadlessNodeFactory {
       const removedByProject = new Map<Project, string[]>()
       const changedByProject = new Map<Project, Map<string, CanvasNodeState>>()
       for (const id of ids) {
-        const projectId = this.spawnedBy.get(id)!.projectId
+        const projectId = this.ownership.ownerOf(id)!.projectId
         const project = workspace.projects.find((candidate) => candidate.id === projectId)
         const target = project?.nodes.find((node) => node.id === id)
         if (!project || !target) continue
@@ -744,7 +811,7 @@ export class HeadlessNodeFactory {
       }
 
       for (const id of ids) {
-        this.spawnedBy.delete(id)
+        this.ownership.forget(id)
         this.attached.delete(id)
         this.awaitingFirstWorking.delete(id)
         this.retryCount.delete(id)
@@ -798,6 +865,8 @@ export class HeadlessNodeFactory {
           }
         }
       }
+      const unowned = this.unownedMutation(sourceNodeId, [from, ...targets])
+      if (unowned) return this.ownershipRefusal('link', sourceNodeId, unowned)
 
       const byId = new Map(source.project.nodes.map((node) => [node.id, node]))
       if (!byId.has(from)) {
@@ -854,6 +923,8 @@ export class HeadlessNodeFactory {
       }
 
       const ids = (args.nodes ?? '').split(',').map((id) => id.trim()).filter(Boolean)
+      const unowned = this.unownedMutation(sourceNodeId, ids)
+      if (unowned) return this.ownershipRefusal('group', sourceNodeId, unowned)
       const resolvable = ids.filter((id) => source.project.nodes.some((node) => node.id === id))
       if (!resolvable.length) {
         return { ok: false, error: 'group: none of the given node ids exist' }
@@ -875,7 +946,7 @@ export class HeadlessNodeFactory {
 
       source.project.nodes = grouped.nodes
       await this.deps.workspaceStore.save(workspace)
-      this.spawnedBy.set(grouped.groupId, {
+      this.ownership.record(grouped.groupId, {
         sourceNodeId,
         projectId: source.project.id
       })
@@ -911,6 +982,9 @@ export class HeadlessNodeFactory {
       }
       const target = source.project.nodes.find((node) => node.id === id)
       if (!target) return { ok: false, error: `rename: no node with id ${id}` }
+      if (!this.ownsMutation(sourceNodeId, id)) {
+        return this.ownershipRefusal('rename', sourceNodeId, id)
+      }
 
       const title = oneLine(args.title ?? '')
       const renamed = { ...target, title, titleAuto: false }
@@ -938,6 +1012,8 @@ export class HeadlessNodeFactory {
       }
 
       const ids = [...new Set((args.node ?? '').split(',').map((id) => id.trim()).filter(Boolean))]
+      const unowned = this.unownedMutation(sourceNodeId, ids)
+      if (unowned) return this.ownershipRefusal('color', sourceNodeId, unowned)
       const changed = ids
         .map((id) => source.project.nodes.find((node) => node.id === id))
         .filter((node): node is CanvasNodeState => !!node)
@@ -973,6 +1049,12 @@ export class HeadlessNodeFactory {
           : new Set(['agent', 'count', 'cwd', 'prompt', 'after', 'project', 'model'])
       )
       if (flagError) return { ok: false, error: `${verb}: ${flagError}` }
+      if (!verified) {
+        return {
+          ok: false,
+          error: `${verb}-identity-refused: Server Edition ${verb} requires verified node identity`
+        }
+      }
 
       const workspace = await this.deps.workspaceStore.load({ sideline: false })
       const source = sourceProject(workspace, sourceNodeId)
@@ -984,6 +1066,8 @@ export class HeadlessNodeFactory {
       if ('ok' in target) return target
       const after = this.resolveAfter(target, args.after, verb)
       if (!Array.isArray(after)) return after
+      const unownedAfter = this.unownedMutation(sourceNodeId, after)
+      if (unownedAfter) return this.ownershipRefusal(verb, sourceNodeId, unownedAfter)
 
       const settings = this.deps.settings()
       const nodeSize = terminalSize(settings)
@@ -1095,13 +1179,14 @@ export class HeadlessNodeFactory {
 
         if (verb === 'open-agent') {
           const sourceAgent = effectiveAgentId(source.node, this.deps.agentIdOf)
-          if (canContextLink(sourceAgent) && canContextLink(agentId as AgentId)) {
+          if (sourceAgent && canContextLink(sourceAgent) && canContextLink(agentId as AgentId)) {
             addEdge(bridges, source.node.id, id, 'link')
           }
           for (const depId of after) {
             const dep = target.nodes.find((candidate) => candidate.id === depId)
-            if (dep && canContextLink(effectiveAgentId(dep, this.deps.agentIdOf)) &&
-              canContextLink(agentId as AgentId)) addEdge(bridges, id, depId, 'link')
+            const depAgent = dep ? effectiveAgentId(dep, this.deps.agentIdOf) : undefined
+            if (depAgent && canContextLink(depAgent) && canContextLink(agentId as AgentId))
+              addEdge(bridges, id, depId, 'link')
           }
         }
       }
@@ -1111,7 +1196,7 @@ export class HeadlessNodeFactory {
       target.bridges = bridges
       await this.deps.workspaceStore.save(workspace)
       for (const node of created) {
-        this.spawnedBy.set(node.id, { sourceNodeId, projectId: target.id })
+        this.ownership.record(node.id, { sourceNodeId, projectId: target.id })
       }
       this.publish(target, created)
 
@@ -1197,6 +1282,9 @@ export class HeadlessNodeFactory {
         }
       }
       if (!node) return { ok: false, error: 'sticky: note disappeared while resolving it' }
+      if (!created && !this.ownsMutation(sourceNodeId, node.id)) {
+        return this.ownershipRefusal('sticky', sourceNodeId, node.id)
+      }
 
       const write = applyStickyWrite(node.text ?? '', parsed.write)
       if ('error' in write) return { ok: false, error: `sticky: ${write.error}` }
@@ -1205,7 +1293,7 @@ export class HeadlessNodeFactory {
       node.textUpdatedBy = source.node.title || source.node.id
       await this.deps.workspaceStore.save(workspace)
       if (created) {
-        this.spawnedBy.set(node.id, { sourceNodeId, projectId: source.project.id })
+        this.ownership.record(node.id, { sourceNodeId, projectId: source.project.id })
       }
       this.publish(source.project, [node])
       return {
@@ -1216,9 +1304,13 @@ export class HeadlessNodeFactory {
     })
   }
 
-  /** Reattach persisted server-owned armed nodes at boot, then fire anything already satisfied. */
+  /**
+   * Boot is intentionally inert. Creator proof is process-local and empty after restart, so even
+   * sending a persisted command would control a session this process cannot attribute. Owner opens
+   * and browser views are the only cold-spawn authority; current-run agent events drive arms below.
+   */
   start(): Promise<void> {
-    return this.refreshArmed()
+    return Promise.resolve()
   }
 
   onAgentEvent(event: Pick<NormalizedAgentEvent, 'nodeId' | 'state'>): void {
@@ -1237,6 +1329,9 @@ export class HeadlessNodeFactory {
         for (const node of project.nodes) {
           const pending = node.pendingLaunch
           if (!pending || pending.executor !== 'server' || !pending.command) continue
+          // A persisted arm surviving a restart is data, not creator proof. Only a node freshly
+          // spawned for this caller during the current run may receive automatic input.
+          if (!this.ownership.ownerOf(node.id)) continue
           const markChanged = (): void => {
             const list = changedByProject.get(project) ?? []
             if (!list.includes(node)) list.push(node)
@@ -1253,14 +1348,6 @@ export class HeadlessNodeFactory {
             if (!(observed?.state === 'working' && observed.nodeId === depId))
               this.awaitingFirstWorking.add(depId)
           }
-          try {
-            const result = await this.attach(project, node)
-            if (!result.sessionId) continue
-          } catch {
-            this.scheduleRetry(node.id)
-            continue
-          }
-
           const ready = pending.after.every((depId) => {
             const stillExists = project.nodes.some((candidate) => candidate.id === depId)
             if (!stillExists) return true
@@ -1270,6 +1357,13 @@ export class HeadlessNodeFactory {
               : this.deps.stateOf(depId) === 'done'
           })
           if (!ready) continue
+          // `sessionExists` is a probe, whereas `createHeadless` is attach-or-create. Never call
+          // the latter from boot/event reconciliation: a dead node stays dormant until its owner
+          // explicitly opens it or a user views it. A probe failure also stays dormant because an
+          // unreadable backend is not proof that delivery is safe.
+          const live = this.attached.has(node.id) ||
+            await this.deps.ptyManager.sessionExists(node.id).catch(() => false)
+          if (!live) continue
           if (!(await this.deps.ptyManager.sendText(node.id, pending.command))) {
             this.scheduleRetry(node.id)
             continue
@@ -1311,7 +1405,7 @@ export class HeadlessNodeFactory {
     this.stopped = true
     for (const timer of this.retryTimers.values()) (this.deps.clearSchedule ?? clearTimeout)(timer)
     this.retryTimers.clear()
-    this.spawnedBy.clear()
+    this.ownership.clear()
     this.projectGrants.clear()
   }
 }

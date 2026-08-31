@@ -88,6 +88,12 @@ export interface AgentMessagingDeps {
    * refuse `unproven-target-owner`.
    */
   paneOwnerProject(nodeId: string): string | undefined
+  /**
+   * Optional shell-specific creator gate. Server Edition supplies its process-local caller→target
+   * proof so message delivery cannot type into a session the caller did not spawn. Desktop omits
+   * this because its control path remains user-confirmed. Checked on every queued flush too.
+   */
+  callerOwnsTarget?(sourceNodeId: string, targetNodeId: string): boolean
   customAgents(): readonly { id: string; launchCmd: string }[] | undefined
   appendBoardLog(projectId: string, entry: BoardLogEntry): Promise<boolean>
   /** Test seam: override the receipt subscription. Production uses the module bus below. */
@@ -293,6 +299,9 @@ const NOT_PERMITTED_TEXT: Record<NotPermittedReason, string> = {
   'self-send': 'a node cannot message itself.',
   'unsupported-edition': 'agent messaging does not exist on this edition.',
   'unaddressable-node-id': 'that node id cannot be addressed safely.',
+  'caller-not-owner':
+    'the sending agent did not spawn the target during this Server run, so it may not type into ' +
+    'or notify that session. This ownership refusal is permanent for this target.',
   'ambiguous-target-node-id':
     'that node id exists in more than one project, so the target pane cannot be attributed to a ' +
     'single project\'s messaging grant. De-duplicate the id (re-add the cloned folder to mint ' +
@@ -468,6 +477,10 @@ export async function runDelivery(
   const scope = resolveDeliveryScope(projects, req.sourceNodeId, req.targetNodeId)
   let notPermitted = scopeRefusal(scope)
   const projectId = scope.kind === 'same-project' ? scope.projectId : undefined
+  if (!notPermitted && deps.callerOwnsTarget &&
+      !deps.callerOwnsTarget(req.sourceNodeId, req.targetNodeId)) {
+    notPermitted = 'caller-not-owner'
+  }
   if (!notPermitted) {
     // OWNERSHIP IS PROVEN AT RUNTIME, NOT READ FROM THE STORE (PR #237 fix round 2). The scope
     // above resolved `projectId` from the persisted node-set, which is attacker-writable — a
@@ -499,10 +512,11 @@ export async function runDelivery(
   const owner = projects.find((p) => p.id === projectId)
   const sourceNode = owner?.nodes.find((n) => n.id === req.sourceNodeId)
   const targetNode = owner?.nodes.find((n) => n.id === req.targetNodeId)
-  // The spawn-time default (`options.agentId ?? 'claude'`), mirrored: a plain terminal node got
-  // the claude hook env at spawn, so its pane is judged against claude's binaries — and a bare
-  // shell in it still refuses as `targetNotAgentPane`.
-  const targetAgentId = targetNode?.agentId ?? 'claude'
+  // A plain terminal is not Claude by default. A hand-launched agent may still prove its runtime
+  // identity through a hook event; absent either stored or runtime evidence, the binary predicate
+  // receives an unknowable identity and refuses instead of guessing a provider.
+  const targetAgentId = targetNode?.agentId ??
+    (deps.mirrorEntry ?? coreMirrorEntry)(req.targetNodeId)?.agentId ?? ''
 
   const delivery: DeliveryDeps = {
     paneOwner: (id) => deps.paneOwner(id),

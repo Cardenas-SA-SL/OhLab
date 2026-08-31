@@ -147,6 +147,15 @@ export function createServerEditionControlHandler(actions: ServerEditionControlA
     }
     const command = parseControlRequest(verb, args)
     if ('error' in command) return { ok: false, error: command.error }
+    // Creator ownership is meaningful only for an authenticated node identity. Keep this at the
+    // Server boundary so every mutating/executing verb — including ones whose factory method has no
+    // `verified` parameter — fails before it can inspect or change shared state.
+    if (!verified) {
+      return {
+        ok: false,
+        error: `${command.verb}-identity-refused: Server Edition canvas control requires verified node identity`
+      }
+    }
 
     switch (command.verb) {
       case 'open-project':

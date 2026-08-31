@@ -131,13 +131,12 @@ export function needsLiveCanvas(verb: string): boolean {
 /**
  * The capability half of the guard: may a session in this node drive the canvas?
  *
- * The empty/absent default MIRRORS pty-manager's spawn-time default (`options.agentId ?? 'claude'`):
- * a plain terminal node received the claude hook env at spawn, so a manual `claude` there holds
- * NODETERM_CANVAS_CONTROL — rejecting it here would contradict the env it was handed.
+ * Plain terminals are not agent nodes. Treating missing identity as Claude made a bare shell look
+ * control-capable and let recovery code relabel it as an agent. A hand-launched CLI is still
+ * observable through its runtime hooks, but the serialized node does not gain agent authority.
  */
 export function sourceIsControlCapable(agentId: unknown): boolean {
-  const id = typeof agentId === 'string' && agentId ? agentId : 'claude'
-  return canControlCanvas(id as AgentId)
+  return typeof agentId === 'string' && agentId.length > 0 && canControlCanvas(agentId as AgentId)
 }
 
 /**

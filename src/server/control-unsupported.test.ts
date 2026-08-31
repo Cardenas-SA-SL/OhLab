@@ -236,6 +236,32 @@ describe('the enabled Server Edition handler parses and dispatches the v1 surfac
     )
   })
 
+  it('refuses every enabled verb at the handler boundary when creator identity is unverified', async () => {
+    const a = actions()
+    const handler = createServerEditionControlHandler(a)
+
+    await expect(handler({
+      verb: 'group',
+      nodeId: 'term-source',
+      args: { nodes: 'term-source,term-target' },
+      verified: false
+    })).resolves.toEqual({
+      ok: false,
+      error: 'group-identity-refused: Server Edition canvas control requires verified node identity'
+    })
+    await expect(handler({
+      verb: 'open-terminal',
+      nodeId: 'term-source',
+      args: {},
+      verified: false
+    })).resolves.toEqual({
+      ok: false,
+      error: 'open-terminal-identity-refused: Server Edition canvas control requires verified node identity'
+    })
+    expect(a.group).not.toHaveBeenCalled()
+    expect(a.openTerminal).not.toHaveBeenCalled()
+  })
+
   it('routes messaging without trusting a notify body', async () => {
     const a = actions()
     const handler = createServerEditionControlHandler(a)

@@ -369,6 +369,8 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
       // Plain shells still inherit the user's ordinary process environment; the gateway neither
       // overwrites it nor emits an explicit tmux session value.
       expect(spawnArgs[0].env.ANTHROPIC_AUTH_TOKEN).toBe('preexisting-shell-token')
+      expect(spawnArgs[0].env.NODETERM_AGENT_ID).toBeUndefined()
+      expect(spawnArgs[0].env.NODETERM_CANVAS_CONTROL).toBeUndefined()
       expect(spawnArgs[0].args.join(' ')).not.toContain('vk-secret')
       expect(spawnArgs[0].args.join(' ')).not.toContain('bifrost.example.test')
     } finally {

@@ -114,6 +114,21 @@ describe('deliverFromControl', () => {
     expect(deps.rec.sent).toEqual([])
   })
 
+  it('revalidates an injected caller-to-target creator gate before touching the pane', async () => {
+    const owns = vi.fn(() => false)
+    const deps = fakeDeps({ callerOwnsTarget: owns })
+    const { outcome, reply } = await deliverFromControl(req(), deps)
+
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'caller-not-owner' })
+    expect(reply).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('caller-not-owner')
+    })
+    expect(owns).toHaveBeenCalledWith('a1', 'b1')
+    expect(deps.rec.paneOwnerCalls).toEqual([])
+    expect(deps.rec.sent).toEqual([])
+  })
+
   it('refuses a cross-project target and a self-send, resolved off the store', async () => {
     const deps = fakeDeps()
     const cross = await deliverFromControl(req({ targetNodeId: 'c2' }), deps)
@@ -391,6 +406,33 @@ describe('deliver-on-idle wiring (PR 7)', () => {
     )
     await vi.waitFor(() => expect(queue.depth('b1')).toBe(0))
     expect(flushed).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a queued send if caller ownership is gone before the idle flush', async () => {
+    let owns = true
+    const busy: MirrorEntry = {
+      state: 'working',
+      updatedAt: 1,
+      stateVerified: true,
+      clientRevision: MANAGED_SCRIPT_REVISION
+    }
+    const deps = fakeDeps({
+      mirrorEntry: () => busy,
+      callerOwnsTarget: () => owns
+    })
+    const queue = createDeliveryQueue(deps, { schedule: () => () => {} })
+    deps.queue = queue
+
+    expect((await deliverFromControl(req(), deps)).outcome.kind).toBe('queued')
+    expect(queue.depth('b1')).toBe(1)
+    owns = false
+
+    onMessagingAgentEvent(
+      { nodeId: 'b1', state: 'done', verified: true, newTurn: false },
+      queue
+    )
+    await vi.waitFor(() => expect(queue.depth('b1')).toBe(0))
+    expect(deps.rec.sent).toEqual([])
   })
 
   it('without a queue, the same busy target is refused `targetBusy` (old behaviour intact)', async () => {

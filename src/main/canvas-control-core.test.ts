@@ -342,6 +342,16 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('both agent-facing texts state the Server creator-ownership and inert-boot contract', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('ownership is fail-closed')
+      expect(body).toContain('verified node identity')
+      expect(body).toContain('current server run')
+      expect(body).toMatch(/never[\s\S]*auto-adopted[\s\S]*relaunched[\s\S]*controlled at boot/)
+      expect(body).toContain('before any partial mutation')
+    }
+  })
+
   it('renders the RETRYABLE table — the table is the source, not a re-typed copy', () => {
     const body = buildCanvasSkillBody('/x/shim.sh')
     const yesAt = body.indexOf('Worth retrying')
