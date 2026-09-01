@@ -602,7 +602,13 @@ interface GrokPayload {
   reason?: string
   /** StopFailure only: the closed error class tested by its matcher. */
   error?: string
-  /** PreCompact/PostCompact only: `manual` or `auto`. */
+  /** PreCompact/PostCompact only: `manual` or `auto`. MEASURED on grok 1.0.13 (2026-09-01): the
+   *  wire spells this `source`; `trigger` is Claude's spelling and never appears in a grok payload.
+   *  Both are read because the SDK path may still present the Claude-shaped key, and reading a key
+   *  that never arrives costs nothing — while reading only `trigger` cost us every compaction
+   *  event: the guard below rejected 100% of real ones while the docs-derived test payloads,
+   *  which carried `trigger`, kept it green. */
+  source?: string
   trigger?: string
   /** Events fired inside a subagent use its type as identity; there is no measured instance id. */
   subagentType?: string
@@ -729,7 +735,7 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
     }
   }
   if (ev === 'precompact' || ev === 'postcompact') {
-    const trigger = grokCanonical(p.trigger)
+    const trigger = grokCanonical(p.source ?? p.trigger)
     if (trigger !== 'manual' && trigger !== 'auto') return null
     return {
       ...base,
