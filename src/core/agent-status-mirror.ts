@@ -389,7 +389,45 @@ export interface MirrorInbox {
  * Pure reducer: fold one event into a node's entry, mirroring the renderer store's MAIN-state
  * semantics. Returns the next entry (never mutates `prev`). `now` is injected for testability.
  */
+function resolveGrokStopCancelled(ev: NormalizedAgentEvent): NormalizedAgentEvent {
+  if (
+    ev.agentId !== 'grok' ||
+    ev.kind !== 'state' ||
+    ev.state !== undefined ||
+    !ev.cancelReason ||
+    ev.subagentType !== undefined
+  ) {
+    return ev
+  }
+
+  // Grok 1.0.13's `10-hooks.md:336,348,354,384` makes this a CLOSED session-level decision.
+  // A subagent cancellation is returned above because ending its card must not end the parent
+  // session. Unknown reasons stay identity-only: guessing `done` could turn a future cancel-and-send
+  // dialect into a false completion while the agent is still working.
+  switch (ev.cancelReason) {
+    case 'user_interrupt':
+      return { ...ev, state: 'done', interrupted: true }
+    case 'permission_rejected':
+    case 'permission_cancelled':
+    case 'max_turns':
+    case 'no_progress':
+      // These end the turn, but are not an Esc/Ctrl-C. Keeping them non-interrupted makes the
+      // non-successful terminal outcome visible instead of suppressing its completion edge.
+      return { ...ev, state: 'done' }
+    case 'unknown':
+      return ev
+  }
+}
+
 export function reduceEntry(
+  prev: MirrorEntry | undefined,
+  ev: NormalizedAgentEvent,
+  now: number
+): MirrorEntry {
+  return reduceEffectiveEntry(prev, resolveGrokStopCancelled(ev), now)
+}
+
+function reduceEffectiveEntry(
   prev: MirrorEntry | undefined,
   ev: NormalizedAgentEvent,
   now: number
@@ -1339,18 +1377,19 @@ interface NeedsYouClassification {
  *    STRIPPED — so TerminalNode's `blocked && pendingId` gate never renders approve/deny on a
  *    question (field report: the buttons showed during an AskUserQuestion);
  *  - a genuine `approval` gains `askKind:'approval'` and keeps its `pendingId` unchanged.
- * Every other event (working / done / session / subagent / recurring) passes through untouched
- * (same reference). Internal behavior — inbox production, live-update seams, disk writes — is
- * unchanged; this only affects what the caller then broadcasts. Called with EVERY normalized event
- * by both shells.
+ * Grok's state-less `StopCancelled` is projected here too, so the state folded into this mirror is
+ * the same state both shells broadcast; subagent/unknown cancellations retain their original
+ * identity-only event. Every other event passes through untouched (same reference). Called with
+ * EVERY normalized event by both shells.
  */
-export function recordAgentEvent(ev: NormalizedAgentEvent): NormalizedAgentEvent {
-  if (!ev?.nodeId) return ev
+export function recordAgentEvent(rawEvent: NormalizedAgentEvent): NormalizedAgentEvent {
+  if (!rawEvent?.nodeId) return rawEvent
+  const ev = resolveGrokStopCancelled(rawEvent)
   const nodeId = ev.nodeId
   const now = Date.now()
   const prev = state.get(nodeId)
   const prevState = prev?.state
-  const next = reduceEntry(prev, ev, now)
+  const next = reduceEffectiveEntry(prev, ev, now)
   state.set(nodeId, next)
   // reduceEntry held an unanswered `request_user_input` through its turn-end `done` — rewrite
   // the broadcast to what the reducer decided, so every consumer (canvas store, notch, phone)

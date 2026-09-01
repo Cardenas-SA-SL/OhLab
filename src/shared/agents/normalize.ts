@@ -73,6 +73,18 @@ export interface NormalizedAgentEvent {
   // subagent
   toolUseId?: string
   subagentType?: string
+  // grok StopCancelled only: normalized state-less so the mirror can make the session-aware badge
+  // decision (a subagent cancellation must not end its parent session).
+  cancelReason?:
+    | 'user_interrupt'
+    | 'permission_rejected'
+    | 'permission_cancelled'
+    | 'max_turns'
+    | 'no_progress'
+    | 'unknown'
+  // grok compaction lifecycle. These events carry the old/new session ids but do not themselves
+  // prove the agent is working or idle, so consumers may update identity without moving state.
+  compactionPhase?: 'pre' | 'post'
   taskLabel?: string
   durationMs?: number
   tokens?: number
@@ -455,9 +467,9 @@ export function normalizeGemini(env: RawHookEnvelope): NormalizedAgentEvent | nu
     //
     // A CLOSED match, not a substring: the docs name exactly ONE type (reference.md:278), and an
     // unknown future one must stay a no-op — a badge that sticks on a finished node is a failure
-    // this codebase has shipped before. Grok is the cautionary tale: there
-    // `type.includes('permission')` turned a notification that fires before every tool call into a
-    // strobing NEEDS YOU. Widening this "to be safe" is the unsafe direction.
+    // this codebase has shipped before. Grok is the cautionary tale: there, a substring match on
+    // "permission" turned a notification that fires before every tool call into a strobing NEEDS
+    // YOU. Widening this "to be safe" is the unsafe direction.
     //
     // Nothing here can be answered from our side: the hook is observability only and its
     // flow-control fields are ignored (reference.md:284-285), so this reports state and no more —
@@ -586,32 +598,17 @@ interface GrokPayload {
    *  `notificationType ?? notification_type ?? type` (`src/shared/agent-hook-listener.ts:2370-2376`).
    *  Reading a key a shipped integration reads costs nothing and closes a whole dialect. */
   type?: string
-  /** Notification only: the human-readable status line. Orca reads it as a bare `message`
-   *  (`agent-hook-listener.ts:3973`) — one spelling, so no dual read here — and grok's idle state is
-   *  detectable ONLY from it (see GROK_IDLE_MESSAGES). */
-  message?: string
-  /** Notification only: severity. Orca reads a bare `level` (`agent-hook-listener.ts:3975`) and uses
-   *  it to tell grok's routine per-tool permission prompt (`info`) from a louder one. */
-  level?: string
   /** Stop only: 'end_turn' for a genuine turn end; 'channel_closed'/'shutdown' at session close. */
   reason?: string
+  /** StopFailure only: the closed error class tested by its matcher. */
+  error?: string
+  /** PreCompact/PostCompact only: `manual` or `auto`. */
+  trigger?: string
+  /** Events fired inside a subagent use its type as identity; there is no measured instance id. */
+  subagentType?: string
+  subagent_type?: string
   prompt?: string
 }
-
-/**
- * Fragments of a grok `Notification` MESSAGE that mean "sat at the prompt, nothing running".
- *
- * Provenance: orca's `isGrokIdleNotification` (`/root/orca-main/src/shared/agent-hook-listener.ts:2391-2402`,
- * MIT), matched case-insensitively as substrings of the message — grok states its idle prompt in
- * prose ("Type your message…", "shift-tab normal mode"), not with a notification TYPE. This list is
- * therefore INFERRED from another integration's reader, not measured here: no grok binary was run.
- */
-const GROK_IDLE_MESSAGES = [
-  'type your message',
-  'enter send',
-  'shift-tab normal',
-  'ask a side question'
-] as const
 
 /**
  * ONE canonicalization for every grok VALUE we compare — lowercase, letters only, so all of
@@ -621,6 +618,24 @@ const GROK_IDLE_MESSAGES = [
  * how a value gets normalized in one branch and matched raw in another.
  */
 const grokCanonical = (v: string | undefined): string => (v ?? '').toLowerCase().replace(/[^a-z]/g, '')
+
+const GROK_STOP_FAILURE_TYPES = new Set([
+  'ratelimit',
+  'authenticationfailed',
+  'invalidrequest',
+  'servererror',
+  'maxoutputtokens',
+  'unknown'
+])
+
+const GROK_CANCEL_REASONS: Record<string, NonNullable<NormalizedAgentEvent['cancelReason']>> = {
+  userinterrupt: 'user_interrupt',
+  permissionrejected: 'permission_rejected',
+  permissioncancelled: 'permission_cancelled',
+  maxturns: 'max_turns',
+  noprogress: 'no_progress',
+  unknown: 'unknown'
+}
 
 /** Canonical form of a grok event name: 'pre_tool_use', 'PreToolUse' and 'preToolUse' all → 'pretooluse'. */
 const grokEventName = (p: GrokPayload): string =>
@@ -685,98 +700,76 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
       ? { ...base, kind: 'state', state: 'done', lastMessage }
       : { ...base, kind: 'state', state: 'done', interrupted: true }
   }
-  // The turn died on an API error — grok skips Stop entirely here, exactly as Claude does.
-  if (ev === 'stopfailure')
-    return { ...base, kind: 'state', state: 'done', errored: true, lastMessage }
-  if (ev === 'notification') {
-    // grok's Notification is the one event whose vocabulary we could not measure, and the three
-    // sources that describe it do not agree, so this mapping is deliberately safe in BOTH
-    // directions. Every line below cites where its words come from; all of it is INFERENCE — no
-    // grok binary was run on the machine that wrote it.
-    //  - orca (`/root/orca-main`, MIT, a shipping grok integration) names `permission_prompt`
-    //    plus prose messages (`agent-hook-listener.ts:2378-2402`).
-    //  - grok's own shipped docs name a different set entirely:
-    //    `turn_complete | approval_required | session_ready | task_complete | agent_error` — but see
-    //    the `approval_required` branch below: that list is the NOTIFICATION TRIGGER vocabulary
-    //    (`~/.grok/docs/user-guide/05-configuration.md:414`), not documented `notificationType` values.
-    // Everything unrecognized stays a deliberate NO-OP: same discipline as normalizeClaude, where an
-    // unknown future type sticking a badge on a finished node is the failure that has actually
-    // happened before.
-    //
-    // The type goes through `grokCanonical`, the SAME rule the event name uses — so the literals
-    // below are letters-only ('permission_prompt', 'permissionPrompt' and 'Permission-Prompt' all
-    // become 'permissionprompt'). This is not decoration: grok's envelope is documented camelCase
-    // throughout, so `permissionPrompt` is a plausible spelling, and comparing it raw would let it
-    // MISS the suppression below and fall through to the `includes('permission')` ask branch — i.e.
-    // reinstate the per-tool-call strobe in the one direction that hurts. Orca canonicalizes too, to
-    // snake_case (`normalizeHookEventName`, `agent-hook-listener.ts:2201-2210`); we reuse OUR one rule
-    // rather than adopting a second spelling convention into this file.
-    const type = grokCanonical(p.notificationType ?? p.notification_type ?? p.type)
-    // message/level are prose, not identifiers: trim + lowercase only, field-for-field as orca reads
-    // them (`:3973-3975`). Canonicalizing THESE would strip the spaces the phrases are made of.
-    const message = (p.message ?? '').trim().toLowerCase()
-    const level = (p.level ?? '').trim().toLowerCase()
-    // THE ROUTINE PER-TOOL PROMPT IS NOT A NEEDS-YOU. Orca's
-    // `isGrokRoutinePermissionPromptNotification` (`agent-hook-listener.ts:2378-2389`) suppresses it,
-    // comment verbatim: "Grok emits this before each tool even under bypassPermissions; PreToolUse
-    // already covers progress." Its regression test is
-    // `src/renderer/src/hooks/agent-hook-completion-notifications.test.ts:654`.
-    // Left unsuppressed, EVERY grok tool call would raise `blocked` here, and downstream that edge
-    // has no de-duplication: markUnread with no cooldown, the needs-you chime, an OS notification
-    // whenever the window is unfocused, and one phone inbox card per working→blocked edge.
-    // Matched exactly as orca matches it — the precise type, the precise message, and a level that
-    // is `info` or absent — so a LOUDER prompt (a real ask reusing the same type) still gets through.
-    if (
-      type === 'permissionprompt' &&
-      message === 'tool permission requested' &&
-      (!level || level === 'info')
-    ) {
-      return null
+  // The turn died on an API error — grok skips Stop entirely here, exactly as Claude does. The
+  // matcher vocabulary is closed in grok 1.0.13; a future value is a no-op rather than a guessed
+  // terminal state.
+  if (ev === 'stopfailure') {
+    if (!GROK_STOP_FAILURE_TYPES.has(grokCanonical(p.error))) return null
+    return { ...base, kind: 'state', state: 'done', lastMessage }
+  }
+  if (ev === 'permissiondenied') return { ...base, kind: 'state', state: 'working' }
+  if (ev === 'stopcancelled') {
+    const cancelReason = GROK_CANCEL_REASONS[grokCanonical(p.reason)]
+    if (!cancelReason) return null
+    // Transport the classified reason state-less: the mirror owns the session-aware transition
+    // and can ignore a subagent cancellation without losing session identity.
+    return {
+      ...base,
+      kind: 'state',
+      cancelReason,
+      subagentType: p.subagentType ?? p.subagent_type,
+      lastMessage
     }
-    // A genuine permission ask is a FAMILY of names ('permission_prompt', 'permission_request', …),
-    // and its worst case is a `blocked` badge the agent's next hook clears — so substring is the
-    // right trade.
-    // `approval_required` is INFERENCE ON INFERENCE, and is labelled that way deliberately: grok's
-    // docs name it only as a `[ui.notifications].events` TRIGGER (05-configuration.md:414), never as a
-    // `notificationType` value. The bridge is `10-hooks.md:153`, "the matcher tests … the notification
-    // type on `Notification`", which implies the type vocabulary is drawn from that same set. Weaker
-    // than the orca spelling above, and matched exactly for that reason — it costs nothing if wrong
-    // (an unused literal) and is the only thing that fires at all if grok's own words are the real ones.
-    if (type.includes('permission') || type === 'approvalrequired') {
+  }
+  if (ev === 'subagentstart' || ev === 'subagentstop') {
+    return {
+      ...base,
+      kind: ev === 'subagentstart' ? 'subagent-start' : 'subagent-end',
+      subagentType: p.subagentType ?? p.subagent_type
+    }
+  }
+  if (ev === 'precompact' || ev === 'postcompact') {
+    const trigger = grokCanonical(p.trigger)
+    if (trigger !== 'manual' && trigger !== 'auto') return null
+    return {
+      ...base,
+      kind: 'state',
+      compactionPhase: ev === 'precompact' ? 'pre' : 'post'
+    }
+  }
+  if (ev === 'notification') {
+    // Grok 1.0.13 publishes this CLOSED vocabulary in
+    // `~/.grok/docs/user-guide/10-hooks.md:99`: idle_prompt, permission_prompt, task_complete.
+    // `:162` is the load-bearing correction to the old orca-derived branch: permission_prompt fires
+    // ONLY while a permission UI is actually waiting, never routinely before every tool call.
+    // Exact classification prevents a future permission-like name from sticking NEEDS YOU with no
+    // later hook guaranteed to clear it.
+    const type = p.notificationType ?? p.notification_type ?? p.type
+    // NO ROUTINE-PROMPT SUPPRESSION HERE, and that is a measured decision rather than an omission.
+    //
+    // The old orca-derived branch dropped a `permission_prompt` whose message was exactly
+    // "Tool permission requested" at level `info`, because orca reports grok emitting one before
+    // EVERY tool call. Captured live on 1.0.13 (2026-09-01), the GENUINE prompt — fired with a real
+    // permission dialog on screen — is byte-for-byte that same triple:
+    //     notificationType 'permission_prompt' · message 'Tool permission requested' · level 'info'
+    // and no routine per-tool-call notification was emitted at all. So that filter cannot separate
+    // the routine case from a real ask on this version: it can only swallow the real one.
+    //
+    // Swallowing it is the worse of the two failures. A strobe is loud and obvious; a suppressed ask
+    // leaves grok waiting for approval with the node showing nothing, and no later hook is
+    // guaranteed to correct it. If a future grok does emit the routine prompt, it must be told apart
+    // by something that actually differs — not by a message the real ask also carries.
+    if (type === 'permission_prompt') {
       return { ...base, kind: 'state', state: 'blocked', lastMessage }
     }
-    // The asking types are a CLOSED set, exactly as in normalizeClaude, and for its reason: grok's
-    // vocabulary is claude-derived, and claude's `elicitation_complete` / `elicitation_response` are
-    // informational — they fire when an elicitation ENDS. A substring test on 'elicit' would match
-    // them and leave NEEDS YOU on a node that just finished, with no later hook to clear it.
-    //
-    // DELIBERATELY NOT setting `awaitingInput` here, and the omission is a bet either way. Codex's
-    // `request_user_input` ends its turn with the question still open (the answer arrives as a fresh
-    // UserPromptSubmit), so `normalizeCodex` marks the ask `awaitingInput` and `reduceEntry` holds
-    // `waiting` through the turn-end `done` — without it the node goes green over a session that is
-    // still waiting on the user. Whether grok's elicitation behaves the same way is UNMEASURED: if it
-    // does, grok has that bug; if it does not, setting the flag would hold NEEDS YOU on a node that
-    // genuinely finished, which is the worse of the two. So it stays off until someone watches a real
-    // grok elicitation cross a turn boundary — device checklist item 33.
-    if (type === 'elicitationdialog' || type === 'agentneedsinput') {
-      return { ...base, kind: 'state', state: 'waiting', lastMessage }
-    }
-    // Idle at the prompt: the RESCUE signal for a node stuck on `working`. grok fires no hook at all
-    // for an interrupted turn (Esc), so this is the only thing that can ever clear one — which is
-    // why it is keyed off the MESSAGE (GROK_IDLE_MESSAGES, per orca) and not off a type. A
-    // type-only test was dead code: neither source names an "idle" type.
-    // It is checked AFTER the ask branches on purpose, mirroring orca's own precedence
-    // (`agent-hook-listener.ts:3994-4012`: routine-suppress, then ask, then idle) — a payload that
-    // claims both an ask type and idle prose is asking, and a wrongly-cleared badge is the failure
-    // this whole branch exists to prevent. `type.includes('idle')` is kept as a belt-and-braces
-    // fallback for a message-less idle notification: unlike a substring test on an ASK word it can
-    // only ever CLEAR a badge, so a false positive costs a badge, never a stuck one.
-    if (GROK_IDLE_MESSAGES.some((m) => message.includes(m)) || type.includes('idle')) {
+    if (type === 'idle_prompt') {
       return { ...base, kind: 'state', state: 'done', interrupted: true, idle: true }
     }
+    // The spec names task_complete as a user-attention notification, but never says it ends a turn.
+    // Stop remains the documented turn-end signal, so task_complete and every future type are
+    // informational no-ops rather than guessed badge transitions.
     return null
   }
-  // Not subscribed in v1: PermissionDenied, SubagentStart/Stop, PreCompact/PostCompact.
   return null
 }
 

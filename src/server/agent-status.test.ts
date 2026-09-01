@@ -402,6 +402,32 @@ describe('wireAgentStatus — the grok raw-listener branch', () => {
     expect(grokSessionDirFor('gs-4')).toBeUndefined()
   })
 
+  it('replaces the old session association when PostCompact mints a new id', () => {
+    const fh = fakeHooks()
+    const ctx = recTail()
+    wireAgentStatus(platform, { hooks: fh.hooks as never, contextTail: ctx.tail as never })
+    fh.fireRaw('grok', 'g-compact', {
+      hookEventName: 'pre_compact',
+      sessionId: 'gs-before',
+      cwd: '/w/project'
+    })
+    expect(grokSessionDirFor('gs-before')).toBe(sessionDir('/w/project', 'gs-before'))
+
+    fh.fireRaw('grok', 'g-compact', {
+      hookEventName: 'post_compact',
+      sessionId: 'gs-after',
+      cwd: '/w/project'
+    })
+    expect(grokSessionDirFor('gs-before')).toBeUndefined()
+    expect(grokSessionDirFor('gs-after')).toBe(sessionDir('/w/project', 'gs-after'))
+
+    platform.cast(platform.attach({ sendText: () => {}, sendBinary: () => {} }), IPC.ptyDestroy, [
+      'g-compact'
+    ])
+    expect(ctx.calls.some((c) => c.m === 'untrack' && c.args[0] === 'gs-after')).toBe(true)
+    forgetGrokSession('gs-after')
+  })
+
   it('learns nothing rather than half a path when the cwd is not reconstructible', () => {
     const fh = fakeHooks()
     wireAgentStatus(platform, { hooks: fh.hooks as never, contextTail: recTail().tail as never })

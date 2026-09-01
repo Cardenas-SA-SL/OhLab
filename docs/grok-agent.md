@@ -83,12 +83,11 @@ another integration's reader, not from grok's own documentation.
 | turn-end reason | — | `reason` (`end_turn` \| `channel_closed` \| `shutdown`) | same |
 | also on every event | — | `timestamp`, `permissionMode` | same |
 
-† **The `Notification` payload is the one row with no documented source.** Grok's docs describe the
-event but not its body, so the three key spellings — plus the `message` and `level` fields the mapping
-in §5 reads — come from **orca** (`/root/orca-main`, MIT, a shipping grok integration):
-`notificationType ?? notification_type ?? type` at `src/shared/agent-hook-listener.ts:2370-2376`,
-`message`/`level` at `:3973-3975`. Treat every Notification claim in this document as inference from
-that reader until checklist **10** replaces it with a capture.
+† Grok 1.0.13 publishes the `Notification` type vocabulary as `idle_prompt`, `permission_prompt`,
+and `task_complete` (`~/.grok/docs/user-guide/10-hooks.md:99`), and states that
+`permission_prompt` fires only while a permission UI is actually waiting (`:162`). The payload key
+aliases remain defensive: file hooks use `notificationType`, the SDK uses `notification_type`, and
+the bare `type` fallback comes from orca's reader (`src/shared/agent-hook-listener.ts:2370-2376`).
 
 Consequences, in the order they bite:
 
@@ -108,30 +107,33 @@ Consequences, in the order they bite:
   adopting another node's name. `grokSessionDir` returns `null` (learn nothing) rather than half a
   path when either half is unusable.
 
-The nine subscribed events map as follows (`normalizeGrok`); everything else returns `null`, a
-deliberate no-op:
+All 15 events published by Grok 1.0.13 are subscribed. They map as follows (`normalizeGrok`);
+unrecognized values inside a closed matcher vocabulary return `null`, a deliberate no-op:
 
 | grok event | `NormalizedAgentEvent` | note |
 |---|---|---|
 | `SessionStart` / `SessionEnd` | session `start` / `end` | `SessionEnd` also drops the session's remembered directory |
 | `UserPromptSubmit` | `working`, `newTurn: true` | the turn start; `newTurn` is what clears per-turn fan-out once per turn |
 | `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | `working` | a **failed** tool is still mid-turn — grok fires `PostToolUseFailure` and carries on |
+| `PermissionDenied` | `working` | post-decision event: the denied tool did not end the turn, and the permission UI is no longer waiting |
 | `Stop` (`reason` anything but `channel_closed`/`shutdown`) | `done` + `lastMessage` | a **denylist**, not an allowlist of `end_turn`: `Stop` is the event the RUNNING badge depends on ending, so an unknown reason must fail towards reporting it |
 | `Stop` (`channel_closed` / `shutdown`) | `done`, `interrupted: true` | the observe-only second `Stop` at session close; `interrupted` suppresses the completion alert and unread dot, and the stale `lastAssistantMessage` is dropped |
 | `StopFailure` | `done` + `lastMessage` | fires **instead of** `Stop` when the turn dies on an API error — without it the badge sticks |
-| `Notification` `permission_prompt` + message `tool permission requested` + level `info`/absent | **nothing** (`null`) | grok emits this before **every** tool call, even under `bypassPermissions` (orca's `isGrokRoutinePermissionPromptNotification`, `agent-hook-listener.ts:2378-2389`). The type is canonicalized first (`grokCanonical`, the same letters-only rule the event name uses), so the camelCase spelling grok's envelope would plausibly carry — `permissionPrompt` — is suppressed too; comparing raw would drop it into the ask row below and reinstate the strobe. Mapping it to `blocked` fired `markUnread` with no cooldown, the needs-you chime, an OS notification per tool call while unfocused, and a phone inbox card per `working→blocked` edge. Matched exactly, so a **louder** prompt with the same type still gets through |
-| `Notification` `*permission*` / `approval_required` | `blocked` | substring for the permission family (its worst case is a badge the next hook clears), plus `approval_required` — which is **inference on inference**: `05-configuration.md:414` names it as a notification *trigger*, not as a `notificationType` value, and the bridge is `10-hooks.md:153` ("the matcher tests … the notification type on `Notification`"). Matched exactly for that reason. The two spellings share no substring, and matching both is what keeps this mapping from firing for nothing under either vocabulary |
-| `Notification` `elicitation_dialog` / `agent_needs_input` | `waiting` | a **closed set**, exactly as in `normalizeClaude`: a substring test on `elicit` would also match claude's informational `elicitation_complete`/`_response` and leave NEEDS YOU on a node that just finished, with no later hook to clear it |
-| `Notification` whose **message** reads idle (`type your message`, `enter send`, `shift-tab normal`, `ask a side question`; `*idle*` type as a fallback) | `done`, `interrupted`, `idle` | the **rescue** signal for a node stuck on `working` — see §8. Keyed on the MESSAGE because that is where grok states it (orca's `isGrokIdleNotification`, `:2391-2402`); a type-only test never fired, since no source names an "idle" type. Checked **after** the ask branches, mirroring orca's own precedence (`:3994-4012`) |
+| `StopCancelled` (`user_interrupt`, session-level) | `done`, `interrupted` | clears RUNNING without an ordinary completion alert/unread |
+| `StopCancelled` (`permission_rejected`, `permission_cancelled`, `max_turns`, `no_progress`) | `done` | visible non-interrupted terminal outcome; exact closed reasons only |
+| `StopCancelled` with `subagentType`, or reason `unknown` | **no state change** | a child stop is not the session stop; unknown stays no-op so a future busy/cancel dialect cannot become a false completion |
+| `Notification` `permission_prompt` | `blocked` | exact published type; Grok says it fires **only** while a permission UI is waiting (`10-hooks.md:162`) |
+| `Notification` `idle_prompt` | `done`, `interrupted`, `idle` | exact published type (`10-hooks.md:99`); reuses the mirror's `idleInferred` rescue, so it only clears `working` and cannot erase a live approval |
+| `Notification` `task_complete` | **nothing** (`null`) | published as a user-attention type, but the spec does not say it closes a turn; `Stop` remains the turn-end signal, so guessing `done` here would risk a false completion |
+| any other `Notification` type | **nothing** (`null`) | closed-set default: a future permission-like name must not leave a sticky NEEDS YOU badge |
+| `SubagentStart` / `SubagentStop` | subagent `start` / `end` | child lifecycle only; no invented instance id and no parent-session state transition (`SubagentEnd` is Grok's accepted alias of `SubagentStop`) |
+| `PreCompact` / `PostCompact` | compaction `pre` / `post` | no badge transition; the raw listener replaces the remembered session association when `PostCompact` carries the newly minted id |
 
 `Stop` fires **once per turn plus once at close** — N+1 times in an N-turn session, the last one
 observe-only — and interrupted / refused / max-turns turns **skip `Stop` hooks entirely**.
 
-Not subscribed in v1: `PermissionDenied`, `SubagentStart`, `SubagentStop`, `PreCompact`,
-`PostCompact` — documented exactly as the nine are, but with nothing here to consume them (a
-post-decision event, subagent cards grok does not have, compaction nobody reads). Grok skips hook
-event names it does not recognize (that is how a shared Claude settings file loads at all), so adding
-one later is safe.
+The configuration uses Grok's canonical `SubagentStop` spelling. Grok also accepts `SubagentEnd` as
+an alias, but subscribing twice would only duplicate the same lifecycle signal.
 
 ---
 
@@ -180,9 +182,10 @@ without status hooks.
 
 Grok also merges **`~/.claude/settings.json`** (and `settings.local.json`, `~/.cursor/hooks.json`,
 project `.grok/hooks/*.json`). nodeterm's **claude** managed hook already lives in that file. So
-**8 of grok's 9 events** also fire `claude.sh` and POST to `/hook/claude` — every one except
-`PostToolUseFailure`, which claude has no entry for (`CLAUDE_HOOK_EVENTS`). This is by design left
-alone — we do not disable grok's `[compat.claude]` scanning, because it is the user's config and it
+**8 of Grok's 15 events** also fire `claude.sh` and POST to `/hook/claude`: `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `StopFailure`, `Notification`, and
+`SessionEnd` — the intersection with `CLAUDE_HOOK_EVENTS`. This is by design left alone — we do not
+disable grok's `[compat.claude]` scanning, because it is the user's config and it
 is what makes our skills discoverable (§1), and we do not add a cross-agent guard to the shared
 managed script, because `pty-manager` passes `options.agentId ?? 'claude'` — `NODETERM_AGENT_ID` is
 `claude` for **plain terminal** nodes too, and a guard keyed on it would kill status for anyone who
@@ -356,7 +359,25 @@ ai-name / comments).
 
 ## 8. Known gaps and follow-ups
 
-**Gaps in what shipped** — state these, do not paper over them:
+**Verified corrections to the original assumptions:**
+
+1. **The `Notification` vocabulary is published and closed.** Grok 1.0.13 names `idle_prompt`,
+   `permission_prompt`, and `task_complete` in `~/.grok/docs/user-guide/10-hooks.md:99`; `:162`
+   explicitly says `permission_prompt` fires only while a permission UI is actually waiting. The
+   normalizer therefore maps that exact type to `blocked`, maps exact `idle_prompt` through the
+   existing `idleInferred` rescue, and treats `task_complete` as informational because the spec does
+   not define it as a turn end (`Stop` does). Every unknown type is a no-op; no substring widens the
+   permission set.
+2. **The earlier Esc gap was based on a false premise; no watchdog is needed.** Grok 1.0.13
+   publishes `StopCancelled` for turns that end without `Stop` (`10-hooks.md:98,336,348,354,384`). A
+   session-level `user_interrupt` now clears RUNNING as an interrupted `done`; permission rejection
+   or cancellation, `max_turns`, and `no_progress` are visible non-interrupted turn ends. A payload
+   carrying `subagentType` cannot end the parent session, and an unknown reason is a closed-set
+   no-op. Cancel-and-send emits no `StopCancelled` because the replacement turn stays busy. Exact
+   `idle_prompt` remains as a bounded rescue for the documented case where no stop hook completes:
+   it can clear only `working`, never a live approval or question.
+
+**Remaining gaps — state these, do not paper over them:**
 
 1. **The `Notification` vocabulary is unverified, and it can fail in BOTH directions.** Grok documents
    no hook for "a permission prompt is on screen" — claude's `PermissionRequest` has no counterpart, and
@@ -500,22 +521,16 @@ Env + identity
     only ever comes from /hook/grok — no flicker, no duplicate completion notification.
 
 State machine edges
- 9. Press Esc mid-turn. Expected (documented): NO hook fires and the badge stays RUNNING until
-    the next prompt. Confirm, and record how bad it feels — this decides whether a watchdog is
-    worth building.
-10. The `Notification` capture — the highest-value item on this list, because the mapping in §5 rests
-    entirely on another integration's reader. Record, VERBATIM and per notification, all THREE fields
-    the mapping reads: the kind (`notificationType` / `notification_type` / `type` — note which key,
-    and its exact casing), `message`, and `level`. Do it for BOTH cases, because they are handled
-    oppositely and only the exact strings can tell them apart:
-    (a) a **routine** run — one turn with several tool calls, under `auto` AND under
-    `bypassPermissions`, window in the BACKGROUND. If a notification fires per tool call, our
-    suppression must match its message/level exactly or the node strobes NEEDS YOU (chime + OS
-    notification + phone card per tool call). Count the notifications against the tool calls.
-    (b) a **genuine** ask that needs a human answer. That one must still reach `blocked`.
-    Also note whether an IDLE notification exists at all and its exact message (item 9's rescue
-    depends on the four phrases in `GROK_IDLE_MESSAGES`). This is the only path to a NEEDS YOU badge;
-    record the vocabulary.
+ 9. Press Esc mid-turn. Expected: session `StopCancelled(reason=user_interrupt)` clears RUNNING as
+    an interrupted stop (no ordinary completion alert/unread); a payload carrying `subagentType`
+    leaves the session working. Record whether `idle_prompt` follows as the bounded fallback. Also
+    try cancel-and-send: it emits no stop hook and the replacement turn must stay RUNNING. No
+    watchdog is needed because the session-level terminal event exists.
+10. Capture one real payload for each published `Notification` type and record which key carries the
+    kind (`notificationType`, `notification_type`, or `type`). The type vocabulary and semantics are
+    already published in `10-hooks.md:99,162`; this capture is only to replace the remaining
+    defensive key aliases with measured envelope shapes. Message prose and severity do not classify
+    state.
 11. Force an API error (e.g. an invalid model). Does StopFailure clear the RUNNING badge?
 12. Quit with `/quit`. Does the session-close Stop stay silent (no "agent finished" notification)?
 

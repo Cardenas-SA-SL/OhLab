@@ -345,13 +345,19 @@ describe('RemoteHooks.setup — grok', () => {
   // assertion still passes. The `/home/dev/.grok` negative assertions are what make that fail.
   const GROK_EVENTS = [
     'Notification',
+    'PermissionDenied',
+    'PostCompact',
     'PostToolUse',
     'PostToolUseFailure',
+    'PreCompact',
     'PreToolUse',
     'SessionEnd',
     'SessionStart',
     'Stop',
+    'StopCancelled',
     'StopFailure',
+    'SubagentStart',
+    'SubagentStop',
     'UserPromptSubmit'
   ]
 

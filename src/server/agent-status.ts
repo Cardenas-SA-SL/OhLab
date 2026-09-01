@@ -7,7 +7,7 @@
 // local logic.
 //
 // This module must import nothing from electron or `../main` (see no-electron.test.ts).
-import { grokHomeDir } from '../core/agents/grok-paths'
+import { grokHomeDir, grokSessionDir, grokSessionsDir } from '../core/agents/grok-paths'
 import { join, resolve } from 'path'
 import { homedir } from 'os'
 import { hookServer } from '../core/agents/hook-server'
@@ -24,9 +24,8 @@ import { codexHome } from '../core/usage/codex-usage'
 import { setNodeTranscript } from '../core/context-link'
 import { isSafeLocalTranscriptPath } from '../core/claude-accounts-core'
 import { linkedClaudeConfigDirs } from '../core/claude-config-dir'
-import { grokRawFields, isAsyncSubagentLaunch, type NormalizedAgentEvent } from '../shared/agents/normalize'
-import { grokSessionDir, grokSessionsDir } from '../core/agents/grok-paths'
-import { forgetGrokSession, rememberGrokSessionDir } from '../core/grok-session'
+import { isAsyncSubagentLaunch, grokRawFields, type NormalizedAgentEvent } from '../shared/agents/normalize'
+import { applyGrokHookSession } from '../core/grok-hook-session'
 import { IPC } from '../shared/ipc'
 import type { ServerPlatform } from './platform-server'
 
@@ -204,39 +203,30 @@ export function wireAgentStatus(
   hooks.setRawListener((agentId, nodeId, payload, _meta) => {
     if (agentId === 'grok') {
       // This branch records two associations, neither of which grok's envelope states outright.
-      // Everything the claude path does below hangs off `transcript_path`, and grok has none.
-      // Read through `grokRawFields` so grok's two field dialects (camelCase and the SDK's
-      // snake_case) are decoded in exactly one place.
-      const g = grokRawFields(payload)
-      // 1. node → session: read by the phone's context ring and the ⌘K session lookup.
-      if (nodeId && g.sessionId) nodeContextSession.set(nodeId, g.sessionId)
-      // 2. session → its session DIRECTORY, derived from (cwd, sessionId) — the two fields every
-      // grok hook does carry — and remembered here, the one place they arrive together. That is
-      // what lets the session-name read (core/grok-session.ts) be a direct open rather than a scan
-      // of grok's sessions tree, which is how one node would end up adopting another's name.
-      // `grokSessionDir` returns null for a cwd grok stored under its slug+hash scheme instead, in
-      // which case we learn nothing about this session rather than build half a path.
+      // Everything the claude path does below hangs off `transcript_path`, and grok has none. Core
+      // owns the node/session/directory transition (`applyGrokHookSession`) so desktop and Server
+      // Edition cannot implement different event branches — including the one thing only it does:
+      // PostCompact mints a NEW session id, so the PRIOR id is retired there and not only on
+      // SessionEnd. Written inline, that transition existed in two copies and neither knew it.
       //
-      // The Server Edition populates it exactly as the desktop does; what it does not yet serve is
-      // the READ (IPC.ptyReadSessionName has no server handler — see the ws-bridge stub).
-      if (g.sessionId && g.cwd) {
+      // What stays HERE is what needs a shell to exist: the per-shell context tail and the phone
+      // mirror. `plan` carries the decoded event/session/cwd, so the dialect is still decoded in
+      // exactly one place.
+      const plan = applyGrokHookSession(nodeId, payload, nodeContextSession)
+      // Context meter: grok's numbers are NOT in the transcript, so there is nothing here for
+      // `transcript_path` to point at even once grok starts sending one. They live in
+      // `signals.json`, the sibling of `chat_history.jsonl`, which is why this tail is tracked from
+      // the DERIVED directory rather than from a hook field — and why it is created with
+      // `wholeFile` (that file is rewritten in place, not appended to).
+      if (plan.sessionId && plan.cwd) {
         const dir = grokSessionDir({
           sessionsDir: grokSessionsDir(),
-          cwd: g.cwd,
-          sessionId: g.sessionId
+          cwd: plan.cwd,
+          sessionId: plan.sessionId
         })
-        if (dir) {
-          rememberGrokSessionDir(g.sessionId, dir)
-          // Context meter: grok's numbers are NOT in the transcript, so there is nothing here for
-          // `transcript_path` to point at even once grok starts sending one. They live in
-          // `signals.json`, the sibling of `chat_history.jsonl`, which is why this tail is tracked
-          // from the DERIVED directory rather than from a hook field — and why it is created with
-          // `wholeFile` (that file is rewritten in place, not appended to).
-          const signals = join(dir, GROK_SIGNALS_FILE)
-          grokContextTail.track(g.sessionId, signals)
-        }
+        if (dir) grokContextTail.track(plan.sessionId, join(dir, GROK_SIGNALS_FILE))
       }
-      // 3. node → what it is doing NOW (the phone's per-node activity line).
+      // node → what it is doing NOW (the phone's per-node activity line).
       //
       // §8.3 of docs/grok-agent.md said grok's file hooks "never send PreToolUse", so calling this
       // was a no-op and it was deleted. MEASURED on 1.0.13 (2026-09-02), that is wrong in wording
@@ -245,10 +235,11 @@ export function wireAgentStatus(
       // never matched. The blocker was a SPELLING, not an absence, which is why deleting the call
       // looked correct and closed the door on a working feature.
       //
-      // Translated here rather than by loosening that gate: the mirror is claude-shaped on purpose,
-      // and grok's dialect is decoded in exactly one place (`grokRawFields`). `toolActivity` knows
-      // grok's fifteen tool names, so the line reads "Reading fichero.txt", never a claude phrase.
-      if (nodeId && g.event === 'pretooluse' && g.toolName) {
+      // Translated here rather than by loosening that gate: the mirror is claude-shaped on purpose.
+      // `toolActivity` knows grok's fifteen tool names, so the line reads "Reading fichero.txt",
+      // never a claude phrase.
+      const g = grokRawFields(payload)
+      if (nodeId && plan.event === 'pretooluse' && g.toolName) {
         recordRawToolEvent(nodeId, {
           hook_event_name: 'PreToolUse',
           tool_name: g.toolName,
@@ -256,18 +247,13 @@ export function wireAgentStatus(
         })
       }
       // The turn is over: clear the activity line the same way the claude path does.
-      if (nodeId && (g.event === 'stop' || g.event === 'sessionend')) {
+      if (nodeId && (plan.event === 'stop' || plan.event === 'sessionend')) {
         recordRawToolEvent(nodeId, { hook_event_name: 'Stop' })
       }
-      // The session is over, so nothing will read its directory again — and forgetting costs
-      // nothing even though grok IS resumable and `grok --resume <id>` reuses BOTH the id and the
-      // directory: a resumed session fires its own hooks, whose (cwd, sessionId) re-derive and
-      // re-remember the very same path. The map is bounded, so dropping now beats waiting for
-      // eviction to reach an entry nobody is asking about.
-      if (g.event === 'sessionend') {
-        forgetGrokSession(g.sessionId)
-        grokContextTail.untrack(g.sessionId)
-      }
+      // Forgetting the MAP entry and untracking the TAIL are two different things and neither
+      // substitutes for the other: `applyGrokHookSession` did the first (and does it for PostCompact
+      // too, which this call site cannot see). The tail is this shell's, so it is released here.
+      if (plan.forgetSessionId) grokContextTail.untrack(plan.forgetSessionId)
       return
     }
     // gemini and codex both carry `transcript_path` in their hook envelope (gemini: the base input

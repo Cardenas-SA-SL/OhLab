@@ -1758,7 +1758,82 @@ describe('stale-working sweep (shared/agents/stale)', () => {
 })
 
 
-describe('idle_prompt rescue (Esc that ran no Stop hook)', () => {
+describe('Grok StopCancelled closes only the session turn', () => {
+  beforeEach(() => _resetForTest())
+
+  it('turns a session user_interrupt into one interrupted done edge', () => {
+    recordAgentEvent(ev({ agentId: 'grok', state: 'working', newTurn: true }))
+
+    const out = recordAgentEvent(
+      ev({ agentId: 'grok', state: undefined, cancelReason: 'user_interrupt' })
+    )
+
+    expect(out).toEqual({
+      nodeId: 'n1',
+      agentId: 'grok',
+      kind: 'state',
+      state: 'done',
+      interrupted: true,
+      cancelReason: 'user_interrupt'
+    })
+    expect(_snapshot().n1.state).toBe('done')
+    expect(_inboxSnapshot().events).toEqual([
+      expect.objectContaining({ nodeId: 'n1', kind: 'done', title: 'Stopped', interrupted: true })
+    ])
+  })
+
+  it.each([
+    'permission_rejected',
+    'permission_cancelled',
+    'max_turns',
+    'no_progress'
+  ] as const)('turns session reason %s into a visible, non-interrupted done', (cancelReason) => {
+    recordAgentEvent(ev({ agentId: 'grok', state: 'working', newTurn: true }))
+
+    const out = recordAgentEvent(ev({ agentId: 'grok', state: undefined, cancelReason }))
+
+    expect(out).toEqual({
+      nodeId: 'n1',
+      agentId: 'grok',
+      kind: 'state',
+      state: 'done',
+      cancelReason
+    })
+    expect(_snapshot().n1.state).toBe('done')
+    expect(_inboxSnapshot().events).toEqual([
+      expect.objectContaining({ nodeId: 'n1', kind: 'done', title: 'Finished' })
+    ])
+    expect(_inboxSnapshot().events[0]?.interrupted).toBeUndefined()
+  })
+
+  it.each(['explore', ''] as const)(
+    'does not let a cancellation with subagentType=%j end the session turn',
+    (subagentType) => {
+      recordAgentEvent(ev({ agentId: 'grok', state: 'working', newTurn: true }))
+      const cancelled = ev({
+        agentId: 'grok',
+        state: undefined,
+        cancelReason: 'user_interrupt',
+        subagentType
+      })
+
+      expect(recordAgentEvent(cancelled)).toBe(cancelled)
+      expect(_snapshot().n1.state).toBe('working')
+      expect(_inboxSnapshot().events).toEqual([])
+    }
+  )
+
+  it('leaves an unknown cancellation reason as an identity-only no-op', () => {
+    recordAgentEvent(ev({ agentId: 'grok', state: 'working', newTurn: true }))
+    const cancelled = ev({ agentId: 'grok', state: undefined, cancelReason: 'unknown' })
+
+    expect(recordAgentEvent(cancelled)).toBe(cancelled)
+    expect(_snapshot().n1.state).toBe('working')
+    expect(_inboxSnapshot().events).toEqual([])
+  })
+})
+
+describe('idle_prompt rescue (a stop hook may not complete)', () => {
   it('moves a stuck working node off working', () => {
     const prev = reduceEntry(undefined, ev({ state: 'working' }), 1000)
     expect(prev.state).toBe('working')
