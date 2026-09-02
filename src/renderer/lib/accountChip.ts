@@ -76,6 +76,29 @@ export function configDirsMatch(a: string | undefined | null, b: string | undefi
   return !!left && left === normalizeConfigDirForCompare(b)
 }
 
+/**
+ * Is this account's IDENTITY a directory on THIS machine — i.e. is it a LINKED account
+ * (`configDir` set, no `host`)?
+ *
+ * `claudeAccounts.link` is a LOCAL adoption, so a linked row's `configDir` names a directory on the
+ * machine the core runs on. That is what makes such an id unsafe for an observation from another
+ * machine: the id was derived FROM THAT PATH, by `classifyClaudeConfigDir`'s linked rule in core,
+ * which is host-agnostic on purpose and runs before `remote` exists (see `resolveObserved`).
+ * `host` is what separates it from a managed-remote account, whose id came from the path SHAPE
+ * (`~/.nodeterm/claude-accounts/<id>`) and so means the same thing on whichever machine posted it.
+ *
+ * Two deliberate widenings, both of which demote MORE rather than less — this module's standing
+ * failure direction (one chip fewer, never a wrong one):
+ *  - `pending` is NOT excluded (core's own `linkedDirOf` excludes it): the question here is not
+ *    "may this row be dir-matched" but "does this id stand for a local directory", and a linked row
+ *    still waiting on its login claims one just as much.
+ *  - the raw field's truthiness decides, not `normalizeLinkedConfigDir`: settings.json is
+ *    hand-editable, and a value too broken to USE is still the user declaring this account local.
+ */
+function isLocallyLinkedAccount(a: ClaudeAccount): boolean {
+  return !!a.configDir && !a.host
+}
+
 /** The two facts about the node an observation arrived for, as the renderer can see them. */
 export interface ObservationOrigin {
   /** The node itself — the live React Flow `node.data` for the active project, or the serialized
@@ -136,9 +159,33 @@ export function observationIsRemote(origin: ObservationOrigin | undefined): bool
  * string whenever the two machines share a username, which is the ordinary case rather than a
  * corner. Matching them would label the remote pane with a local account's identity, and
  * `effectiveAccountId` would then hand that id to the LOCAL transcript, session-name and usage
- * readers. Managed-remote observations are unaffected: they arrive `known: true` carrying a real
- * `accountId` (classifier rule 2, `~/.nodeterm/claude-accounts/<id>`), and the id-based branch
- * above resolves them against the account list without ever looking at a path.
+ * readers.
+ *
+ * **An id is not automatically safer than a path — it depends on where the id came from.** The
+ * dir-match refusal above is not the whole story, because the FIRST dir match already happened in
+ * core: `classifyClaudeConfigDir`'s linked rule compares the posted dir against every linked
+ * account's `configDir`, is host-agnostic by design, and runs at POST time, before the renderer
+ * has stamped `remote`. So when a local linked account holds `/home/me/.claude-2` and an SSH
+ * pane posts a transcript under the host's `/home/me/.claude-2`, the observation arrives here
+ * ALREADY `{known: true, accountId: '<the local linked id>'}` — it never reaches the dir-match
+ * refusal, because the id branch returns first. A remote observation resolving to a LINKED account
+ * (`isLocallyLinkedAccount`) is therefore demoted to the bare dir, which is exactly the answer the
+ * dir-match refusal would have given had core not got there first.
+ *
+ * Managed-remote observations are unaffected, and that is the non-regression: they arrive
+ * `known: true` carrying a real `accountId` (classifier rule 2, `~/.nodeterm/claude-accounts/<id>`)
+ * whose account row has `host` set, so it is an id derived from a path SHAPE that means the same
+ * thing on either machine — not a claim about a directory on this one. Managed LOCAL accounts
+ * (rule 1, no `configDir`) are left alone too, deliberately: reaching one from a remote path would
+ * take a host holding this machine's whole `<userData>/claude-accounts` path, while demoting them
+ * would be paid regularly by the case below.
+ *
+ * **The cost, stated plainly:** `remote` is one boolean and `observationIsRemote(undefined)` is
+ * TRUE, so a LOCAL linked pane whose node no canvas holds any more (a tmux session outliving the
+ * node that named it) is demoted here too — its chip becomes the bare dir and its readers fall
+ * back to the system root. That is the same trade the flag was introduced under: one label fewer,
+ * never a wrong one. Splitting "on a host" from "cannot place this node" to recover it would
+ * reinstate exactly the "unknown ⇒ local" guess `observationIsRemote` refuses to make.
  */
 export function resolveObserved(
   observed: ObservedClaudeAccount | undefined,
@@ -150,7 +197,20 @@ export function resolveObserved(
   const dirMatchable = !observed.remote
   if (observed.known) {
     if (!observed.accountId) return observed // the system default — nothing to lose
-    if (accounts.some((a) => a.id === observed.accountId)) return observed
+    const held = accounts.find((a) => a.id === observed.accountId)
+    if (held) {
+      // The id still resolves — but a REMOTE observation carrying a LINKED account's id is an id
+      // that core derived from a LOCAL path (classifier rule 3), so it says nothing about the
+      // machine that posted it. Demote it to the bare dir, the same answer the dir-match refusal
+      // below gives; otherwise `effectiveAccountId` hands a local account id to the LOCAL
+      // transcript / session-name / usage readers for a session whose filesystem is elsewhere.
+      // Managed accounts (no `configDir`) and managed-remote ones (`host` set) fall through
+      // untouched — their ids are not claims about a directory here.
+      if (observed.remote && isLocallyLinkedAccount(held)) {
+        return { ...observed, accountId: null, known: false }
+      }
+      return observed
+    }
     // The id is gone (unlinked/removed since the observation). Fall back to the dir — unless there
     // is none, in which case there is nothing better to say than the id we already have.
     if (!observed.configDir) return observed
@@ -176,12 +236,14 @@ export function resolveObserved(
  * creation-time.
  *
  * A REMOTE observation needs no branch of its own here, because `resolveObserved` already refuses
- * to dir-match one: an unlinked remote dir stays `known: false` and yields `undefined`, so a
- * remote pane can never hand a LOCAL account's id to the local transcript / session-name / usage
- * readers. What it can still yield is an id from the two ID-based routes, and both are right — a
- * managed-remote account (`~/.nodeterm/claude-accounts/<id>`) is a real record whose reads are
- * scoped by that id on whichever host runs them, and the host's own system `~/.claude` yields
- * `undefined`, which is the system root on either machine.
+ * every route by which one could reach a LOCAL account's id: it dir-matches no remote dir, and it
+ * demotes a remote observation that arrived already carrying a LINKED account's id (core matched
+ * that path before the `remote` flag existed — see `resolveObserved`). Both leave `known: false`,
+ * which yields `undefined` here. What a remote observation can still yield is an id from the two
+ * routes that do not name a directory on this machine, and both are right — a managed-remote
+ * account (`~/.nodeterm/claude-accounts/<id>`) is a real record whose reads are scoped by that id
+ * on whichever host runs them, and the host's own system `~/.claude` yields `undefined`, which is
+ * the system root on either machine.
  */
 export function effectiveAccountId(
   dataAccountId?: string,

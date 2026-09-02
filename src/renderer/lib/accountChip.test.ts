@@ -459,12 +459,22 @@ describe('a REMOTE observation is never treated as a dir on this machine', () =>
     )
   })
 
-  it('is never matched against a local account that happens to hold the same path', () => {
-    // `ClaudeAccount.configDir` is written by `claudeAccounts.link`, a LOCAL adoption, so this
-    // account's `/home/me/.claude-2` is a directory on THIS machine. Matching the host's dir to it
-    // would label the remote pane with a local identity — and `effectiveAccountId` would then aim
-    // the local transcript / session-name / usage readers at that account's dir.
-    const localLink = acct({ id: 'lnk', label: 'second', email: undefined, configDir: '/home/me/.claude-2' })
+  // `ClaudeAccount.configDir` is written by `claudeAccounts.link`, a LOCAL adoption, so a linked
+  // account's `/home/me/.claude-2` is a directory on THIS machine. Matching the host's dir to it
+  // labels the remote pane with a local identity — and `effectiveAccountId` then aims the local
+  // transcript / session-name / usage readers at that account's dir.
+  //
+  // There are TWO orderings and they arrive here in different shapes, which is the whole point of
+  // splitting them: the account may be linked AFTER the observation was captured (the dir was
+  // unknown at POST time, so `known: false`), or BEFORE it (core's classifier already matched the
+  // path and stamped the id, so `known: true`). Only the second is what the hook server emits for
+  // a user who has both a linked account and an SSH project — the ordinary case.
+  const localLink = acct({ id: 'lnk', label: 'second', email: undefined, configDir: '/home/me/.claude-2' })
+
+  it('is never matched against a local account linked AFTER the observation was captured', () => {
+    // `known: false` — nothing claimed this dir when the hook posted, so the classifier could only
+    // report the bare path. Re-resolution against the CURRENT list is what would otherwise adopt
+    // it, and that is the direction this case pins.
     expect(resolveObserved(remoteUnlinked, [localLink])).toBe(remoteUnlinked)
     expect(effectiveAccountId(undefined, remoteUnlinked, [localLink])).toBeUndefined()
     // The local pane on the same path still upgrades — the refusal is about remoteness, not the
@@ -472,11 +482,76 @@ describe('a REMOTE observation is never treated as a dir on this machine', () =>
     expect(resolveObserved(unlinked, [localLink])?.accountId).toBe('lnk')
   })
 
+  it('refuses the id CORE already stamped when the account was linked BEFORE the observation', () => {
+    // The shape the hook server actually emits in this situation, and the one the `known: false`
+    // case above cannot stand in for. `classifyClaudeConfigDir`'s linked rule is host-agnostic and
+    // runs at POST time, before the renderer stamps `remote`: the host's `/home/me/.claude-2` is
+    // string-equal to the local linked account's dir, so the observation arrives ALREADY resolved
+    // to `lnk` with `known: true`, and `resolveObserved`'s id branch returns before any dir-match
+    // refusal is consulted. Without the demotion the pane is labelled with the local identity and
+    // every local reader is aimed at that account's directory.
+    const remoteStamped = observed({
+      configDir: '/home/me/.claude-2',
+      accountId: 'lnk',
+      known: true,
+      remote: true
+    })
+    expect(resolveObserved(remoteStamped, [localLink])).toEqual({
+      ...remoteStamped,
+      accountId: null,
+      known: false
+    })
+    // Which is what the consumers must see: no local account for the readers…
+    expect(effectiveAccountId(undefined, remoteStamped, [localLink])).toBeUndefined()
+    // …the dir as its own identity rather than the account's…
+    expect(accountKey(undefined, remoteStamped, [localLink])).toBe('ext:/home/me/.claude-2')
+    const chip = accountChipFor({ observed: remoteStamped, accounts: [localLink], multiple: true })
+    expect(chip?.kind).toBe('unlinked')
+    expect(chip?.tooltip).toContain('remote host')
+    expect(chip?.tooltip).not.toContain('Settings')
+    // …and no Link offer, since the button would `stat` this machine.
+    expect(unlinkedConfigDirs({ n1: { account: remoteStamped } }, [localLink])).toEqual([])
+    // The identical observation from a LOCAL pane keeps the account: the demotion is about
+    // remoteness alone, so a linked account still labels the panes it exists for.
+    const localStamped = observed({ configDir: '/home/me/.claude-2', accountId: 'lnk', known: true })
+    expect(resolveObserved(localStamped, [localLink])).toBe(localStamped)
+    expect(effectiveAccountId(undefined, localStamped, [localLink])).toBe('lnk')
+  })
+
+  it('demotes a linked id whatever state the settings row is in — but never a MANAGED one', () => {
+    // `isLocallyLinkedAccount` asks only "does this id stand for a directory on this machine".
+    // A `pending` linked row still claims one (core's own dir-match rule skips pending rows, so
+    // this id can only have been stamped by an earlier settled state or a hand edit — either way
+    // the path is local), and settings.json is hand-editable, so a `configDir` too broken to use
+    // is still that declaration. Both widenings demote MORE, never less.
+    const pendingLink = acct({ id: 'lnk', configDir: '/home/me/.claude-2', pending: true })
+    const remoteStamped = observed({
+      configDir: '/home/me/.claude-2',
+      accountId: 'lnk',
+      known: true,
+      remote: true
+    })
+    expect(resolveObserved(remoteStamped, [pendingLink])?.known).toBe(false)
+    const brokenLink = acct({ id: 'lnk', configDir: 'not/absolute' })
+    expect(resolveObserved(remoteStamped, [brokenLink])?.known).toBe(false)
+    // A MANAGED local account has no `configDir`: its id came from `<userData>/claude-accounts/`,
+    // not from a path the user declared, and reaching one from a remote observation would take a
+    // host that holds this machine's entire userData path. Left alone on purpose — demoting it
+    // would be paid by every managed pane whose node the canvas can no longer place.
+    const managedRemoteObs = observed({
+      configDir: '/data/claude-accounts/a1',
+      accountId: 'a1',
+      known: true,
+      remote: true
+    })
+    expect(resolveObserved(managedRemoteObs, [acct()])).toBe(managedRemoteObs)
+    expect(effectiveAccountId(undefined, managedRemoteObs, [acct()])).toBe('a1')
+  })
+
   it('does not dir-match on the fallback path either, when the observed id has gone away', () => {
     // `resolveObserved`'s other direction: a known id that no longer exists falls back to its dir.
     // A remote one must degrade to the bare dir rather than re-home on a local account.
     const goneRemote = observed({ configDir: '/home/me/.claude-2', accountId: 'old', known: true, remote: true })
-    const localLink = acct({ id: 'lnk', configDir: '/home/me/.claude-2' })
     expect(resolveObserved(goneRemote, [localLink])).toEqual({ ...goneRemote, accountId: null, known: false })
   })
 
