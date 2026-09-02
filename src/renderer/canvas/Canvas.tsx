@@ -492,6 +492,7 @@ import {
   createDinoNode,
   createTriggerNode,
   createFilesNode,
+  sshBindingForCwd,
   createDiffNode,
   createEditorNode,
   createGroupNode,
@@ -3599,10 +3600,13 @@ export function Canvas() {
       console.info(
         `[nodeterm] node-create agent=- project=${targetProjectId} group=${groupId ?? '-'} cwd=${cwd ?? '-'}`
       )
+      // In an SSH project the node is stamped remote (runs over the project's master) and
+      // `createTerminalNode` roots it at `ssh.remoteCwd`, which silently discards a caller's
+      // "here" — see `sshBindingForCwd` for the whole reasoning. With no override this is
+      // byte-identical to before.
+      const ssh = sshBindingForCwd(project?.ssh, cwdOverride)
       setNodes((ns) => {
-        // In an SSH project the node is stamped remote (runs over the project's master); the
-        // factory takes the project's ssh and roots the terminal at its remoteCwd.
-        const node = createTerminalNode(ns.length, cwd, center ?? emptyNodePos(), initialCommand, project?.ssh)
+        const node = createTerminalNode(ns.length, cwd, center ?? emptyNodePos(), initialCommand, ssh)
         return [...ns, groupId ? parentInto(node, groupId) : node]
       })
       markDirty()

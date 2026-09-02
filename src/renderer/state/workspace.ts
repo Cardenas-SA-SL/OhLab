@@ -301,6 +301,26 @@ export function nodeSshFor(
   return { server: projectSsh.server, remoteCwd: cwd || projectSsh.remoteCwd }
 }
 
+/**
+ * The ssh binding a terminal should be created with when the caller named a directory.
+ *
+ * `createTerminalNode` roots a remote node at `ssh.remoteCwd` and ignores its `cwd` argument
+ * (`cwd: ssh ? ssh.remoteCwd : cwd`). That is right for a plain "new terminal" and wrong for
+ * every caller that meant a SPECIFIC directory — a file manager's "New terminal here", a Source
+ * Control action scoped to a checkout — because on an SSH project the request was discarded in
+ * silence and the terminal opened at the project root.
+ *
+ * Keyed on an EXPLICIT override, never on a resolved cwd: an SSH project can still carry a local
+ * `project.cwd`, and promoting that to `remoteCwd` would root remote terminals at a path from the
+ * wrong machine. With no override the binding is returned untouched.
+ */
+export function sshBindingForCwd(
+  ssh: Project['ssh'] | undefined,
+  cwdOverride: string | undefined
+): Project['ssh'] | undefined {
+  return ssh && cwdOverride ? { ...ssh, remoteCwd: cwdOverride } : ssh
+}
+
 export function createTerminalNode(
   index: number,
   cwd?: string,

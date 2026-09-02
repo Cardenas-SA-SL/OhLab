@@ -235,7 +235,13 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
       if (entry) {
         items.push({ label: entry.dir ? 'Open folder' : 'Open', onClick: () => open(entry) })
       }
-      if (!entry || entry.dir) {
+      // "here" has to be somewhere a terminal can actually be opened. `addTerminal` spawns
+      // against the ACTIVE project, and a relay project carries no `ssh` binding — so on a relay
+      // tab this would hand the PEER's path to a plain local terminal, the same wrong-machine
+      // mistake `fileOpenTarget` refuses for `shell.openPath`. Spawning onto a peer's core is a
+      // real feature, not a one-liner, so the row is withheld rather than faked. (An SSH project
+      // is fine: `addTerminal` now rebinds `remoteCwd` to the requested directory.)
+      if ((!entry || entry.dir) && source !== 'relay') {
         items.push({
           label: 'New terminal here',
           onClick: () =>
@@ -257,7 +263,7 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
       }
       setMenu({ x: e.clientX, y: e.clientY, items })
     },
-    [cwd, open, create, api, localShell]
+    [cwd, open, create, api, localShell, source]
   )
 
   const toggleCollapse = () =>
