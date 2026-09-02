@@ -117,6 +117,22 @@ function readAppVersion(): string {
 }
 
 /**
+ * Name the account this process runs as, for the canvas-control boot notice. `os.userInfo()`
+ * THROWS a SystemError when the effective uid has no password-database entry — the normal case for
+ * a container started with an arbitrary uid — so it is never called bare on a boot path: the log
+ * line exists to inform the operator, and it must not be able to take the feature they enabled
+ * down with it. Falls back to the numeric uid, and then to a plain phrase on a platform with none.
+ */
+function serverUserLabel(): string {
+  try {
+    return os.userInfo().username
+  } catch {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null
+    return uid === null ? 'the server user' : `uid ${uid}`
+  }
+}
+
+/**
  * This host's Server-Edition install metadata (spec: server-update), surfaced to the phone via the
  * agent-status mirror's top-level `server` block. `scripts/install-server.sh` writes
  * `<dataDir>/install-meta.json` (`{version, commit, installedAt}`) after every successful install
@@ -596,6 +612,21 @@ export async function startServer(
       console.warn(
         '[nodeterm-server] Server Edition canvas control failed to initialize; keeping it disabled',
         error
+      )
+    }
+    if (canvasControl) {
+      // Loud on purpose, and in the same register as the proxy-trust line above: this is the
+      // operator's one chance to notice that a flag reading as "canvas control" also hands agent
+      // sessions the ability to run commands as this user. An operator who took "opt-in canvas
+      // control" and "creator ownership" at face value could reasonably size the blast radius as
+      // the canvas; it is the host. Printed only when the runtime actually came up, so a failed
+      // init never announces a capability that is in fact disabled.
+      console.log(
+        `⚠️  Server canvas control ENABLED: agent sessions with verified node identity can run ` +
+          `arbitrary commands on this host as ${serverUserLabel()} (open-terminal --cmd), with ` +
+          `this user's environment, files and credentials. Creator ownership and the per-project ` +
+          `capability gates decide which agent may ask, not what may be asked for. Unset ` +
+          `NODETERM_SERVER_CANVAS_CONTROL / drop --canvas-control to turn it off.`
       )
     }
   }

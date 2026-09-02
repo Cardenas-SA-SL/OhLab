@@ -36,9 +36,17 @@ export type ServerConfig = {
    * Enable the Server Edition `/control/*` canvas runtime. Defaults OFF so an upgrade cannot
    * silently grant agents a new local execution surface. Environment:
    * NODETERM_SERVER_CANVAS_CONTROL=1;
-   * CLI: --canvas-control. Hook endpoint authentication and per-project capability gates still
-   * apply when enabled. The server-process env name is deliberately distinct from the
-   * per-session NODETERM_CANVAS_CONTROL discovery bit injected by HookServer.
+   * CLI: --canvas-control.
+   *
+   * Enabling it lets an agent session run arbitrary commands on this host as the user the server
+   * runs as: `open-terminal --cmd <command>` is executed in a PTY this process spawns, with that
+   * user's environment, files and credentials. Hook endpoint authentication, verified node
+   * identity and per-project capability gates still apply when enabled, but they decide WHICH
+   * agent may ask, not WHAT may be asked for — the surface this flag opens is the host, not the
+   * canvas. Boot announces it on stdout for the same reason (see startServer).
+   *
+   * The server-process env name is deliberately distinct from the per-session
+   * NODETERM_CANVAS_CONTROL discovery bit injected by HookServer.
    */
   canvasControl?: boolean
   /**

@@ -530,7 +530,12 @@ directory**.
 
 Server canvas control is disabled by default. Set `NODETERM_SERVER_CANVAS_CONTROL=1` (or pass
 `--canvas-control`) to install the Server-local shim and enable its `/control/*` implementation.
-Every enabled request requires verified node identity.
+Every enabled request requires verified node identity. **Enabling it lets an agent session run
+arbitrary commands on this host as the user the server runs as** — `open-terminal --cmd <command>`
+is executed in a PTY this process spawns, with that user's environment, files and credentials. The
+gates below decide *which* agent may ask, not *what* may be asked for, so the surface this flag
+opens is the host, not the canvas. Enable it on a host where you would be content to hand those
+agents a shell.
 
 Ownership is intentionally narrower than the desktop confirmation UI: an agent may mutate, message,
 or close only a node it opened during the current Server process run. Link, group, rename, color,
