@@ -2712,7 +2712,10 @@ app.whenReady().then(async () => {
   hookServer.setRawListener((agentId, nodeId, payload, _meta) => {
     if (agentId === 'grok') {
       // This branch records two associations, neither of which grok's envelope states outright.
-      // Everything the claude path does below hangs off `transcript_path`, and grok has none. Core
+      // Everything the claude path does below hangs off `transcript_path`. Grok DOES send one --
+      // `transcriptPath`, MEASURED on 1.0.13 in 14 of 15 captured payloads -- but it names
+      // `updates.jsonl`, which holds no readable conversation, so this path deliberately ignores
+      // the advertised value and derives the session directory instead. Core
       // owns the node/session/directory transition (`applyGrokHookSession`) so desktop and Server
       // Edition cannot implement different event branches — including the one thing only it does:
       // PostCompact mints a NEW session id, so the PRIOR id is retired there and not only on
@@ -2722,8 +2725,8 @@ app.whenReady().then(async () => {
       // mirror. `plan` carries the decoded event/session/cwd, so the dialect is still decoded in
       // exactly one place.
       const plan = applyGrokHookSession(nodeId, payload, nodeContextSession)
-      // Context meter: grok's numbers are NOT in the transcript, so there is nothing here for
-      // `transcript_path` to point at even once grok starts sending one. They live in
+      // Context meter: grok's numbers are NOT in the transcript, so the advertised `transcriptPath`
+      // has nothing here to point at. They live in
       // `signals.json`, the sibling of `chat_history.jsonl`, which is why this tail is tracked from
       // the DERIVED directory rather than from a hook field — and why it is created with
       // `wholeFile` (that file is rewritten in place, not appended to).

@@ -353,7 +353,9 @@ describe('wireAgentStatus — the grok raw-listener branch', () => {
     const fh = fakeHooks()
     const ctx = recTail()
     wireAgentStatus(platform, { hooks: fh.hooks as never, contextTail: ctx.tail as never })
-    // grok's own dialect: camelCase keys, snake_case event VALUE, and no transcript_path at all.
+    // grok's own dialect: camelCase keys, snake_case event VALUE. It DOES send `transcriptPath`,
+    // omitted here because nothing on this path reads it: the transcript is derived from
+    // (cwd, sessionId), and the advertised path names `updates.jsonl`, the wrong file.
     fh.fireRaw('grok', 'g1', {
       hookEventName: 'user_prompt_submit',
       sessionId: 'gs-1',

@@ -575,8 +575,10 @@ export function normalizeOpencode(env: RawHookEnvelope): NormalizedAgentEvent | 
 // session, and the branch never had one. Hooks registered through the grok SDK convert the top-level keys to
 // snake_case instead, so both spellings occur in the wild — hence every field is read twice and
 // the event name is CANONICALIZED (lowercased, letters only) rather than compared literally.
-// There is deliberately no `transcript_path` in this envelope: grok's transcript is DERIVED from
-// (cwd, sessionId), which is why the shells' raw listeners need `grokRawFields` below.
+// `transcript_path` is deliberately absent from THIS envelope -- but not from the wire. Grok does
+// send `transcriptPath` (MEASURED on 1.0.13, 14 of 15 payloads) and it names `updates.jsonl`, the
+// file that holds no readable conversation. The transcript is DERIVED from (cwd, sessionId)
+// instead, which is why the shells' raw listeners need `grokRawFields` below.
 interface GrokPayload {
   hookEventName?: string
   hook_event_name?: string
