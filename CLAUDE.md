@@ -915,8 +915,14 @@ session.
     root remote terminals at a path from the wrong machine. On a RELAY tab there is no `ssh` to
     rebind, so the row used to spawn a plain LOCAL terminal at the peer's remote path; it is now
     withheld there instead — spawning onto a peer's core is a real feature, not a one-liner.
-  - Creation is gated on the project having a directory (`hasCwd`) on every surface — pane menu,
-    Dock, sidebar "+", ⌘K, and the group-frame menu, where it inherits a bound **worktree's** cwd
+  - Creation needs a project directory (`hasCwd`), and **the row degrades EXPLICITLY rather than
+    vanishing** — disabled, carrying `FILES_NO_CWD_HINT` (an alias of `NEW_FILE_NO_CWD_HINT`), on
+    the pane menu, the Dock and the sidebar "+". That is the rule #621 established for "New file…"
+    and the SSH worktree row: a cwd-less project is a supported, persisted canvas, so a row that
+    simply disappears takes its own reason with it while the fix ("Set folder…") sits one menu
+    away. **⌘K is the deliberate exception** and hides the entry, exactly as main's "New file…"
+    does — a disabled palette entry surfaces as a search result that does nothing, the same reason
+    `sshAccountsHint` is omitted there. Inside a group frame it inherits a bound **worktree's** cwd
     via `cwdForNewNodeIn`, so a frame per branch also means a file tree per branch.
   - **A node kind not registered in `lib/reopenNode.ts` is a trap, and this one fell in it.** Every
     kind must sit in exactly one of `UNRESTORABLE` or a `buildBase` `case` — `files` was in neither,

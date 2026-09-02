@@ -3,6 +3,7 @@ import {
   CONTENT_ADD_ITEMS,
   contentAddItemsToMenuItems,
   contentAddItemsToDockRows,
+  FILES_NO_CWD_HINT,
   NEW_FILE_NO_CWD_HINT,
   WORKTREE_NO_CWD_HINT,
   WORKTREE_SSH_HINT,
@@ -72,12 +73,18 @@ describe('contentAddItemsToMenuItems', () => {
     ])
   })
 
-  it('hides "New file manager" when the project has no cwd', () => {
+  // Follows the rule main established for "New file…": a folder-shaped row on a cwd-less canvas
+  // degrades EXPLICITLY. This test previously asserted the row was HIDDEN, which is the behaviour
+  // that rule reversed.
+  it('DISABLES "New file manager" with its reason when the project has no cwd — never hides it', () => {
     const items = contentAddItemsToMenuItems(CONTENT_ADD_ITEMS, handlers(), {
       hasCwd: false,
       isSshProject: false
     })
-    expect(items.some((i) => 'label' in i && i.label === 'New file manager')).toBe(false)
+    const row = items.find((i) => 'label' in i && i.label === 'New file manager')
+    expect(row).toBeDefined()
+    expect(row && 'disabled' in row && row.disabled).toBe(true)
+    expect(row && 'hint' in row && row.hint).toBe(FILES_NO_CWD_HINT)
   })
 
   // A cwd-less project is a supported, persisted canvas — the folder-shaped rows must degrade
@@ -170,12 +177,15 @@ describe('contentAddItemsToDockRows', () => {
     expect(rows.some((r) => r.kind === 'remote')).toBe(false)
   })
 
-  it('hides "files" when there is no cwd', () => {
+  it('DISABLES "files" with its reason when there is no cwd — the Dock keeps the row too', () => {
     const rows = contentAddItemsToDockRows(CONTENT_ADD_ITEMS, handlers(), {
       hasCwd: false,
       isSshProject: false
     })
-    expect(rows.some((r) => r.kind === 'files')).toBe(false)
+    const row = rows.find((r) => r.kind === 'files')
+    expect(row).toBeDefined()
+    expect(row?.disabled).toBe(true)
+    expect(row?.hint).toBe(FILES_NO_CWD_HINT)
   })
 
   it('DISABLES "new-file" with its reason when there is no cwd — the Dock keeps the row too', () => {

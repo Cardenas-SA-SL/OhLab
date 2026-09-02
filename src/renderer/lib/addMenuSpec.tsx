@@ -125,6 +125,8 @@ export const WORKTREE_SSH_HINT = 'Not supported in SSH projects yet'
  */
 export const NEW_FILE_NO_CWD_HINT = 'This project has no folder — set one first (tab ⌄ → “Set folder…”)'
 export const WORKTREE_NO_CWD_HINT = NEW_FILE_NO_CWD_HINT
+/** Same reason, same fix — a file manager has nothing to list without a project folder. */
+export const FILES_NO_CWD_HINT = NEW_FILE_NO_CWD_HINT
 
 /**
  * Map the canonical content list to {@link MenuItem}s for the `ContextMenu` component.
@@ -164,11 +166,18 @@ export function contentAddItemsToMenuItems(
         out.push({ label: 'New sticky note', icon: <IconNote />, onClick: () => handlers.sticky(at) })
         break
       case 'files':
-        // Needs a directory to root itself in — hidden on a cwd-less canvas for the same reason
-        // "New file…" is: an affordance that can only report "there is no folder" is not one.
-        if (ctx.hasCwd) {
-          out.push({ label: 'New file manager', icon: <IconExplorer />, onClick: () => handlers.files(at) })
-        }
+        // A file manager needs a directory to root itself in. This row used to be HIDDEN on a
+        // cwd-less canvas, reasoning that it was "the same as New file…" — and main has since
+        // reversed exactly that rule (`NEW_FILE_NO_CWD_HINT`): a cwd-less project is a supported,
+        // persisted canvas, so a folder-shaped row degrades EXPLICITLY rather than vanishing,
+        // because a row that is gone takes its reason with it and the fix is one menu away.
+        out.push({
+          label: 'New file manager',
+          icon: <IconExplorer />,
+          disabled: !ctx.hasCwd,
+          hint: ctx.hasCwd ? undefined : FILES_NO_CWD_HINT,
+          onClick: () => handlers.files(at)
+        })
         break
       case 'dino':
         out.push({ label: 'New dino game', icon: <IconDino />, onClick: () => handlers.dino(at) })
@@ -258,9 +267,14 @@ export function contentAddItemsToDockRows(
         out.push({ kind: 'sticky', label: 'Sticky Note', icon: <IconNote />, onClick: () => handlers.sticky() })
         break
       case 'files':
-        if (ctx.hasCwd) {
-          out.push({ kind: 'files', label: 'File Manager', icon: <IconExplorer />, onClick: () => handlers.files() })
-        }
+        out.push({
+          kind: 'files',
+          label: 'File Manager',
+          icon: <IconExplorer />,
+          disabled: !ctx.hasCwd,
+          hint: ctx.hasCwd ? undefined : FILES_NO_CWD_HINT,
+          onClick: () => handlers.files()
+        })
         break
       case 'dino':
         out.push({ kind: 'dino', label: 'Dino Game', icon: <IconDino />, onClick: () => handlers.dino() })
