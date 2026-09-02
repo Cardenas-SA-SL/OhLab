@@ -327,6 +327,13 @@ export interface CanvasNodeState {
   collapsed?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
+  /**
+   * A user-chosen icon shown wherever this node is listed (canvas header, kanban card, sessions
+   * sidebar): one emoji/character, or an image file. Absent = the node draws exactly as it did
+   * before the feature. Validate with `normalizeNodeIcon` at the point of use — this value comes
+   * from a git-shared, hand-editable project file. See @shared/node-icon.
+   */
+  icon?: import('./node-icon').NodeIcon
   /** Parent group node id, if this node belongs to a group frame. */
   parentId?: string
   // terminal-only
@@ -422,6 +429,24 @@ export interface ClosedSessionEntry {
   closedAt: number
   node: CanvasNodeState
   absolutePosition: { x: number; y: number }
+  /**
+   * The agent session this node was running when it was closed — a POINTER to the transcript the
+   * agent CLI already owns, never a copy of its text (issue #531). It is the one fact that dies
+   * with the node and cannot be recovered afterwards: the live id is held only in the transient
+   * `agentStatus` store, whose entry is dropped on delete, while the transcript `.jsonl` itself
+   * stays on disk under the agent's own root. Without it a closed station's work cannot be read
+   * back at all, which is what made "close the node once its branch is merged" quietly destructive.
+   *
+   * Captured at close from the hook-fed live id, falling back to `node.agentSessionId` (the id
+   * nodeterm minted at creation) — the two agree whenever both exist, and each covers a case the
+   * other misses (a RESUMED session has no minted id; a node that never emitted a hook event has
+   * no live one).
+   *
+   * MACHINE-LOCAL by construction: `closedSessions` rides `IndexEntryV3`, never the git-shared
+   * `.nodeterm/project.json` (see `Project.closedSessions`), so a session id — a `$HOME`-anchored
+   * fact about one person's machine — is never shipped to everyone who clones the repo.
+   */
+  sessionId?: string
 }
 
 /**
@@ -2390,16 +2415,22 @@ export interface ChatTranscriptResult {
 
 export interface ChatApi {
   /**
-   * Reads a Claude session transcript as structured chat messages.
+   * Reads an agent session transcript as structured chat messages.
    * Resolves the transcript like `ClaudeApi.readTranscript` (sessionId → cwd), then
    * reconstructs ordered bubbles + tool calls. `nodeId` lets an SSH-project node be resolved
    * on its HOST even when no hook event has registered its transcript in this app run.
+   *
+   * `agentId` picks the reader. Omitted (or `claude`) keeps the historical claude path exactly as
+   * it was. It is NOT optional in spirit: without it a grok node falls into claude's resolver, whose
+   * cwd fallback returns the newest CLAUDE transcript for that directory — someone else's
+   * conversation. `CHAT_CAPABLE` decides who may ask; this decides who answers.
    */
   readTranscript(
     sessionId: string | undefined,
     cwd: string | undefined,
     accountId?: string,
-    nodeId?: string
+    nodeId?: string,
+    agentId?: string
   ): Promise<ChatTranscriptResult>
 }
 
@@ -2511,6 +2542,41 @@ export interface ClaudeCliCaps {
    * the CLI exit, so a wrong guess kills every claude launch rather than degrading.
    */
   sessionIdFlag: boolean
+}
+
+export interface GrokCliCaps {
+  /**
+   * Whether the local grok CLI accepts `--session-id <uuid>`, so nodeterm can MINT a node's session
+   * id instead of waiting to learn it from a hook.
+   *
+   * Probed from `grok --help` by `core/grok-cli.ts` — grok's OWN probe, never claude's. The two
+   * CLIs are installed and upgraded independently, so claude's answer is not even correlated with
+   * grok's, and an unknown flag makes grok exit rather than degrade.
+   *
+   * grok's grammar differs from claude's in three measured ways (1.0.13): the UUID must not already
+   * exist under the target session directory, so minting one twice is a LAUNCH ERROR and never a
+   * resume; `--session-id` combines with `--resume`/`--continue` only alongside `--fork-session`;
+   * and `--resume` accepts a TITLE as well as an id, failing as ambiguous on duplicates.
+   */
+  sessionIdFlag: boolean
+}
+
+/** Unprobed grok ⇒ omit the flag ⇒ today's command line, byte-identical. */
+export const UNKNOWN_GROK_CLI_CAPS: GrokCliCaps = { sessionIdFlag: false }
+
+export interface GrokApi {
+  /** Capabilities of the local grok CLI (memoized in the shell; safe to call repeatedly).
+   *  Never rejects — an unprobed CLI resolves to the fail-open caps. */
+  cliCaps(): Promise<GrokCliCaps>
+  /**
+   * The session ids grok already has under this cwd.
+   *
+   * Needed because grok REFUSES a `--session-id` that already exists under the target session
+   * directory — that is a launch error, not a resume, so a node handed a taken id never starts. An
+   * array rather than a Set: a Set does not survive the IPC/WS-RPC boundary and would arrive empty,
+   * which is the one wrong answer this call can give.
+   */
+  takenSessionIds(cwd: string): Promise<string[]>
 }
 
 /** The answer whenever the CLI version can't be determined: no `auto` flag → bare command, and no
@@ -2870,12 +2936,13 @@ export interface PairingApi {
   stop(): Promise<void>
   /** Fires once when pairing finishes (ok=true paired, ok=false timeout). Returns unsubscribe. */
   onDone(cb: (result: { ok: boolean; relay?: 'ok' | 'off' | 'failed' | 'dev' }) => void): () => void
-  /** Live re-probe of 127.0.0.1:22, so the Remote Login warning can clear the moment the user
-   *  flips the toggle in System Settings (polled by the UI only while the warning is showing). */
+  /** Live re-probe of 127.0.0.1:22, so the "SSH server is off" warning can clear the moment the
+   *  user turns it on (polled by the UI only while the warning is showing). */
   probeSsh(): Promise<boolean>
-  /** Open System Settings → General → Sharing (Remote Login). The deep link is a main-side
-   *  constant — x-apple.* schemes never pass shellOpenExternal's http(s) allowlist. macOS-only;
-   *  a no-op elsewhere. */
+  /** Open this OS's settings page for its SSH server — Sharing → Remote Login on macOS, Optional
+   *  features on Windows (`sshServerCopy().settingsUrl`, the same table the warning's copy comes
+   *  from). The deep link is a main-side constant: neither scheme passes shellOpenExternal's
+   *  http(s) allowlist. A no-op where that table offers no URL, and the UI shows no button there. */
   openRemoteLoginSettings(): Promise<void>
   /** List paired devices from ~/.nodeterm/agent.json (never includes the token). */
   listDevices(): Promise<PairedDevice[]>
@@ -2986,6 +3053,7 @@ export interface NodeTerminalApi {
   canvas: CanvasApi
   codex: CodexApi
   claude: ClaudeApi
+  grok: GrokApi
   /** Custom-agent launch/preview (env-var expansion + command assembly). */
   agent: AgentApi
   chat: ChatApi
@@ -3100,6 +3168,17 @@ export interface NodeTerminalApi {
    *  full set each change, never a delta. Feeds `isNodeWatched` so Eco cannot hibernate a session
    *  someone is watching from a phone. Desktop-only signal, like `onAgentWake`. */
   onRemoteViewers(listener: (nodeIds: string[]) => void): () => void
+  /** Fires when the core asks this renderer to reload a terminal node's view in place (bump its
+   *  `respawnNonce` — fresh attach to the SAME tmux session) — the phone relay host's
+   *  `node.refresh` verb. A nudge with the `onAgentWake` contract: no-op for an unknown,
+   *  non-terminal or unmounted node. Desktop-only signal (the relay host lives in the desktop
+   *  main process); the ws-bridge subscribes to nothing and returns a no-op unsubscribe. */
+  onAgentRefreshNode(listener: (nodeId: string) => void): () => void
+  /** Fires when the core asks this renderer to rename a node on a phone's behalf (the relay
+   *  host's `node.rename` verb, title already sanitized host-side). The renderer routes it
+   *  through the same `renameSession` funnel as the node header. Desktop-only signal, like
+   *  `onAgentRefreshNode`. */
+  onAgentRenameNode(listener: (payload: { nodeId: string; title: string }) => void): () => void
   /** Fires with live subagent transcript chunks while a subagent runs. Returns unsubscribe. */
   onSubagentActivity(listener: (e: SubagentActivity) => void): () => void
   /** Fires when an agent's `nodeterm` CLI requests a canvas action. Returns unsubscribe. */

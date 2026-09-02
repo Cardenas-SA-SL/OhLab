@@ -82,6 +82,7 @@ import {
   planOffscreenVisibility,
   releaseStillEnabled,
   shouldDeferReleaseForEco,
+  shouldDeferReleaseForHeldLaunch,
   shouldDeferReleaseForLiveWork,
   OFFSCREEN_DEFER_RETRY_MS,
   OFFSCREEN_DISPOSE_MS_DEFAULT
@@ -142,6 +143,8 @@ import { renameCommand } from '../lib/sessionRename'
 import { useSettings } from '../state/settings'
 import { useCodexIdentity, codexSharedIdentity, codexFallbackText } from '../state/codexIdentity'
 import { useAgentStatus, agentStatusForApi, inferInterruptAfterSettle } from '../state/agentStatus'
+import { useLaunchDelivery } from '../state/launchDelivery'
+import { erroredDeps, launchTooltip } from '../lib/pendingLaunch'
 import type { AgentState } from '@shared/agents/normalize'
 import type { ClientId } from '@shared/presence'
 import { PresenceChips } from '../components/PresenceChips'
@@ -191,6 +194,10 @@ import { ColumnPill } from '../components/kanban/ColumnPill'
 import { BoardLogPanel } from '../components/kanban/BoardLogPanel'
 import { AgentMascot } from './AgentMascot'
 import { MaximizeButton } from './MaximizeButton'
+import { NodeIconView } from '../components/NodeIcon'
+import { nodeIconDialog } from '../components/NodeIconPicker'
+import { applyIconChoice } from '../lib/nodeIconChoice'
+import type { NodeIcon } from '@shared/node-icon'
 import { connectHostAttachment } from '../lib/sshAttachments'
 
 /** Which physical modifier the registry's abstract `Cmd` resolves to for the find-bar chord. */
@@ -836,6 +843,54 @@ const coSubs = new Map<string, (s: CoState) => void>()
 const restartSubs = new Map<string, () => void>()
 
 /**
+ * Nodes whose terminal is up and settled enough to be TYPED INTO — the signal Canvas's armed-launch
+ * loop waits on before it delivers a held command (`pendingLaunch`).
+ *
+ * It exists because the loop used to wait on nothing at all: it fired `pty.sendText` the instant
+ * the canvas held the node and spent a flat 2 s retry budget while the session was still being
+ * spawned, then gave up in a `console.warn`. On a cold project switch that budget is gone before
+ * tmux has a session to paste into, which is issue #569 item 1 — a node stuck on QUEUED that only
+ * a manual click could start.
+ *
+ * "Ready" is deliberately the same moment `writeWhenShellReady` delivers an `initialCommand`: the
+ * session resolved AND its shell has gone quiet. Both paths type into the same pane, and a launch
+ * line written across zsh's rc-file tty flush is the mangled-command bug that helper exists for.
+ *
+ * ABSENT = not ready, which is the safe direction: it holds the launch (visibly — see
+ * `useLaunchDelivery`) instead of burning it against a session that is not there. Published by the
+ * node itself, since nothing else can see the spawn resolve. A PARKED session stays ready, and so
+ * does one whose viewer was RELEASED offscreen while tmux is underneath — both are still a live
+ * tmux session addressable by name; only a teardown that ends the session (respawn, delete, or the
+ * release of a plain-shell session) clears it.
+ */
+const sessionReadyNodes = new Set<string>()
+const sessionReadySubs = new Set<(nodeId: string) => void>()
+
+/** Is this node's session up and typeable? Unknown answers false — see the note above. */
+export function isSessionReady(nodeId: string): boolean {
+  return sessionReadyNodes.has(nodeId)
+}
+
+/**
+ * Watch for nodes becoming ready. The callback is handed the node id rather than being a bare
+ * "something changed" ping: Canvas re-renders on it, and a canvas of forty terminals must not
+ * re-render forty times on load for the sake of the one node that is armed.
+ */
+export function subscribeSessionReady(cb: (nodeId: string) => void): () => void {
+  sessionReadySubs.add(cb)
+  return () => {
+    sessionReadySubs.delete(cb)
+  }
+}
+
+function setSessionReady(nodeId: string, ready: boolean): void {
+  if (sessionReadyNodes.has(nodeId) === ready) return
+  if (ready) sessionReadyNodes.add(nodeId)
+  else sessionReadyNodes.delete(nodeId)
+  for (const cb of sessionReadySubs) cb(nodeId)
+}
+
+/**
  * Which mounted terminals are currently OUT of the viewport, published by the one visibility
  * observer each node already runs (Phase 2's) — never a second observer, and never a second
  * verdict: this map only mirrors what that callback decided.
@@ -1301,6 +1356,10 @@ export function TerminalNode({
   // with — it can be off-screen mid-drag or right after a ⌘K jump — so it is never taken down.
   const selectedRef = useRef(selected)
   selectedRef.current = selected
+  // Is this node holding a `--after` launch? Read at release FIRE time (see `fireRelease`) — the
+  // hold ends when the launch fires, and a plan made at arm time would not know.
+  const armedRef = useRef(!!data.pendingLaunch)
+  armedRef.current = !!data.pendingLaunch
   // --- glyphgrid (experimental shared renderer) ---
   // This node's registered grid, published by the lifecycle effect so the position effect can push
   // an origin without re-running (and therefore respawning) the terminal. Null for every terminal
@@ -1587,6 +1646,11 @@ export function TerminalNode({
   // it is armed, and by WHAT it is blocked — dep titles read straight off the live canvas, since
   // "waits for term-17" tells the user nothing.
   const pendingLaunch = data.pendingLaunch as PendingLaunch | undefined
+  // What the delivery loop has to say about this node's held launch, if anything. Absent is the
+  // ordinary case (still waiting on a dependency); the two states it can carry are the ones that
+  // used to be invisible — see the store. Selected by id so an unarmed node never re-renders on
+  // another node's delivery.
+  const launchDelivery = useLaunchDelivery((s) => s.byId[id])
   const pendingWaitingOn = [
     ...(pendingLaunch?.after ?? []).map(
       (depId) => ((getNode(depId) as CanvasNode | undefined)?.data.title as string) || depId
@@ -1595,6 +1659,24 @@ export function TerminalNode({
     // tooltip on a setup-only hold would read "Waiting for  to finish".
     ...(pendingLaunch?.awaitSetupGroup ? ['the project setup script'] : [])
   ].join(', ')
+  // Which of those deps are held because their last turn ERRORED (issue #521) — an errored station
+  // is idle, so without naming them the tooltip would promise a wait that will never end on its
+  // own. Selected as a joined string so the selector returns a primitive and an unarmed node never
+  // re-renders on another node's status.
+  const erroredDepIds = useAgentStatus((s) => {
+    const after = pendingLaunch?.after ?? []
+    if (!after.length) return ''
+    // Same liveness rule `depSatisfied` uses: a dep that is gone counts as satisfied, so it is
+    // not something this node is held on and must not be named as one.
+    const live = new Set(after.filter((d) => !!getNode(d)))
+    return erroredDeps({ id, data: { pendingLaunch } }, s.byId, live).join(',')
+  })
+  const pendingErroredOn = erroredDepIds
+    ? erroredDepIds
+        .split(',')
+        .map((depId) => ((getNode(depId) as CanvasNode | undefined)?.data.title as string) || depId)
+        .join(', ')
+    : ''
   // Use the chat panel only for a chat-capable agent with a known session; otherwise the
   // markdown-of-output view (computed in the capture effect below) is shown as a fallback.
   const useChat = mdMode && showChat && !!status?.sessionId
@@ -1781,6 +1863,11 @@ export function TerminalNode({
       parkedTerminals.delete(termKey)
       parked.timer.cancel()
     }
+    // An ADOPTED terminal is already typeable — the same live session, the same settled shell —
+    // and its spawn continuation ran on a previous mount, so it will never reach the publish
+    // below. A fresh one starts NOT ready: this effect also re-runs for a respawn and for an
+    // offscreen revive, and both replace the session a stale `true` would describe.
+    setSessionReady(id, !!parked)
 
     const s = useSettings.getState().settings
     // Appearance comes from ONE place, shared with the kanban card modal's viewer of this same
@@ -2651,7 +2738,12 @@ export function TerminalNode({
       // into a CSI write and cancel the event — and DO NOT preventDefault: the dispatcher bails
       // on defaultPrevented events, so a prevented bubble would kill the very dispatch this
       // exists to reach.
-      if (action === 'bubble') return false
+      // 'native': same mechanics, different owner — the PLATFORM's paste (Windows Ctrl+V, issue
+      // #562). xterm would map it to \x16 and cancel the keydown, which suppresses both
+      // Chromium's paste command and the Edit menu's Ctrl+V accelerator; leaving the event
+      // untouched lets the ordinary `paste` event reach xterm's textarea, exactly as ⌘V does on
+      // macOS (bracketed-paste framing included).
+      if (action === 'bubble' || action === 'native') return false
       e.preventDefault()
       if (action === 'copy') window.nodeTerminal.clipboard.writeText(term.getSelection())
       // Shift+Enter → ESC+CR so agent CLIs insert a newline instead of submitting
@@ -3069,22 +3161,14 @@ export function TerminalNode({
         // `quote>` on Enter) instead of running. The settle wait below minimizes wasted
         // attempts; deliverCommand (echo-verify + retry, fail-open) guarantees a mangled
         // line is never submitted. See command-delivery.ts.
-        const writeWhenShellReady = (cmd: string): void => {
+        const whenShellSettled = (run: () => void): void => {
           let done = false
           let timer: ReturnType<typeof setTimeout>
           const fire = (): void => {
             if (done) return
             done = true
             unsub()
-            cleanups.push(
-              deliverCommand(
-                {
-                  write: (d) => transport.write(sid, d),
-                  onData: (cb) => transport.onData(sid, cb)
-                },
-                cmd
-              )
-            )
+            run()
           }
           const unsub = transport.onData(sid, () => {
             if (done) return
@@ -3098,6 +3182,26 @@ export function TerminalNode({
             unsub()
           })
         }
+        const writeWhenShellReady = (cmd: string): void => {
+          whenShellSettled(() => {
+            cleanups.push(
+              deliverCommand(
+                {
+                  write: (d) => transport.write(sid, d),
+                  onData: (cb) => transport.onData(sid, cb)
+                },
+                cmd
+              )
+            )
+          })
+        }
+        // Tell the canvas this node can be typed into — the gate its armed-launch loop waits on.
+        // Through the SAME settle the two writers above use, and for the same reason: the held
+        // launch is an agent CLI command line, and a line delivered across zsh's rc-file tty flush
+        // comes out mangled. Published unconditionally (not only for an armed node): whether this
+        // node is armed is Canvas's question, it can change after the spawn resolves, and the
+        // subscribers filter by id anyway.
+        whenShellSettled(() => setSessionReady(id, true))
         // Hibernation × cold restore. `hibernated` is PERSISTED, so it can outlive the very thing
         // it describes:
         //  - `fresh` (the tmux session is GONE — a reboot, a reaped server, a first open): the CLI
@@ -3122,10 +3226,25 @@ export function TerminalNode({
         if (data.initialCommand) {
           writeWhenShellReady(data.initialCommand)
           updateNodeData(id, { initialCommand: undefined })
-        } else if (fresh && agentId && canResume(agentId) && shouldColdResume(pausedNow)) {
+        } else if (
+          fresh &&
+          agentId &&
+          canResume(agentId) &&
+          !data.pendingLaunch &&
+          shouldColdResume(pausedNow)
+        ) {
           // Cold restart of an agent node: the live agent is gone, so re-launch it. Resume the
           // prior conversation by its session id when we have one; otherwise start the agent
           // fresh. Plain terminals get nothing here — just the restored shell.
+          //
+          // An ARMED node (`pendingLaunch`) is excluded, and that is the point of arming: its
+          // launch — the very same agent CLI line, with the brief it was opened for — is being
+          // HELD until its dependencies finish. Launching a bare CLI here starts the session the
+          // hold exists to prevent, and Canvas's held launch then arrives as TEXT typed into the
+          // running CLI rather than as the command it is. A first open is `fresh` by definition,
+          // so this covered every `--after` / `verify` node; it was previously masked by the
+          // delivery race (the held launch usually lost it and was retried), and gating delivery
+          // on the shell settling would have made the collision deterministic.
           //
           // Two sources, in this order, and the order is the whole point:
           //  1. the LIVE id from hooks, which tracks `/clear` and `--fork-session` minting a new
@@ -3886,6 +4005,17 @@ export function TerminalNode({
       // EARLIER effect (this terminal may have been adopted from a park) sees the session die here
       // and tears down instead of wiring listeners onto it; `killSession` keeps the kill single.
       life.dead = true
+      // A real teardown (respawn, delete) ends the session this node published as ready. A PARK
+      // does not, and returns above without reaching here — a parked session is still a live tmux
+      // session addressable by name, so it stays typeable. An OFFSCREEN RELEASE of a tmux-backed
+      // session is the same fact from the other side: only the viewer goes, the session keeps
+      // running and `sendText` reaches it by name — so readiness is kept. MEASURED (2026-09-02):
+      // clearing it here held a released `--after` node's launch through its dependency going
+      // `done`, with the badge claiming the terminal "has not started yet", until a camera travel
+      // revived the node and it fired at once. The plain-shell fallback never reaches this branch
+      // armed — `shouldDeferReleaseForHeldLaunch` holds the release there — and a respawn while
+      // down is not a release (the effect early-returned, so there is no session to keep).
+      if (!(offscreenDownRef.current && sessionPersistent)) setSessionReady(id, false)
       cleanups.forEach((fn) => fn())
       if (sessionId) killSession(sessionId)
       term.dispose()
@@ -4020,6 +4150,22 @@ export function TerminalNode({
               // runs would skip the hibernate-first ordering and forfeit the CLI's hundreds of MB
               // at the exact moment they became reclaimable. The stretch effectively begins when
               // the work ends.
+              offscreenSinceRef.current = Date.now()
+              offscreenTimerRef.current = setTimeout(fireRelease, OFFSCREEN_DEFER_RETRY_MS)
+              return
+            }
+            // A HELD LAUNCH ON A PLAIN SHELL (the fifth lever): the `--after` launch this node holds
+            // is typed into the pane by session name, and without tmux the release destroys that
+            // pane. Nothing brings a released node back but the camera, so the launch would sit
+            // QUEUED until the user happened to pan over it. Same cadence, same drain: the hold
+            // ends when the launch fires. (Tmux-backed: released as normal — see the teardown,
+            // which keeps such a session READY because it stays typeable by name.)
+            if (
+              shouldDeferReleaseForHeldLaunch({
+                tmuxBacked: sessionPersistentRef.current,
+                armed: armedRef.current
+              })
+            ) {
               offscreenSinceRef.current = Date.now()
               offscreenTimerRef.current = setTimeout(fireRelease, OFFSCREEN_DEFER_RETRY_MS)
               return
@@ -4637,6 +4783,24 @@ export function TerminalNode({
             ))}
           </div>
         )}
+        {data.icon ? (
+          <button
+            className="term-node__icon nodrag"
+            title="Change icon"
+            onClick={(e) => {
+              e.stopPropagation()
+              void nodeIconDialog({
+                nodeId: id,
+                title: (data.title as string) ?? '',
+                icon: data.icon as NodeIcon
+              }).then((choice) =>
+                applyIconChoice(choice, (icon) => updateNodeData(id, { icon }))
+              )
+            }}
+          >
+            <NodeIconView icon={data.icon as NodeIcon} size={15} />
+          </button>
+        ) : null}
         {editingTitle ? (
           <input
             className="term-node__title nodrag"
@@ -4776,22 +4940,48 @@ export function TerminalNode({
             "run now" an armed node left over from before the restart would be a dead end. */}
         {pendingLaunch && (
           <span
-            className="term-node__status term-node__status--queued nodrag"
-            title={`Waiting for ${pendingWaitingOn} to finish, then runs:\n${pendingLaunch.command}`}
+            className={`term-node__status term-node__status--queued nodrag${
+              launchDelivery ? ' term-node__status--queued-warn' : ''
+            }`}
+            title={launchTooltip(launchDelivery, pendingWaitingOn, pendingLaunch.command, pendingErroredOn)}
           >
             <span className="term-node__status-dot" />
-            QUEUED
+            {launchDelivery ? '⚠ ' : ''}QUEUED
             <button
               className="term-node__queued-run"
               title="Run now without waiting"
               onClick={(e) => {
                 e.stopPropagation()
-                void api.pty.sendText(id, pendingLaunch.command)
-                updateNodeData(id, { pendingLaunch: undefined })
+                // Disarm only on a delivery that actually landed. Dropping `pendingLaunch`
+                // unconditionally threw the command away whenever the session was not up yet —
+                // and "not up yet" is precisely the state a user reaches for this button in, so
+                // the one escape hatch could destroy the thing it exists to rescue.
+                void api.pty.sendText(id, pendingLaunch.command).then((ok) => {
+                  if (ok) {
+                    useLaunchDelivery.getState().clear(id)
+                    updateNodeData(id, { pendingLaunch: undefined })
+                  } else {
+                    useLaunchDelivery.getState().markFailed(id, 1)
+                  }
+                })
               }}
             >
               ▶
             </button>
+          </span>
+        )}
+        {/* Issue #521: the last turn ended on an API/model error (the agent's own `StopFailure`
+            hook). NOT a state — the station is idle, and the two facts coexist; this is the only
+            thing on any surface that tells an errored station apart from one that finished. It
+            clears itself on the next genuine turn. Shown beside a `done`/unknown state only: a
+            live RUNNING/NEEDS YOU is about the CURRENT turn and speaks for itself. */}
+        {status?.lastTurnError && status?.state !== 'working' && (
+          <span
+            className="term-node__status term-node__status--errored"
+            title={`${agentLabel} ended its last turn on an error \u2014 it produced nothing this turn. Anything armed to wait on this node is held until a turn succeeds.`}
+          >
+            <span className="term-node__status-dot" />
+            TURN FAILED
           </span>
         )}
         {(status?.state === 'waiting' || status?.state === 'blocked') && (
@@ -5107,9 +5297,12 @@ export function TerminalNode({
                 nodeId={id}
                 sessionId={status?.sessionId}
                 cwd={data.cwd as string | undefined}
-                // A READER (the ⌘M transcript view): the account the session RUNS as (D5), so a
-                // plain terminal on ~/.claude-2 reads ITS transcript instead of an empty system one.
+                // A READER (the ⌘M transcript view) takes the account the session actually RUNS
+                // as, never the creation-time one, so a plain terminal launched under
+                // `CLAUDE_CONFIG_DIR=~/.claude-2` reads ITS transcript instead of an empty
+                // system-root one. Spawn/env identity is unaffected — that stays creation-time.
                 accountId={accountForReads}
+                agentId={agentId}
               />
             </Suspense>
           ) : (

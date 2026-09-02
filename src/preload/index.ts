@@ -520,6 +520,10 @@ const api: NodeTerminalApi = {
     readTranscript: (sessionId, cwd, accountId, nodeId) =>
       ipcRenderer.invoke(IPC.claudeReadTranscript, sessionId, cwd, accountId, nodeId)
   },
+  grok: {
+    cliCaps: () => ipcRenderer.invoke(IPC.grokCliCaps),
+    takenSessionIds: (cwd) => ipcRenderer.invoke(IPC.grokTakenSessionIds, cwd)
+  },
   agent: {
     envSnapshot: () => ipcRenderer.invoke(IPC.envSnapshot),
     discoverModels: (settings) => ipcRenderer.invoke(IPC.agentDiscoverModels, settings),
@@ -529,8 +533,8 @@ const api: NodeTerminalApi = {
     clearGatewayCredential: () => ipcRenderer.invoke(IPC.agentGatewayCredentialClear)
   },
   chat: {
-    readTranscript: (sessionId, cwd, accountId, nodeId) =>
-      ipcRenderer.invoke(IPC.chatReadTranscript, sessionId, cwd, accountId, nodeId)
+    readTranscript: (sessionId, cwd, accountId, nodeId, agentId) =>
+      ipcRenderer.invoke(IPC.chatReadTranscript, sessionId, cwd, accountId, nodeId, agentId)
   },
   claudeAccounts: {
     add: (ctx) => ipcRenderer.invoke(IPC.claudeAccountsAdd, ctx),
@@ -768,6 +772,16 @@ const api: NodeTerminalApi = {
     const handler = (_e: unknown, nodeIds: string[]) => listener(nodeIds)
     ipcRenderer.on(IPC.agentRemoteViewers, handler)
     return () => ipcRenderer.removeListener(IPC.agentRemoteViewers, handler)
+  },
+  onAgentRefreshNode: (listener) => {
+    const handler = (_e: unknown, nodeId: string) => listener(nodeId)
+    ipcRenderer.on(IPC.agentRefreshNode, handler)
+    return () => ipcRenderer.removeListener(IPC.agentRefreshNode, handler)
+  },
+  onAgentRenameNode: (listener) => {
+    const handler = (_e: unknown, payload: { nodeId: string; title: string }) => listener(payload)
+    ipcRenderer.on(IPC.agentRenameNode, handler)
+    return () => ipcRenderer.removeListener(IPC.agentRenameNode, handler)
   },
   onSubagentActivity: (listener) => {
     const handler = (_e: unknown, payload: Parameters<typeof listener>[0]) => listener(payload)

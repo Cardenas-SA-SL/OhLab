@@ -313,8 +313,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
     '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
     '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
-    '  start until every listed station has gone idle, and is context-linked to them so it can read',
-    '  their work when it wakes — use it for "B needs what A produced" instead of polling. Only',
+    '  start until every listed station has finished a turn SUCCESSFULLY, and is context-linked to',
+    '  them so it can read their work when it wakes — use it for "B needs what A produced" instead',
+    '  of polling. A station whose turn ended on an API error does NOT release its dependents even',
+    '  though it is idle (`list` marks it LAST TURN ERRORED); nudge or retry it, or run the armed',
+    '  node yourself. Only',
     `  status-reporting agent nodes (${statusAgents}, or custom agents based on them) may be waited on; a plain terminal never`,
     '  reports finishing, so waiting on one is refused. `--project <id>` opens the node(s) in another',
     '  project instead of yours. It accepts exactly two things — any other id is refused: your OWN',
@@ -322,6 +325,13 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  included); or an id `open-project` returned to YOU in this session, which never switches the',
     '  user\'s view. A session opened into a non-active project starts when the user next views that',
     '  project — do not poll for it. `--group`/`--after` cannot be combined with `--project`.',
+    '  The reply reports whether anything actually started: `queued` is true (and `queuedIds`',
+    '  lists which) when a node was opened ARMED — waiting on `--after`, on a worktree\'s',
+    '  setup script, or on a `--project` target the user has not viewed yet. A queued node',
+    '  exists on the canvas but has no process behind it: do not route work to it, do not',
+    '  `send` to it and do not report it as started. It launches itself when its wait ends,',
+    '  then reports through the ordinary status hooks — there is nothing to poll.',
+    '  `queued: false` means the session is running.',
     '  `--prompt` arrives on ONE LINE: every run of whitespace in it, newlines included, is',
     '  collapsed to a single space before the session starts (the prompt rides the launch command',
     '  line typed into the pane). For a structured or multi-line brief use `--prompt-file <abs',
@@ -380,6 +390,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  the user to confirm deletion.',
     '- `branch --node <id>` — branch a Claude node\'s conversation (Claude nodes only).',
     '- `rename --node <id> --title "New Name"` — rename any node (terminals, groups, stickies…).',
+    '  Renaming to the title the node ALREADY has is a no-op: nothing is typed into its agent',
+    '  session, and the reply says `already named`. Re-assert your own name as often as you like.',
     '- `write --node <id> --text "..."` / `close --node <id>` — type into / close a node.',
     '  Both ask the user to confirm a dialog and may be denied. Read WHICH answer came back:',
     '  `denied by user` is a decision and is FINAL — never re-ask — while `no answer within 120s`',
@@ -687,6 +699,10 @@ ${dryRunDocLines().join('\n')}
 
 Verbs:
 - \`list\` — list current nodes (id, kind, title). Start here when you need a node id.
+  A row ending **LAST TURN ERRORED** is a station whose last turn died on an API/model error:
+  it is idle, but it produced nothing, so do not read its output or build on it. The marker
+  is on the row on purpose — a fan-out of seven stations should cost one call to learn this,
+  not seven. It clears itself the moment that station completes another turn.
 - \`help\` — print the verb list. The shim answers this itself, without reaching the app, so it
   is also what to run when you are unsure whether the control endpoint is alive.
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]\` — open N plain terminals (default 1).
@@ -695,13 +711,17 @@ Verbs:
   \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
   hands its worktree path down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
-  every listed station has gone idle — that is how you express "B needs what A produces" without
+  every listed station has finished a turn successfully — that is how you express "B needs what A produces" without
   sitting in a poll loop. The armed node is also context-linked to each station it waits on, so
   it can read their work the moment it wakes. Only agent nodes that report status
   (${statusAgents}, or custom agents based on them) can be waited on — waiting on a plain terminal is refused, because a
   plain terminal never reports finishing and the node would hang forever. Note the semantics:
   "idle" is the end of a station's TURN, not proof its whole job is done — right for a station
   given one self-contained prompt, wrong if you expect a long conversation first.
+  A station whose turn ended on an API/model ERROR does NOT release its dependents, even
+  though it is idle: it reached idle immediately and produced nothing, so firing would start
+  the chain on bad ground. \`list\` marks it LAST TURN ERRORED. Nudge or retry that station —
+  one successful turn releases everything armed behind it — or run the armed node yourself.
   \`--project <id>\` opens the node(s) in another project instead of yours. It accepts exactly
   two things — any other id is refused: your OWN project id, which behaves exactly as if the flag
   were omitted (a normal open, view switch included); or an id \`open-project\` returned to YOU
@@ -709,6 +729,13 @@ Verbs:
   TARGET project's (its cwd, its default account and permission mode). A session opened into a
   non-active project starts when the user next views that project — do not poll for it; the reply
   says so. \`--group\`/\`--after\` cannot be combined with \`--project\`.
+  **The reply tells you whether anything actually started.** \`queued\` is true — and
+  \`queuedIds\` names which of the returned ids — whenever a node was opened **armed**: waiting on
+  \`--after\`, on a worktree's setup script, or on a \`--project\` target the user has not viewed
+  yet. A queued node exists on the canvas but has **no process behind it**, so do not route work
+  to it, do not \`send\` to it and do not report it as started. It launches itself when its wait
+  ends and then reports through the ordinary status hooks, so there is nothing to poll.
+  \`queued: false\` means the session is running.
   \`--prompt\` arrives on ONE LINE. Every run of whitespace in it — newlines included — is
   collapsed to a single space before the session starts, because the prompt is passed as an
   argument on the agent CLI's launch command line and that line is typed into the pane. Two
@@ -805,6 +832,8 @@ Verbs:
 - \`branch --node <id>\` — branch a Claude node's conversation: the node stays on the new
   branch and a new node opens resuming the original. Target must be a Claude agent node.
 - \`rename --node <id> --title "New Name"\` — rename any node (terminals, groups, stickies…).
+  Renaming to the title the node ALREADY has is a no-op: nothing is typed into its agent
+  session, and the reply says \`already named\`. Re-assert your own name as often as you like.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id>\` — close a node. (Asks the user to confirm.)
 - \`send --node <id> --text "..."\` — deliver a message INTO another agent node's session, in this

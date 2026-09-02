@@ -369,10 +369,50 @@ describe('parseControlRequest', () => {
     }
   })
 
+  it('both agent-facing texts say the open reply reports `queued` (issue #569 item 1)', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      // The field itself, and the list that says WHICH ids — a caller that cannot name the queued
+      // nodes cannot act on the answer.
+      expect(body).toContain('queued')
+      expect(body).toContain('queuedIds')
+      // The consequence is the whole point of the field: an armed node has no process, so an
+      // orchestrator must not route work to it. Without this sentence the flag reads as trivia.
+      expect(body.toLowerCase()).toContain('no process')
+      // And the three ways a node ends up armed must all be named, or a caller learns the third
+      // one by reporting a --project session as started when it has not begun.
+      expect(body).toContain('--after')
+      expect(body).toContain('--project')
+      expect(body.toLowerCase()).toMatch(/setup script/)
+    }
+  })
+
+  it('both agent-facing texts say an ERRORED station does not release its dependents (#521)', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      // The contract changed under `--after`: "gone idle" no longer releases a dependent, because
+      // a station whose turn died on an API error reaches idle IMMEDIATELY. A text still promising
+      // the old rule tells an orchestrator its chain launched on something that produced nothing.
+      expect(body.toLowerCase()).toContain('successfully')
+      expect(body).toContain('LAST TURN ERRORED')
+      // And a way out, or the orchestrator is told it is stuck without being told what to do.
+      expect(body.toLowerCase()).toMatch(/nudge|retry/)
+    }
+  })
+
   it('both agent-facing texts document the sticky verb', () => {
     for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
       expect(body).toContain('`sticky --node')
       expect(body).toContain('--create')
+    }
+  })
+
+  it('both agent-facing texts say an unchanged rename types nothing into the session', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      // Issues #582 / #569 §2. An orchestrator that re-asserts its node's name on startup and
+      // after every context reset was previously paying a `/rename` injection into the working
+      // session each time — one reporter worked around it by reading the title first. The verb
+      // now compares, so the text has to say so, or callers keep building that workaround.
+      expect(body.toLowerCase()).toContain('already named')
+      expect(body.toLowerCase()).toContain('no-op')
     }
   })
 

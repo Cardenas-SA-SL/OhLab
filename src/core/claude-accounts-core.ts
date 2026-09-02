@@ -282,6 +282,7 @@ export function isSafeLocalTranscriptPath(
   homeDir: string,
   userDataPath: string,
   codexHomeDir?: string,
+  grokHomeDir?: string,
   linkedDirs?: readonly string[]
 ): boolean {
   const legacyRoot = path.join(homeDir, '.claude', 'projects')
@@ -295,8 +296,18 @@ export function isSafeLocalTranscriptPath(
   if (abs === geminiRoot || abs.startsWith(geminiRoot + path.sep)) return true
   const codexRoot = path.join(codexHomeDir || path.join(homeDir, '.codex'), 'sessions')
   if (abs === codexRoot || abs.startsWith(codexRoot + path.sep)) return true
-  // Linked accounts (D4). `<dir>/projects` and below only — the `+ path.sep` is what keeps a
-  // sibling-prefix root (`…/projects-evil`) out, exactly as for the two roots above.
+  // grok: `$GROK_HOME/sessions/<url-encoded cwd>/<sessionId>/`. `sessions` and not `$GROK_HOME`,
+  // because the same tree holds `auth.json` — a home-wide allowance would put the user's bearer
+  // token inside the jail this predicate exists to keep it out of. Same parameter discipline as
+  // codex: the shells own the env (`grokHomeDir()` in `agents/grok-paths.ts` resolves $GROK_HOME),
+  // this module stays pure path math, and getting it wrong fails CLOSED — a relocated grok home
+  // means the context link silently never resolves, never a widened read.
+  const grokRoot = path.join(grokHomeDir || path.join(homeDir, '.grok'), 'sessions')
+  if (abs === grokRoot || abs.startsWith(grokRoot + path.sep)) return true
+  // Linked accounts: a config dir the USER already drives (`CLAUDE_CONFIG_DIR=~/.claude-2 claude`)
+  // that they adopted in Settings. `<dir>/projects` and below only — the `+ path.sep` is what keeps
+  // a sibling-prefix root (`…/projects-evil`) out, exactly as for the roots above. The dirs come
+  // from SETTINGS and never from the POST, so a forged payload cannot name its own jail root.
   for (const raw of linkedDirs ?? []) {
     const dir = normalizeLinkedConfigDir(raw)
     if (!dir) continue

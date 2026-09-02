@@ -516,38 +516,46 @@ describe('isSafeLocalTranscriptPath — linked config dirs', () => {
   const linkedDirs = ['/home/u/.claude-2']
 
   it('accepts <linkedDir>/projects and everything under it', () => {
-    expect(isSafeLocalTranscriptPath(`${home}/.claude-2/projects`, home, ud, undefined, linkedDirs)).toBe(true)
     expect(
-      isSafeLocalTranscriptPath(`${home}/.claude-2/projects/-repo/s.jsonl`, home, ud, undefined, linkedDirs)
+      isSafeLocalTranscriptPath(`${home}/.claude-2/projects`, home, ud, undefined, undefined, linkedDirs)
+    ).toBe(true)
+    expect(
+      isSafeLocalTranscriptPath(`${home}/.claude-2/projects/-repo/s.jsonl`, home, ud, undefined, undefined, linkedDirs)
     ).toBe(true)
   })
 
   it('still refuses everything ELSE in that dir — the `.ssh` case §3 names', () => {
-    expect(isSafeLocalTranscriptPath(`${home}/.claude-2/.ssh`, home, ud, undefined, linkedDirs)).toBe(false)
+    expect(isSafeLocalTranscriptPath(`${home}/.claude-2/.ssh`, home, ud, undefined, undefined, linkedDirs)).toBe(false)
     expect(
-      isSafeLocalTranscriptPath(`${home}/.claude-2/.credentials.json`, home, ud, undefined, linkedDirs)
+      isSafeLocalTranscriptPath(`${home}/.claude-2/.credentials.json`, home, ud, undefined, undefined, linkedDirs)
     ).toBe(false)
-    expect(isSafeLocalTranscriptPath(`${home}/.claude-2`, home, ud, undefined, linkedDirs)).toBe(false)
+    expect(isSafeLocalTranscriptPath(`${home}/.claude-2`, home, ud, undefined, undefined, linkedDirs)).toBe(false)
     // A sibling-prefix root, as for every other allowed root.
     expect(
-      isSafeLocalTranscriptPath(`${home}/.claude-2/projects-evil/x`, home, ud, undefined, linkedDirs)
+      isSafeLocalTranscriptPath(`${home}/.claude-2/projects-evil/x`, home, ud, undefined, undefined, linkedDirs)
     ).toBe(false)
     // The PARENT of a linked dir is not opened up by linking the child.
-    expect(isSafeLocalTranscriptPath(`${home}/projects/x.jsonl`, home, ud, undefined, linkedDirs)).toBe(false)
+    expect(
+      isSafeLocalTranscriptPath(`${home}/projects/x.jsonl`, home, ud, undefined, undefined, linkedDirs)
+    ).toBe(false)
   })
 
   it('contributes no root for a value that fails re-validation at the point of use', () => {
     // Hand-editable settings JSON: a relative or `..`-bearing dir is ignored, not resolved.
-    expect(isSafeLocalTranscriptPath(`${home}/.claude-2/projects/s.jsonl`, home, ud, undefined, ['.claude-2'])).toBe(
-      false
-    )
-    expect(isSafeLocalTranscriptPath('/etc/projects/x', home, ud, undefined, ['/etc/../etc'])).toBe(true)
-    expect(isSafeLocalTranscriptPath(`${home}/.ssh/id_rsa`, home, ud, undefined, ['/'])).toBe(false)
+    expect(
+      isSafeLocalTranscriptPath(`${home}/.claude-2/projects/s.jsonl`, home, ud, undefined, undefined, ['.claude-2'])
+    ).toBe(false)
+    expect(isSafeLocalTranscriptPath('/etc/projects/x', home, ud, undefined, undefined, ['/etc/../etc'])).toBe(true)
+    expect(isSafeLocalTranscriptPath(`${home}/.ssh/id_rsa`, home, ud, undefined, undefined, ['/'])).toBe(false)
   })
 
   it('is bit-for-bit the old predicate when no linked dirs are passed', () => {
     expect(isSafeLocalTranscriptPath(`${home}/.claude-2/projects/s.jsonl`, home, ud)).toBe(false)
-    expect(isSafeLocalTranscriptPath(`${home}/.claude-2/projects/s.jsonl`, home, ud, undefined, [])).toBe(false)
-    expect(isSafeLocalTranscriptPath(`${home}/.claude/projects/s.jsonl`, home, ud, undefined, linkedDirs)).toBe(true)
+    expect(
+      isSafeLocalTranscriptPath(`${home}/.claude-2/projects/s.jsonl`, home, ud, undefined, undefined, [])
+    ).toBe(false)
+    expect(
+      isSafeLocalTranscriptPath(`${home}/.claude/projects/s.jsonl`, home, ud, undefined, undefined, linkedDirs)
+    ).toBe(true)
   })
 })

@@ -17,6 +17,7 @@ import { IPC } from '../../shared/ipc'
 import type { GitHubControlApi, GitHubIssuesApi } from '../../shared/github-issues'
 import {
   UNKNOWN_CLAUDE_CLI_CAPS,
+  UNKNOWN_GROK_CLI_CAPS,
   type BoardLogApi,
   type LogApi,
   type LogRecord,
@@ -24,6 +25,8 @@ import {
   type ChatTranscriptResult,
   type ClaudeApi,
   type ClaudeCliCaps,
+  type GrokApi,
+  type GrokCliCaps,
   type CodexApi,
   type CodexIdentityCaps,
   UNKNOWN_CODEX_IDENTITY_CAPS,
@@ -638,6 +641,8 @@ export function buildAgentApi(
   | 'reportHibernated'
   | 'onAgentWake'
   | 'onRemoteViewers'
+  | 'onAgentRefreshNode'
+  | 'onAgentRenameNode'
 > {
   return {
     onAgentStatus: (listener) => client.subscribe(IPC.agentStatus, listener as Listener),
@@ -651,6 +656,8 @@ export function buildAgentApi(
     // relay, so there is nothing to subscribe to and nothing silently degrades.
     onAgentWake: () => () => undefined,
     onRemoteViewers: () => () => undefined,
+    onAgentRefreshNode: () => () => undefined,
+    onAgentRenameNode: () => () => undefined,
     // Host swept a phone read-ack → drop this browser canvas's unread flag (external clear, no re-ack).
     onUnreadClear: (listener) => client.subscribe(IPC.agentUnreadClear, listener as Listener),
     onSubagentActivity: (listener) =>
@@ -857,6 +864,18 @@ export function buildClaudeApi(client: RpcClient, stub: ClaudeApi): ClaudeApi {
   }
 }
 
+/** grok's probe over WS-RPC. A REAL handler server-side (`registerGrokCliIpc` runs in that shell
+ *  too), so the browser gets the same answer the desktop does — not a stub that quietly disables
+ *  session-id minting on one surface only. Rejection degrades to the fail-open caps. */
+export function buildGrokApi(client: RpcClient): GrokApi {
+  return {
+    cliCaps: () =>
+      (client.request(IPC.grokCliCaps) as Promise<GrokCliCaps>).catch(() => UNKNOWN_GROK_CLI_CAPS),
+    takenSessionIds: (cwd: string) =>
+      (client.request(IPC.grokTakenSessionIds, cwd) as Promise<string[]>).catch(() => [])
+  }
+}
+
 /**
  * The two transcript READ channels, now that `registerTranscriptIpc` serves them in the server
  * shell too. Before this the browser had no handler at all: the stub rejected, the ⌘M panel never
@@ -871,13 +890,14 @@ export function buildTranscriptApi(
 ): Pick<NodeTerminalApi, 'chat'> & { claudeReadTranscript: ClaudeApi['readTranscript'] } {
   return {
     chat: {
-      readTranscript: (sessionId, cwd, accountId, nodeId) =>
+      readTranscript: (sessionId, cwd, accountId, nodeId, agentId) =>
         client.request(
           IPC.chatReadTranscript,
           sessionId,
           cwd,
           accountId,
-          nodeId
+          nodeId,
+          agentId
         ) as Promise<ChatTranscriptResult>
     },
     claudeReadTranscript: (sessionId, cwd, accountId, nodeId) =>
@@ -1055,7 +1075,8 @@ export async function installWsBridge(): Promise<boolean> {
       const t = buildTranscriptApi(client)
       return {
         chat: t.chat,
-        claude: { ...buildClaudeApi(client, stubApi.claude), readTranscript: t.claudeReadTranscript }
+        claude: { ...buildClaudeApi(client, stubApi.claude), readTranscript: t.claudeReadTranscript },
+        grok: buildGrokApi(client)
       }
     })(),
     // Web replacement for the Electron native dialog: an in-app server-directory browser over
@@ -1063,8 +1084,18 @@ export async function installWsBridge(): Promise<boolean> {
     dialog: (() => {
       mountPickerRoot()
       const startDir = '/' // navigable up/down from root; the picker remembers nothing across calls in v1
+      // `write` is what gives folder mode its "New folder" button — the native dialog has one and
+      // the browser has no dialog at all, so without it a server folder had to exist already
+      // before it could be opened as a project. Same `fs.mkdir`/`fs.exists` the Explorer writes
+      // through, and therefore the same reach as everything else this picker already lists.
+      // Lambdas, not `api.fs.mkdir` directly: this IIFE runs while `api` is still being built.
+      const write = {
+        mkdir: (p: string) => api.fs.mkdir(p),
+        exists: (p: string) => api.fs.exists(p)
+      }
       return {
-        selectFolder: () => openDirectoryPicker({ mode: 'folder', startDir, list: api.fs.list }),
+        selectFolder: () =>
+          openDirectoryPicker({ mode: 'folder', startDir, list: api.fs.list, write }),
         selectFile: () => openDirectoryPicker({ mode: 'file', startDir, list: api.fs.list })
       }
     })()

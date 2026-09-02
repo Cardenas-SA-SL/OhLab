@@ -32,7 +32,9 @@ import {
   isNodeWatched,
   setWatchedNode,
   setRemotelyViewedNodes,
-  wakeHibernatedNode
+  wakeHibernatedNode,
+  isSessionReady,
+  subscribeSessionReady
 } from '../nodes/TerminalNode'
 import { solveFitPadding } from './fit-view'
 import { MacWheelGestureRouter, trackpadRoutingEnabled } from './wheel-gesture'
@@ -104,6 +106,7 @@ import {
   IconLock,
   IconMarkdown,
   IconReload,
+  IconSmiley,
   IconPower,
   IconNote,
   IconPhone,
@@ -150,11 +153,15 @@ import {
   contentAddItemsToMenuItems,
   type AddHandlers
 } from '../lib/addMenuSpec'
+import { planSetProjectFolder } from '../lib/setProjectFolder'
 import { transferConversationItems } from '../lib/transferItems'
 import { reopenVariants } from '../lib/reopenVariants'
 import { modelsForAgent } from '@shared/agents/model-gateway'
 import { useModelGateway } from '../state/modelGateway'
-import { viewportAtZoom1 } from '../lib/zoomReset'
+import { viewportAtZoom } from '../lib/zoomReset'
+import { containerOrigin, snapPointInRootSpace } from '../lib/gridSnap'
+import { zoomFromPct } from '../lib/zoomPresets'
+import { CANVAS_MAX_ZOOM, CANVAS_MIN_ZOOM } from './zoom-limits'
 import { isSpaceRelease, spacePanKeydown } from '../lib/spacePan'
 import {
   FLOW_NODE_CLASS,
@@ -172,6 +179,7 @@ import { ShortcutCaptureBanner } from '../components/ShortcutCaptureBanner'
 import { ConflictBar } from '../components/ConflictBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CapabilityNotice } from '../components/CapabilityNotice'
+import { ClosedTranscriptDialog } from '../components/ClosedTranscriptDialog'
 import { SetupConsentDialog } from '../components/SetupConsentDialog'
 import { ConsentNotice } from '../remote/ConsentNotice'
 import { peerApprovalView } from '@shared/remote/approval'
@@ -318,6 +326,7 @@ import {
 } from '../lib/explorerPinHint'
 import { useProjects } from '../state/projects'
 import { useAgentStatus } from '../state/agentStatus'
+import { useLaunchDelivery } from '../state/launchDelivery'
 import { useBrowserLease, drivingNodeIds } from '../state/browserLease'
 import { useTerminalFocus } from '../state/terminalFocus'
 import { useCodexIdentity, codexFallbackText } from '../state/codexIdentity'
@@ -380,6 +389,9 @@ import { promptFilePathError } from '@shared/agents/launch'
 import { parseTeamSpec } from '../lib/teamSpec'
 import { relativeTime } from '../lib/relativeTime'
 import { AgentIcon } from '../lib/agentIcons'
+import { nodeIconDialog } from '../components/NodeIconPicker'
+import { applyIconChoice } from '../lib/nodeIconChoice'
+import type { NodeIcon } from '@shared/node-icon'
 import { branchClaudeSession } from '../lib/claudeBranch'
 import {
   useSession,
@@ -396,13 +408,24 @@ import {
   type RelayTab,
 } from '../session/relay-tab'
 import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
-import { dependencyEdges, launchesToFire, unmetDeps, type ArmedNode } from '../lib/pendingLaunch'
+import {
+  dependencyEdges,
+  launchesToFire,
+  launchRetryDelay,
+  unmetDeps,
+  LAUNCH_STALL_MS,
+  type ArmedNode
+} from '../lib/pendingLaunch'
 import { triggerEdges } from '../lib/triggerCard'
 import { freeSpot } from '../lib/placement'
-import { pushSessionRename } from '../lib/sessionRename'
+import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
-import { buildClosedSessionEntries, stateToReopenSnapshot } from '../lib/closedHistory'
+import {
+  buildClosedSessionEntries,
+  recentlyClosedProjects,
+  stateToReopenSnapshot
+} from '../lib/closedHistory'
 import { uuid } from '../lib/uuid'
 import { planReopen, type ReopenPlan } from '../lib/reopenPlan'
 import { oneLine } from '@shared/one-line'
@@ -419,6 +442,7 @@ import type { SshServer } from '@shared/ssh'
 import { sshHostKey } from '@shared/ssh'
 import type {
   CanvasNodeState,
+  ClosedSessionEntry,
   NodeKind,
   Project,
   ProjectKanban,
@@ -430,6 +454,7 @@ import type { KanbanCreateChoice, KanbanSession } from '../components/kanban/Kan
 import { assignNode, assignedTo, defaultKanban, labelsForCard, migrateProjectTags, resolveColumnRef, unassigned } from '../lib/kanban'
 import { registerWorkspaceDirty } from '../state/workspaceDirty'
 import { snapNodeToGrid } from '../lib/nodeSizing'
+import { snapResizeChanges } from '../lib/resizeSnap'
 import { canClearDirty, canCommitCanvas, canCreateOnCanvas } from '../state/persistGuards'
 import { isHidden } from '../lib/ui-visibility'
 import { boardLogEvents } from '../lib/boardLogDiff'
@@ -511,6 +536,17 @@ import { toKanbanSession } from './toKanbanSession'
 const isMac = /Mac/i.test(navigator.platform || navigator.userAgent)
 
 const GRID = 24
+
+/**
+ * The grid a structural edit should snap to right now, 0 when snapping is off. Read through
+ * `getState()` rather than the component's `settings`, so a callback that is not re-created per
+ * settings change cannot act on a stale value. `gridSize: 0` reads as "use the default", exactly
+ * as it does everywhere else on this canvas.
+ */
+function snapGridNow(): number {
+  const settings = useSettings.getState().settings
+  return settings.snapToGrid ? settings.gridSize || GRID : 0
+}
 
 /** The empty opaque set (glyphgrid), shared so the render-time compute allocates nothing on the
  *  overwhelmingly common "nothing overlaps / layer off" path. */
@@ -600,6 +636,11 @@ interface PendingPeerState {
  */
 const WORKTREE_SSH_HINT = 'Not supported in SSH projects yet'
 const WORKTREE_SSH_NOTICE = 'Worktrees are not supported in SSH projects yet.'
+/** The cwd-less twin of WORKTREE_SSH_NOTICE. The disabled MENU rows carry
+ *  `WORKTREE_NO_CWD_HINT` (lib/addMenuSpec); this is the sentence for the surfaces that have no
+ *  disabled state — the command palette, and any control-verb path that reaches the dialog. */
+const WORKTREE_NO_CWD_NOTICE =
+  'This project has no folder, so it has no git repository to add a worktree to. Set one first (tab ⌄ → “Set folder…”).'
 const FOCUS_NO_TARGET_NOTICE = 'Select a terminal or agent node to focus.'
 
 // The webview's file loader renders off the LOCAL disk and has no remote counterpart, so a host
@@ -642,21 +683,30 @@ const NO_EPHEMERAL: { ephemeralNodes: CanvasNode[]; ephemeralEdges: Edge[] } = {
  * inherits the agent's `parentId`), which is the whole point of storing an offset — grouping or
  * ungrouping the agent flips that space between absolute and group-relative, and a stored
  * position would then teleport the card by the group's own x/y.
+ *
+ * `snap` (absent = off) rounds the LAID-OUT default onto the grid: React Flow's `snapToGrid` only
+ * constrains a drag, so a fan-out card landed off-grid and only jumped into place once the user
+ * nudged it. A DRAGGED offset is left alone — it was already snapped at drag time if the mode was
+ * on, and re-rounding it here would move cards the user placed by hand while it was off.
+ *
+ * The snap carries its container's root-space `origin` because the composed position above is
+ * container-relative, and React Flow's own drag snap works in root space — see
+ * `snapPointInRootSpace`.
  */
 const offsetFrom = (
   parent: { position: { x: number; y: number } },
   stored: { x: number; y: number } | undefined,
-  fallback: { x: number; y: number }
+  fallback: { x: number; y: number },
+  snap?: { grid: number; origin: { x: number; y: number } }
 ): { x: number; y: number } => {
   const off = stored ?? fallback
-  return { x: parent.position.x + off.x, y: parent.position.y + off.y }
+  const position = { x: parent.position.x + off.x, y: parent.position.y + off.y }
+  if (stored || !snap) {
+    return position
+  }
+  return snapPointInRootSpace(position, snap.origin, snap.grid)
 }
 
-// Delivering an armed node's held launch (canvas-control `--after`) can lose the race against
-// that node's own PTY coming up, and a dropped launch is exactly the thing its dependency was
-// waiting for — so a refused delivery is retried a few times instead of vanishing.
-const LAUNCH_DELIVERY_ATTEMPTS = 5
-const LAUNCH_RETRY_MS = 400
 
 // A canvas-control request whose source node lives in another project switches that project in
 // first, and the active-project effect hydrates React Flow ASYNCHRONOUSLY — so the handler waits
@@ -1086,6 +1136,9 @@ export function Canvas() {
   // A client has finished the handshake and is awaiting this host's approval (carries the SAS).
   const [pendingPeer, setPendingPeerState] = useState<PendingPeerState | null>(null)
   const [confirm, setConfirmState] = useState<ConfirmState | null>(null)
+  // The closed-session entry whose transcript is on screen (issue #531), or null. A SNAPSHOT of
+  // the ledger row, not a reference into the store: reading it needs only the pointer it carries.
+  const [closedTranscript, setClosedTranscript] = useState<ClosedSessionEntry | null>(null)
   // Node to center once its project finishes loading (cross-project notification click).
   const pendingFocusRef = useRef<string | null>(null)
   // One-shot: the next active-project load keeps the CURRENT camera instead of applying the
@@ -1340,16 +1393,24 @@ export function Canvas() {
    * The anchor is the viewport CENTRE rather than the origin: zooming about the corner throws the
    * user's work off screen, which is what makes a reset feel like a jump rather than a correction.
    */
-  const zoomTo100 = useCallback(() => {
-    const wrap = flowWrapRef.current
-    const current = getViewport()
-    const next = viewportAtZoom1(current, {
-      x: (wrap?.clientWidth ?? 0) / 2,
-      y: (wrap?.clientHeight ?? 0) / 2
-    })
-    if (next === current) return
-    void setViewport(next, { duration: 200 })
-  }, [getViewport, setViewport])
+  const zoomToScale = useCallback(
+    (target: number) => {
+      const wrap = flowWrapRef.current
+      const current = getViewport()
+      const next = viewportAtZoom(current, {
+        x: (wrap?.clientWidth ?? 0) / 2,
+        y: (wrap?.clientHeight ?? 0) / 2
+      }, target)
+      if (next === current) return
+      void setViewport(next, { duration: 200 })
+    },
+    [getViewport, setViewport]
+  )
+
+  const zoomTo100 = useCallback(() => zoomToScale(1), [zoomToScale])
+
+  /** The dock's preset menu: an exact percentage, centre-anchored like every other zoom command. */
+  const zoomToPct = useCallback((pct: number) => zoomToScale(zoomFromPct(pct)), [zoomToScale])
 
   const activeProjectId = useProjects((s) => s.activeProjectId)
   // Project-level worktree defaults (basePath/baseRef) for the active project, read from the warmed
@@ -1382,11 +1443,11 @@ export function Canvas() {
   const hasProjects = useProjects((s) => s.projects.some((p) => !p.closed))
   // Exclude UNAVAILABLE closed projects (folder missing): reopenProject would activate them
   // unconditionally → a silent-discard empty canvas (the same case the palette guard blocks).
-  // useShallow: the filter derives a NEW array each call — without it, every useProjects write
+  // Ordered newest-CLOSED first, so the "Recently closed" heading is true (issue #506) — this
+  // used to be tab order, which put the project shut ten minutes ago wherever its tab sat.
+  // useShallow: the selector derives a NEW array each call — without it, every useProjects write
   // (each kanban board commit, each debounced canvas save) re-rendered the entire Canvas.
-  const closedProjects = useProjects(
-    useShallow((s) => s.projects.filter((p) => p.closed && !p.unavailable))
-  )
+  const closedProjects = useProjects(useShallow((s) => recentlyClosedProjects(s.projects)))
   // The active project's SSH server (if it's an SSH project) — drives the connection banner.
   const activeSshServer = useProjects(
     (s) => s.projects.find((p) => p.id === s.activeProjectId)?.ssh?.server
@@ -1550,13 +1611,44 @@ export function Canvas() {
     }
     return sig
   })
-  // Bumped to re-run the launch effect after a refused delivery (see LAUNCH_RETRY_MS).
-  const [launchRetry, setLaunchRetry] = useState(0)
+  // Bumped to re-run the launch effect: after a refused delivery's backoff, and when a node
+  // reports its session ready (`subscribeSessionReady` below).
+  const [launchNudge, setLaunchNudge] = useState(0)
   // Ids whose held launch has been handed to the pty. An id stays here FOREVER once delivery
   // succeeded — clearing `pendingLaunch` is a state update that can lag a re-render, and this
   // action is irreversible, so the set (not the node data) is what guarantees exactly-once.
   const launchInFlight = useRef<Set<string>>(new Set())
   const launchAttempts = useRef<Map<string, number>>(new Map())
+  // Per-node "the gate is open but nothing has come up to deliver into" timers — the source of the
+  // visible `stalled` warning. One per armed node, armed once and cleared the moment the node
+  // becomes ready, is delivered, or stops being armed.
+  const launchStallTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const clearStallTimer = useCallback((nodeId: string) => {
+    const t = launchStallTimers.current.get(nodeId)
+    if (t === undefined) return
+    clearTimeout(t)
+    launchStallTimers.current.delete(nodeId)
+  }, [])
+  // A node whose session just came up is the ONE event the launch loop was missing. Filtered by
+  // id on the way in: a canvas of forty terminals publishes forty times on load, and re-rendering
+  // this component for each of them (for the sake of the one node that is armed) is exactly the
+  // churn `armedDepSig` and `loopSig` exist to avoid.
+  useEffect(
+    () =>
+      subscribeSessionReady((nodeId) => {
+        if (nodesRef.current.some((n) => n.id === nodeId && n.data.pendingLaunch))
+          setLaunchNudge((v) => v + 1)
+      }),
+    []
+  )
+  // Nothing must outlive the component: a pending stall timer would fire into an unmounted tree.
+  useEffect(
+    () => () => {
+      for (const t of launchStallTimers.current.values()) clearTimeout(t)
+      launchStallTimers.current.clear()
+    },
+    []
+  )
   // Fire armed nodes whose upstream stations have all gone idle. This is the edge that makes
   // the canvas a graph rather than a fan-out: the dependent starts itself, with no orchestrator
   // sitting in a poll loop burning context.
@@ -1568,7 +1660,50 @@ export function Canvas() {
       live,
       setupDoneForGroup
     ).filter((f) => !launchInFlight.current.has(f.id))
+    // Anything we were reporting on that is no longer an armed node — delivered, run by hand with
+    // ▶, or deleted — stops being reported. Timers go with it: a stall warning for a node that has
+    // already started is a lie with a countdown on it.
+    const delivery = useLaunchDelivery.getState()
+    for (const id of Object.keys(delivery.byId)) {
+      if (!nodes.some((n) => n.id === id && n.data.pendingLaunch)) {
+        delivery.clear(id)
+        clearStallTimer(id)
+      }
+    }
     for (const f of ready) {
+      // THE gate this whole loop turns on. Every dependency is satisfied, but that says nothing
+      // about whether there is a terminal to deliver into: a cold project switch loads the canvas,
+      // mounts the node, spawns tmux and settles a shell, and the old flat 2 s retry budget was
+      // spent long before any of that finished — the launch was then abandoned in a console.warn
+      // and the node sat on QUEUED until somebody clicked ▶ (#569 item 1).
+      //
+      // So we WAIT instead of burning attempts, and we say we are waiting. This is not a deadline:
+      // a session that comes up ten minutes later (an SSH host reconnecting, a checkout behind a
+      // slow setup script) still fires, because `subscribeSessionReady` brings us straight back.
+      if (!isSessionReady(f.id)) {
+        if (!launchStallTimers.current.has(f.id)) {
+          launchStallTimers.current.set(
+            f.id,
+            setTimeout(() => {
+              launchStallTimers.current.delete(f.id)
+              // Re-ask at fire time: the plan is 45 s old and the node may have started, been
+              // delivered or been deleted since.
+              if (
+                !isSessionReady(f.id) &&
+                nodesRef.current.some((n) => n.id === f.id && n.data.pendingLaunch)
+              )
+                useLaunchDelivery.getState().markStalled(f.id)
+            }, LAUNCH_STALL_MS)
+          )
+        }
+        continue
+      }
+      clearStallTimer(f.id)
+      // There IS a terminal now, so a standing "has not started yet" warning is out of date. A
+      // `failed` record is not withdrawn here — that one is about this session refusing the
+      // launch, and only a delivery that lands (or the manual ▶) retires it.
+      if (useLaunchDelivery.getState().byId[f.id]?.kind === 'stalled')
+        useLaunchDelivery.getState().clear(f.id)
       launchInFlight.current.add(f.id)
       const attempt = (launchAttempts.current.get(f.id) ?? 0) + 1
       launchAttempts.current.set(f.id, attempt)
@@ -1577,25 +1712,37 @@ export function Canvas() {
           setNodes((ns) =>
             ns.map((n) => (n.id === f.id ? { ...n, data: { ...n.data, pendingLaunch: undefined } } : n))
           )
+          useLaunchDelivery.getState().clear(f.id)
           markDirty()
           return
         }
-        // Refused: the node's tmux session is most likely still coming up. Let it back out of
-        // flight and re-run shortly — a launch that silently vanishes is worse than a late one.
+        // Refused although the session reported ready — a narrow residual race now, not the
+        // whole cold-start window. Let it back out of flight and re-run after the backoff; a
+        // launch that silently vanishes is worse than a late one.
         launchInFlight.current.delete(f.id)
-        if (attempt < LAUNCH_DELIVERY_ATTEMPTS) {
-          setTimeout(() => setLaunchRetry((v) => v + 1), LAUNCH_RETRY_MS)
-        } else {
-          console.warn('[pending-launch] gave up delivering held launch for', f.id)
+        const delay = launchRetryDelay(attempt)
+        if (delay !== null) {
+          setTimeout(() => setLaunchNudge((v) => v + 1), delay)
+          return
         }
+        // Out of attempts against a session that IS up. Nothing else will retry this, so it is
+        // reported where the person looking at the node can see it — the QUEUED badge turns into
+        // a warning pointing at the manual ▶. The log line stays for a bug report; it is no
+        // longer the only place the failure exists.
+        useLaunchDelivery.getState().markFailed(f.id, attempt)
+        console.warn('[pending-launch] gave up delivering held launch for', f.id)
       })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchRetry are the triggers
-  }, [nodes, armedDepSig, armedSetupSig, launchRetry])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- armedDepSig/armedSetupSig/launchNudge are the triggers
+  }, [nodes, armedDepSig, armedSetupSig, launchNudge])
 
   // Selection state for ephemeral nodes (they live outside React Flow's managed nodes), owned by
   // the agent-nodes store so the cards themselves can set it — see `selectable: false` below.
   const ephSelId = useAgentNodes((s) => s.selectedId)
+  // Grid the laid-out fan-out cards round onto (0 = snap off) — see offsetFrom. A hand-edited
+  // `gridSize: 0` reads as "use the default" here, exactly as it does everywhere else on this
+  // canvas, rather than as a second way to switch snapping off.
+  const ephSnap = settings.snapToGrid ? settings.gridSize || GRID : 0
   const { ephemeralNodes, ephemeralEdges } = useMemo(() => {
     // Common case: no /loop running and no subagents → return a stable empty result so
     // this memo (which depends on `nodes`, i.e. recomputes every drag frame) stays cheap
@@ -1625,6 +1772,9 @@ export function Canvas() {
       if (!parent || parent.data.hideFanout) continue
       const ph = parent.measured?.height ?? (parent.height as number) ?? 400
       const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
+      const snap = ephSnap
+        ? { grid: ephSnap, origin: containerOrigin(parent.parentId, nodes) }
+        : undefined
       const lid = `loop-${pid}`
       eNodes.push({
         id: lid,
@@ -1634,7 +1784,7 @@ export function Canvas() {
         // with the group). Deliberately no extent:'parent' — the fan-out may hang below the
         // frame border without being clamped into it.
         ...(parent.parentId ? { parentId: parent.parentId } : {}),
-        position: offsetFrom(parent, ephemeralPos[lid], { x: -250, y: ph + 60 }),
+        position: offsetFrom(parent, ephemeralPos[lid], { x: -250, y: ph + 60 }, snap),
         draggable: true,
         // NOT selectable: React Flow's rubber band would otherwise sweep a whole fan-out of cards
         // into the selection alongside the real nodes, and every selection action (Group,
@@ -1674,6 +1824,9 @@ export function Canvas() {
       if (!parent || parent.data.hideFanout) continue
       const ph = parent.measured?.height ?? (parent.height as number) ?? 400
       const accent = agentConfig((parent.data.agentId as string) ?? 'claude')?.color ?? '#d97757'
+      const snap = ephSnap
+        ? { grid: ephSnap, origin: containerOrigin(parent.parentId, nodes) }
+        : undefined
       const COLS = 4
       const COL_W = 240
       const ROW_H = 140
@@ -1684,10 +1837,15 @@ export function Canvas() {
           type: 'subagent',
           // Same coordinate-space rule as the loop card above: inherit the agent's group.
           ...(parent.parentId ? { parentId: parent.parentId } : {}),
-          position: offsetFrom(parent, ephemeralPos[cid], {
-            x: (i % COLS) * COL_W,
-            y: ph + 60 + Math.floor(i / COLS) * ROW_H
-          }),
+          position: offsetFrom(
+            parent,
+            ephemeralPos[cid],
+            {
+              x: (i % COLS) * COL_W,
+              y: ph + 60 + Math.floor(i / COLS) * ROW_H
+            },
+            snap
+          ),
           draggable: true,
           selectable: false, // see the loop card above
           selected: ephSelId === cid,
@@ -1718,7 +1876,7 @@ export function Canvas() {
     }
     return { ephemeralNodes: eNodes, ephemeralEdges: eEdges }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loopSig stands in for the byId read
-  }, [agentById, loopSig, ephemeralPos, ephSizes, ephExpanded, ephSelId, nodes])
+  }, [agentById, loopSig, ephemeralPos, ephSizes, ephExpanded, ephSelId, ephSnap, nodes])
 
   // Merge the persisted nodes with the ephemeral ones and the webview keep-alive pool once per
   // change (not per render), so React Flow's array-identity short-circuit holds while
@@ -1997,6 +2155,7 @@ export function Canvas() {
               // The node's creation-time account, for the sidebar row's account chip (the
               // serialized nodes of inactive projects carry it already).
               accountId: n.data.accountId,
+              icon: n.data.icon as NodeIcon | undefined,
               cwd: n.data.cwd,
               ssh: n.data.ssh,
               parentId: n.parentId
@@ -2482,11 +2641,17 @@ export function Canvas() {
   }, [])
 
   // Same strip, same one-shot rule: the workspace list came up empty because the index file was
-  // unreadable. Nothing was lost — say where the backup is and how to get the projects back.
+  // unreadable. Say where the backup is and how to get the projects back — and do NOT promise more
+  // than is true. The old copy read "No project data was lost — each project's canvas is still in
+  // its own folder", which holds for a FOLDER project (its canvas is in `<cwd>/.nodeterm/
+  // project.json`, so "Open folder…" adopts it straight back) and is false for a cwd-less one: that
+  // canvas lived only inside the index, i.e. only inside the backup this note names. Telling a user
+  // whose scratch project just vanished that nothing was lost is the worst of both — it is wrong,
+  // and it stops them keeping the one file that still has their nodes in it.
   useEffect(() => {
     return api.workspace.onCorruptRecovered((backupFile) => {
       setMigrationNote(
-        `The workspace index was corrupted and has been backed up as ${backupFile}. No project data was lost — each project's canvas is still in its own folder. Use “Open folder…” to add them back.`
+        `The workspace index was corrupted and has been backed up as ${backupFile} (in the app's data folder). Projects with a folder are safe — their canvas is in <folder>/.nodeterm/project.json, so “Open folder…” adds them back. A project with no folder lived only in the index: keep that backup, it is the only copy of its canvas.`
       )
     })
   }, [])
@@ -2908,8 +3073,14 @@ export function Canvas() {
         }
         return true
       })
-      onNodesChange(managed)
-      if (managed.some((c) => c.type !== 'select')) markDirty()
+      // Re-snap what the resizer proposes before it is applied, so a resize tracks the grid
+      // during the drag instead of correcting itself on release (see lib/resizeSnap.ts).
+      const snapSettings = useSettings.getState().settings
+      const snapped = snapSettings.snapToGrid
+        ? snapResizeChanges(managed, nodesRef.current, snapSettings.gridSize || GRID)
+        : managed
+      onNodesChange(snapped)
+      if (snapped.some((c) => c.type !== 'select')) markDirty()
     },
     [onNodesChange, markDirty, ephParentPosition]
   )
@@ -4659,11 +4830,20 @@ export function Canvas() {
         // the TOP of deleteNodes, before transport.destroy/setNodes, so a throw here would make
         // Delete do nothing at all on that surface. See lib/uuid.ts (the same call already broke
         // "Add agent" once).
-        const closedEntries = buildClosedSessionEntries(set, nodesRef.current, deletedAt, (nodeId) => {
-          const id = uuid()
-          closedSessionIdByNode.set(nodeId, id)
-          return id
-        })
+        const closedEntries = buildClosedSessionEntries(
+          set,
+          nodesRef.current,
+          deletedAt,
+          (nodeId) => {
+            const id = uuid()
+            closedSessionIdByNode.set(nodeId, id)
+            return id
+          },
+          // Issue #531. The agent-status entry is dropped a few lines below, and the live session
+          // id lives nowhere else — so this is the last instant the pointer to the node's
+          // transcript exists. Read it BEFORE the teardown, not after.
+          (nodeId) => useAgentStatus.getState().byId[nodeId]?.sessionId
+        )
         if (closedEntries.length) {
           useProjects.getState().recordClosedSessions(
             useProjects.getState().activeProjectId ?? '',
@@ -4931,7 +5111,7 @@ export function Canvas() {
   const groupSelection = useCallback(
     (ids: string[]) => {
       const groupCount = nodesRef.current.filter((n) => n.type === 'group').length
-      setNodes((ns) => groupSelectedNodes(ns as CanvasNode[], ids, groupCount))
+      setNodes((ns) => groupSelectedNodes(ns as CanvasNode[], ids, groupCount, snapGridNow()))
       markDirty()
     },
     [setNodes, markDirty]
@@ -4941,7 +5121,7 @@ export function Canvas() {
   // always makes a new one). Only subtree roots move — see addSelectionToGroup.
   const addToExistingGroup = useCallback(
     (ids: string[], groupId: string) => {
-      setNodes((nodes) => addSelectionToGroup(nodes as CanvasNode[], ids, groupId))
+      setNodes((nodes) => addSelectionToGroup(nodes as CanvasNode[], ids, groupId, snapGridNow()))
       markDirty()
     },
     [setNodes, markDirty]
@@ -4996,8 +5176,17 @@ export function Canvas() {
       // The single choke point for opening the dialog — the menus already render their rows
       // disabled on an SSH project, but the command palette has no disabled state, so refuse HERE
       // and say why. Silently doing nothing is the one outcome that is not allowed.
-      if (useProjects.getState().getProject(projectId)?.ssh) {
+      const target = useProjects.getState().getProject(projectId)
+      if (target?.ssh) {
         setNotice({ kind: 'error', text: WORKTREE_SSH_NOTICE })
+        return
+      }
+      // Same choke point, second reason: a cwd-less project has no repo to add a worktree TO. The
+      // dialog used to open anyway and say "This project is not a git repository." — which names
+      // the wrong cause (there is no folder to be a repository) and leaves the user looking for a
+      // git problem that does not exist. The menus render the row disabled; the palette cannot.
+      if (!target?.cwd) {
+        setNotice({ kind: 'error', text: WORKTREE_NO_CWD_NOTICE })
         return
       }
       setWorktreeError(null)
@@ -6099,6 +6288,35 @@ export function Canvas() {
     [setNodes, markDirty]
   )
 
+  /** Write a node's icon (`undefined` clears it). The single funnel for every surface that sets
+   *  one — the node menu, the node header and the kanban card modal — so the canvas is marked
+   *  dirty exactly once per change and in one place. */
+  const setNodeIcon = useCallback(
+    (nodeId: string, icon: NodeIcon | undefined) => {
+      setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, icon } } : n)))
+      markDirty()
+    },
+    [setNodes, markDirty]
+  )
+
+  /**
+   * Open the icon picker for ONE node and apply the answer. Single-target on purpose: an icon is
+   * how you tell two sessions apart, so setting the same one across a multi-selection is the
+   * opposite of what the feature is for — the menu row is offered only for a single node.
+   */
+  const pickNodeIcon = useCallback(
+    (nodeId: string) => {
+      const node = nodesRef.current.find((n) => n.id === nodeId)
+      if (!node) return
+      void nodeIconDialog({
+        nodeId,
+        title: (node.data.title as string) ?? '',
+        icon: node.data.icon as NodeIcon | undefined
+      }).then((choice) => applyIconChoice(choice, (icon) => setNodeIcon(nodeId, icon)))
+    },
+    [setNodeIcon]
+  )
+
   const alignToGrid = useCallback(
     (ids: string[]) => {
       const g = useSettings.getState().settings.gridSize || GRID
@@ -6518,6 +6736,19 @@ export function Canvas() {
    *  may not be the ACTIVE project, so nothing else here is guaranteed to flush it to disk. Force
    *  an explicit save rather than relying on the active-canvas debounce (`markDirty`), which only
    *  covers the active project. */
+  /**
+   * Issue #531 — read a closed session's transcript without reopening (or resuming) anything.
+   * The entry is looked up at CLICK time rather than carried by the row, so a ledger the user
+   * has since pruned cannot open a dialog for a record that no longer exists.
+   */
+  const openClosedTranscript = useCallback((projectId: string, entryId: string) => {
+    const entry = useProjects
+      .getState()
+      .projects.find((p) => p.id === projectId)
+      ?.closedSessions?.find((e) => e.id === entryId)
+    if (entry) setClosedTranscript(entry)
+  }, [])
+
   const reopenClosedSessionCommand = useCallback(
     (projectId: string, entryId: string): boolean => {
       const consumed = useProjects.getState().consumeClosedSession(projectId, entryId)
@@ -7122,6 +7353,23 @@ export function Canvas() {
       ...(isHidden('colors', hidden)
         ? []
         : ([{ type: 'colors', onPick: (c) => setNodesColor(ids, c) }] as MenuItem[])),
+      // Single target, and only a SESSION node: an icon is how you tell two sessions apart, so
+      // setting one across a multi-selection is the opposite of the point — and offering it on a
+      // kind that draws no icon (an editor, a diff, a group frame) would be a row that persists a
+      // value nothing ever shows, which is worse than no row at all.
+      ...(ids.length === 1 &&
+      !isHidden('icon', hidden) &&
+      nodesRef.current.find((n) => n.id === ids[0])?.type === 'terminal'
+        ? ([
+            {
+              label: nodesRef.current.find((n) => n.id === ids[0])?.data.icon
+                ? 'Change icon…'
+                : 'Set icon…',
+              icon: <IconSmiley />,
+              onClick: () => pickNodeIcon(ids[0])
+            }
+          ] as MenuItem[])
+        : []),
       { type: 'separator' },
       ...(isHidden('duplicate', hidden)
         ? []
@@ -8644,7 +8892,8 @@ export function Canvas() {
             reply({
               ok: true,
               message: `opened ${tgCount} ${tgWhat} session(s) in "${target.name}" (${tgIds.join(', ')})`,
-              result: { ids: tgIds, id: tgIds[0], projectId: target.id }
+              // The target is on screen, so these started normally — nothing is queued.
+              result: { ids: tgIds, id: tgIds[0], projectId: target.id, queued: false, queuedIds: [] }
             })
             return
           }
@@ -8665,8 +8914,17 @@ export function Canvas() {
             ok: true,
             message:
               `opened ${tgCount} ${tgWhat} session(s) in "${target.name}" (${tgIds.join(', ')}) — ` +
-              'starts when that project is next viewed',
-            result: { ids: tgIds, id: tgIds[0], projectId: target.id }
+              'queued; starts when that project is next viewed',
+            // Every node on this branch is armed by `armForColdOpen`, so the whole batch is
+            // QUEUED. Said in the reply as a field, not only in the sentence, so an orchestrator
+            // does not have to report a session as started when it is not (#569 item 1).
+            result: {
+              ids: tgIds,
+              id: tgIds[0],
+              projectId: target.id,
+              queued: true,
+              queuedIds: tgIds
+            }
           })
           return
         }
@@ -9030,15 +9288,27 @@ export function Canvas() {
       try {
         switch (verb) {
           case 'list': {
+            // The error marker rides the LIST rows (issue #521), not a per-node read: an
+            // orchestrator running seven stations already calls `list`, and asking each one
+            // separately would be seven round trips to learn the one thing that changes what it
+            // does next.
+            const st = useAgentStatus.getState().byId
             const list = nodesRef.current.map((n) => ({
               id: n.id,
               kind: n.type,
-              title: n.data.title as string
+              title: n.data.title as string,
+              ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {})
             }))
             reply({
               ok: true,
               result: list,
-              message: list.map((n) => `${n.id} [${n.kind}] ${n.title}`).join('\n')
+              message: list
+                .map(
+                  (n) =>
+                    `${n.id} [${n.kind}] ${n.title}` +
+                    (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
+                )
+                .join('\n')
             })
             return
           }
@@ -9073,8 +9343,15 @@ export function Canvas() {
               })
               return
             }
-            const make = (i: number): CanvasNode =>
-              armAfter(
+            // Which of the nodes we are about to open are actually ARMED — i.e. QUEUED rather
+            // than running. `armAfter` decides that per node (deps already satisfied leave the
+            // command as an ordinary `initialCommand`), so the answer is recorded as it builds
+            // them rather than inferred from the flags; `setNodes` has not landed by reply time,
+            // so the canvas cannot be asked either. Reported so a caller can tell "started" from
+            // "will start later" instead of assuming the first — see #569 item 1.
+            const queuedIds: string[] = []
+            const make = (i: number): CanvasNode => {
+              const node = armAfter(
                 createTerminalNode(
                   nodesRef.current.length + i,
                   termCwd,
@@ -9086,6 +9363,9 @@ export function Canvas() {
                 undefined,
                 intoGroupId
               )
+              if (node.data.pendingLaunch) queuedIds.push(node.id)
+              return node
+            }
             const ids = intoGroupId
               ? addGrouped(intoGroupId, count, make)
               : Array.from({ length: count }, (_, i) => addAndConnect(make(i)))
@@ -9094,7 +9374,13 @@ export function Canvas() {
               message:
                 `opened ${count} terminal(s): ${ids.join(', ')}` +
                 (after?.length ? `\nwaiting for ${after.join(', ')} before running` : ''),
-              result: { ids, id: ids[0], after: after ?? [] }
+              result: {
+                ids,
+                id: ids[0],
+                after: after ?? [],
+                queued: queuedIds.length > 0,
+                queuedIds
+              }
             })
             return
           }
@@ -9190,8 +9476,11 @@ export function Canvas() {
               })
               return
             }
-            const make = (i: number): CanvasNode =>
-              armAfter(
+            // See the same list in open-terminal: which of these nodes end up ARMED is
+            // `armAfter`'s per-node decision, recorded as it builds them.
+            const queuedIds: string[] = []
+            const make = (i: number): CanvasNode => {
+              const node = armAfter(
                 createAgentNode(
                   agentId,
                   nodesRef.current.length + i,
@@ -9214,6 +9503,9 @@ export function Canvas() {
                 undefined,
                 intoGroupId
               )
+              if (node.data.pendingLaunch) queuedIds.push(node.id)
+              return node
+            }
             const ids = intoGroupId
               ? addGrouped(intoGroupId, count, make)
               : Array.from({ length: count }, (_, i) => addAndConnect(make(i)))
@@ -9242,7 +9534,13 @@ export function Canvas() {
                   ? `\nwaiting for ${after.join(', ')} before running` +
                     (depLinked.length ? ` (and linked to read them)` : '')
                   : ''),
-              result: { ids, linked: bridged, after: after ?? [] }
+              result: {
+                ids,
+                linked: bridged,
+                after: after ?? [],
+                queued: queuedIds.length > 0,
+                queuedIds
+              }
             })
             return
           }
@@ -9341,7 +9639,7 @@ export function Canvas() {
               return
             }
             const groupCount = live.filter((nd) => nd.type === 'group').length
-            let grouped = groupSelectedNodes(live, resolvable, groupCount)
+            let grouped = groupSelectedNodes(live, resolvable, groupCount, snapGridNow())
             // The new frame is no longer guaranteed to be first (it is emitted in tree order),
             // and a refused set returns the array unchanged — find it by id instead.
             const oldIds = new Set(live.map((node) => node.id))
@@ -9416,7 +9714,7 @@ export function Canvas() {
               if (was?.parentId) affected.add(was.parentId)
             }
             for (const g of affected) {
-              if (next.some((n) => n.parentId === g)) next = fitGroupToChildren(next, g)
+              if (next.some((n) => n.parentId === g)) next = fitGroupToChildren(next, g, snapGridNow())
             }
             setNodes(next)
             markDirty()
@@ -9454,7 +9752,7 @@ export function Canvas() {
               : alignNodes(live, ids, edge!)
             // Tidying a frame's children usually leaves the frame oversized (it was sized to their
             // old scattered spots) — shrink it to hug the new layout. Top-level sets have no frame.
-            if (container) next = fitGroupToChildren(next, container)
+            if (container) next = fitGroupToChildren(next, container, snapGridNow())
             setNodes(next)
             markDirty()
             const how = verb === 'arrange' ? `as ${layout}` : `to ${edge}`
@@ -9594,7 +9892,7 @@ export function Canvas() {
             const existingGroupIds = new Set(
               next.filter((node) => node.type === 'group').map((node) => node.id)
             )
-            next = groupSelectedNodes(next, panelIds, vGroupCount)
+            next = groupSelectedNodes(next, panelIds, vGroupCount, snapGridNow())
             const vGroup = next.find(
               (node) => node.type === 'group' && !existingGroupIds.has(node.id)
             )!
@@ -9722,7 +10020,7 @@ export function Canvas() {
             const existingGroupIds = new Set(
               next.filter((node) => node.type === 'group').map((node) => node.id)
             )
-            next = groupSelectedNodes(next, memberIds, groupCount)
+            next = groupSelectedNodes(next, memberIds, groupCount, snapGridNow())
             const teamGroup = next.find(
               (node) => node.type === 'group' && !existingGroupIds.has(node.id)
             )!
@@ -9963,6 +10261,12 @@ export function Canvas() {
               reply({ ok: false, error: `rename: no node with id ${id}` })
               return
             }
+            // The name the node carries BEFORE this call — read here, before the setNodes below,
+            // because a re-rename to the SAME title must reach the pane with nothing (#582,
+            // #569 §2). Orchestrators re-assert their node's name on startup and after every
+            // context reset, and each identical `/rename` costs the session a transcript entry
+            // plus a `<system-reminder>` claiming the USER just renamed it.
+            const prevTitle = (target.data.title as string) ?? ''
             // Same semantics as renameSession: an explicit rename takes ownership of the
             // name (titleAuto off) and mirrors it into a rename-capable agent's session.
             setNodes((ns) =>
@@ -9971,11 +10275,18 @@ export function Canvas() {
             markDirty()
             const agentId = target.data.agentId as AgentId | undefined
             if (agentId && canRename(agentId) && title) {
-              // Gated: an agent that opens a node and renames it in the same breath would
-              // otherwise splice this line into the launch command still being typed.
-              void pushSessionRename(api.pty, id, title)
+              // Gated twice: on the pane's owner (an agent that opens a node and renames it in the
+              // same breath would otherwise splice this line into the launch command still being
+              // typed) and, inside, on the name actually changing.
+              void pushSessionRename(api.pty, id, title, prevTitle)
             }
-            reply({ ok: true, message: `renamed ${id} to "${title}"` })
+            reply(
+              // Say which of the two happened: the caller cannot see the pane, and "already named"
+              // is the answer that lets an orchestrator stop re-asserting a name it already set.
+              title && sessionNameUnchanged(title, prevTitle)
+                ? { ok: true, message: `${id} is already named "${title}"` }
+                : { ok: true, message: `renamed ${id} to "${title}"` }
+            )
             return
           }
           case 'sticky': {
@@ -10381,6 +10692,15 @@ export function Canvas() {
 
   const renameSession = useCallback(
     (projectId: string, id: string, title: string) => {
+      // Both facts about the node are read BEFORE the rename lands: `renameNode` mutates the
+      // store synchronously, so reading the previous title afterwards would compare the new name
+      // against itself and push a duplicate `/rename` on every no-op rename (#582).
+      const liveNode = nodesRef.current.find((n) => n.id === id)
+      const storedNode = useProjects
+        .getState()
+        .projects.find((p) => p.id === projectId)
+        ?.nodes.find((n) => n.id === id)
+      const prevTitle = (liveNode?.data.title as string | undefined) ?? storedNode?.title ?? ''
       if (projectId === activeProjectId) {
         // An explicit rename takes ownership of the name → stop auto-tracking the session.
         setNodes((ns) =>
@@ -10393,15 +10713,14 @@ export function Canvas() {
       }
       // Mirror the new name into a rename-capable agent's live session (tmux send-keys works
       // whether or not the node is currently mounted). Same one-way push as the node header's ✦.
-      const liveAgent = nodesRef.current.find((n) => n.id === id)?.data.agentId as AgentId | undefined
-      const storedAgent = useProjects
-        .getState()
-        .projects.find((p) => p.id === projectId)
-        ?.nodes.find((n) => n.id === id)?.agentId
-      const agentId = liveAgent ?? storedAgent
+      // The unchanged-name gate inside `pushSessionRename` is defence in depth for the callers
+      // that already compare (the header's rename box): this funnel is also reached by the ✦
+      // AI-name and by the kanban/sidebar rename boxes, which can hand back the name the node
+      // already has.
+      const agentId = (liveNode?.data.agentId as AgentId | undefined) ?? storedNode?.agentId
       const name = title.trim()
       if (agentId && canRename(agentId) && name) {
-        void pushSessionRename(api.pty, id, name)
+        void pushSessionRename(api.pty, id, name, prevTitle)
       }
     },
     [activeProjectId, setNodes, markDirty, writeDisk]
@@ -10413,6 +10732,35 @@ export function Canvas() {
     (nodeId: string, title: string) => renameSession(activeProjectId, nodeId, title),
     [renameSession, activeProjectId]
   )
+
+  // Phone-originated node actions over the relay (the iOS session-list long-press menu). Both are
+  // nudges in the `agent:wake` shape — main already validated/sanitized the payload, and this side
+  // still re-resolves everything and no-ops for a node it cannot find. `refresh` bumps
+  // `respawnNonce` on a mounted terminal of the ACTIVE project (an inactive project's node has no
+  // live view to refresh — honest no-op). `rename` routes through `renameSession`, the same funnel
+  // as the node header: title + titleAuto:false + `/rename` into a rename-capable agent's live
+  // session — the reason this is not a canvas:mutate title write, which would do none of that and
+  // be overwritten by the next session-name poll. The owning project is resolved here because the
+  // phone knows only the node id; a node in NO project is dropped.
+  useEffect(() => {
+    const unsubRefresh = window.nodeTerminal.onAgentRefreshNode?.((nodeId) => {
+      if (typeof nodeId === 'string' && nodeId) reloadTerminals([nodeId])
+    })
+    const unsubRename = window.nodeTerminal.onAgentRenameNode?.((payload) => {
+      const nodeId = typeof payload?.nodeId === 'string' ? payload.nodeId : ''
+      const title = typeof payload?.title === 'string' ? payload.title.trim() : ''
+      if (!nodeId || !title) return
+      const projectId = nodesRef.current.some((n) => n.id === nodeId)
+        ? activeProjectId
+        : useProjects.getState().projects.find((p) => p.nodes.some((n) => n.id === nodeId))?.id
+      if (!projectId) return
+      renameSession(projectId, nodeId, title)
+    })
+    return () => {
+      unsubRefresh?.()
+      unsubRename?.()
+    }
+  }, [reloadTerminals, renameSession, activeProjectId])
 
   // Write-through a sticky node's body text from the kanban card modal (the canvas sticky
   // reads the same data.text path).
@@ -10737,8 +11085,21 @@ export function Canvas() {
           // `e.verified` is the identity evidence for this very transition (hook-server labels it);
           // it was in scope here and dropped on the floor before the store had a field for it.
           if (e.state && !stuckRescueSkip)
-            cs.setState(e.nodeId, e.state, e.agentId, e.newTurn, e.pendingId, e.verified)
-          if (e.newTurn) an.clearForParent(e.nodeId) // genuine new turn → drop the previous fan-out
+            cs.setState(
+              e.nodeId,
+              e.state,
+              e.agentId,
+              e.newTurn,
+              e.pendingId,
+              e.verified,
+              e.errored
+            )
+          // A genuine new turn drops the previous fan-out — but only the cards that FINISHED
+          // (issue #547). Claude launches subagents async, so "waiting for N background agents to
+          // finish" is exactly the state in which the next prompt gets typed, and clearing a
+          // working card there loses it permanently (nothing rehydrates `byId`) while the agent
+          // keeps running — and blinds Eco's live-subagent guard into hibernating its parent.
+          if (e.newTurn) an.clearFinishedForParent(e.nodeId)
           if (e.newTurn && e.task) {
             // Prompt-prefix fallback for /loop|/schedule|/cron when the natural-language
             // phrasing doesn't trigger the tool-based (recurring) detection.
@@ -10834,8 +11195,15 @@ export function Canvas() {
 
   // Safety net for a lost Stop POST / crashed CLI: decay working entries that saw no hook
   // event at all for STALE_WORKING_MS (the sweep itself is cheap; see agentStatus.ts).
+  //
+  // The subagent cards decay on the SAME tick and the same number (issue #547): now that a turn
+  // boundary keeps an unfinished card, a subagent whose end never arrives would otherwise pin its
+  // card — and, through Eco's `liveSubagents`, its parent — forever.
   useEffect(() => {
-    const t = setInterval(() => useAgentStatus.getState().sweepStaleWorking(), 60_000)
+    const t = setInterval(() => {
+      useAgentStatus.getState().sweepStaleWorking()
+      useAgentNodes.getState().sweepStaleWorking()
+    }, 60_000)
     return () => clearInterval(t)
   }, [])
 
@@ -11226,22 +11594,43 @@ export function Canvas() {
     [persist]
   )
 
+  // Reopen a previously closed project and make it active — the active-project effect reloads its
+  // serialized nodes, whose TerminalNodes reattach to the surviving tmux sessions (or cold-restore).
+  const reopenProject = useCallback(
+    (id: string) => {
+      commitActiveToStore()
+      useProjects.getState().reopenProject(id)
+      setWelcomeOpen(false)
+      void writeDisk()
+    },
+    [commitActiveToStore, writeDisk]
+  )
+
   const setProjectFolder = useCallback(
     async (id: string) => {
       const folder = await window.nodeTerminal.dialog.selectFolder()
       if (!folder) return
-      // Folder ↔ project is deduped like "Open folder…": if another project already owns this cwd,
-      // don't point a second tab at it (two same-cwd tabs collapse to one file on save) — just
-      // switch to the existing one.
-      const existing = useProjects.getState().projects.find((p) => p.cwd === folder && p.id !== id)
-      if (existing) {
-        switchProject(existing.id)
+      // Binding a folder makes the next autosave WRITE `<folder>/.nodeterm/project.json`. Ask the
+      // folder what is already there first — this used to bind unconditionally, and a folder that
+      // carried a teammate's committed canvas had it overwritten by this project's nodes at rev 1,
+      // with no sideline copy. "Open folder…" never had that bug because it probes and adopts; the
+      // refusal + the dedupe (a closed owner is REOPENED, not switched to behind a hidden tab) are
+      // the pure `planSetProjectFolder`. See lib/setProjectFolder.ts.
+      const fileState = await api.workspace.projectFileState(folder)
+      const plan = planSetProjectFolder(folder, id, useProjects.getState().projects, fileState)
+      if (plan.kind === 'occupied') {
+        setNotice({ kind: 'error', text: plan.reason })
+        return
+      }
+      if (plan.kind === 'switch') {
+        if (plan.reopen) reopenProject(plan.projectId)
+        else switchProject(plan.projectId)
         return
       }
       useProjects.getState().setProjectCwd(id, folder)
       void persist()
     },
-    [persist, switchProject]
+    [persist, switchProject, reopenProject]
   )
 
   const setProjectDefaultAccount = useCallback(
@@ -11391,18 +11780,6 @@ export function Canvas() {
       closeProject,
       openProjectSettings
     ]
-  )
-
-  // Reopen a previously closed project and make it active — the active-project effect reloads its
-  // serialized nodes, whose TerminalNodes reattach to the surviving tmux sessions (or cold-restore).
-  const reopenProject = useCallback(
-    (id: string) => {
-      commitActiveToStore()
-      useProjects.getState().reopenProject(id)
-      setWelcomeOpen(false)
-      void writeDisk()
-    },
-    [commitActiveToStore, writeDisk]
   )
 
   // ---- presence travel ("go to where my teammate is", from the facepile) ----
@@ -12013,6 +12390,7 @@ export function Canvas() {
           onDeleteNode={deleteNodeFromKanban}
           onModalNodeChange={setKanbanModalNode}
           onBrowserNav={browserNavFromKanban}
+          onSetIcon={setNodeIcon}
         />
       )}
       <UpdateCard />
@@ -12153,8 +12531,8 @@ export function Canvas() {
           onNodeContextMenu={onNodeContextMenu}
           onSelectionContextMenu={onSelectionContextMenu}
           onNodeDoubleClick={onNodeDoubleClick}
-          minZoom={0.01}
-          maxZoom={2}
+          minZoom={CANVAS_MIN_ZOOM}
+          maxZoom={CANVAS_MAX_ZOOM}
           proOptions={{ hideAttribution: true }}
           deleteKeyCode={null}
           // 'pan' drag mode (Miro-style, opt-in): left-drag on empty canvas pans (React Flow
@@ -12387,7 +12765,18 @@ export function Canvas() {
         />
       )}
 
-      {shortcutsOpen && <ShortcutsPanel onClose={() => setShortcutsOpen(false)} />}
+      {shortcutsOpen && (
+        <ShortcutsPanel
+          onClose={() => setShortcutsOpen(false)}
+          // The panel lists what is BOUND; the whole remappable pool (and every command that
+          // ships without a chord) lives in Settings → Keyboard Shortcuts.
+          onCustomize={() => {
+            setShortcutsOpen(false)
+            setSettingsSection('shortcuts')
+            setSettingsOpen(true)
+          }}
+        />
+      )}
       {mobileLaunchOpen && (
         <MobileLaunchCard
           onClose={() => {
@@ -12477,6 +12866,7 @@ export function Canvas() {
           useProjects.getState().discardClosedSession(projectId, entryId)
           void writeDisk()
         }}
+        onOpenClosedTranscript={openClosedTranscript}
         onMouseEnter={openSessionsPeek}
         onMouseLeave={closeSessionsPeekSoon}
       />
@@ -12486,6 +12876,12 @@ export function Canvas() {
           every active-project change (the project-load path), is click-only, and records its
           answer machine-locally — see components/CapabilityNotice.tsx and its test. */}
       <CapabilityNotice />
+
+      {/* A closed session's conversation, read through the same ⌘M reader a live node uses
+          (issue #531 — closing a node used to make its finished work unverifiable). */}
+      {closedTranscript && (
+        <ClosedTranscriptDialog entry={closedTranscript} onClose={() => setClosedTranscript(null)} />
+      )}
 
       {/* The trust gate for a git-shared setup/archive script, mounted ONCE for the whole app on
           the same layer as the clone notice: main raises it (a manual run, or a worktree's setup)
@@ -12773,6 +13169,7 @@ export function Canvas() {
         onFitView={fitAll}
         onZoomIn={() => zoomIn({ duration: 150 })}
         onZoomOut={() => zoomOut({ duration: 150 })}
+        onZoomTo={zoomToPct}
         onDictate={toggleDictation}
         dictateActive={dictationOpen}
       />

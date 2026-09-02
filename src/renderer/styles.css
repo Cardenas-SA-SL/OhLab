@@ -197,8 +197,7 @@ body,
   align-items: center;
   gap: 14px;
   height: 44px;
-  /* Leave room for the macOS traffic lights on the left. */
-  padding: 0 12px 0 86px;
+  padding: 0 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   /* Above the canvas and the menu backdrop so tabs/inputs stay interactive. */
@@ -206,6 +205,14 @@ body,
   flex-shrink: 0;
   /* The bar itself is the window drag region. */
   -webkit-app-region: drag;
+}
+
+/* Leave room for the macOS traffic lights on the left — ONLY where they are drawn inside the web
+   contents (Electron `titleBarStyle: 'hiddenInset'`, darwin desktop). The attribute is stamped by
+   `lib/windowChrome.ts` at boot; without it the reservation applied on Windows and Linux too,
+   pushing the logo in by 86px and taking the same 86px off the tab strip (issue #564). */
+:root[data-window-chrome='inset'] .tabbar {
+  padding-left: 86px;
 }
 
 /* Interactive elements inside the bar must not drag the window. */
@@ -585,12 +592,78 @@ body,
   height: 30px;
 }
 
+.dock-zoom-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .dock-zoom {
-  min-width: 46px;
+  min-width: 52px;
+  padding: 5px 6px;
   text-align: center;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
   user-select: none;
+  cursor: pointer;
+}
+
+.dock-zoom:hover {
+  background: var(--panel-header);
+  color: var(--text);
+}
+
+.dock-zoom.active {
+  background: var(--panel-header);
+  color: var(--text);
+}
+
+/* Zoom presets, anchored to the readout instead of the dock's left edge like the add-menu. */
+.dock-zoom-menu {
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 168px;
+}
+
+.dock-zoom-menu button {
+  gap: 8px;
+  padding: 7px 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The generic `.dock-menu svg` rule paints every menu glyph muted; the tick is a state marker,
+   not a leading icon, so it keeps the accent that says "this is where you are". */
+.dock-zoom-menu .dock-menu__check svg {
+  color: inherit;
+}
+
+.dock-zoom-menu button.is-current {
+  color: var(--accent);
+}
+
+.dock-menu__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.dock-menu__chord {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.dock-menu__rule {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 
 .dock-dirty {
@@ -1562,6 +1635,13 @@ body,
   color: var(--danger);
 }
 
+/* TURN FAILED: the last turn ended on an API/model error (issue #521). Red like NEEDS YOU —
+   something did go wrong — but the dot does NOT pulse: nothing is happening and nothing is being
+   waited for, it is a verdict on a turn that is already over. */
+.term-node__status--errored {
+  color: var(--danger);
+}
+
 .term-node__status--loop {
   color: #bf7af0;
 }
@@ -1616,6 +1696,14 @@ body,
 .term-node__status--queued {
   color: #8e8e93;
   gap: 4px;
+}
+
+/* …and the same chip once the delivery loop has something to report about that launch: it has been
+   ready to run for a long time with no terminal to run in, or its delivery was refused for good.
+   Amber rather than the NEEDS-YOU red: nothing is broken in the user's work, but the session they
+   were told would start has not, and that must not be discoverable only in a console.warn. */
+.term-node__status--queued-warn {
+  color: #ffb340;
 }
 
 /* Copy receipt (1.6 s) — green like the base chip, and deliberately quieter than RUNNING /
@@ -2868,12 +2956,33 @@ body,
   padding-left: 2px;
 }
 
+/* Issue #506: shown only past RECENT_FILTER_THRESHOLD rows, where the list is already
+   scrolling. Same shape as the sessions sidebar's own "Filter sessions…" box — this is the
+   same idea applied to the other list, so it should not look like a different control. */
+.welcome__recent-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
 .welcome__recent-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
   max-height: 220px;
   overflow-y: auto;
+}
+
+.welcome__recent-empty {
+  padding: 10px 10px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .welcome__recent-item {
@@ -5153,6 +5262,65 @@ body,
   font-family: monospace;
 }
 
+.dir-picker__new {
+  flex: none;
+  padding: 0 10px;
+  height: 28px;
+  background: var(--panel-header);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dir-picker__new:hover {
+  background: rgba(var(--tint-rgb), 0.1);
+}
+
+.dir-picker__create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dir-picker__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  background: rgba(var(--tint-rgb), 0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dir-picker__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Match the inline Create/Cancel buttons to the name input's height. */
+.dir-picker__create .confirm__btn {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.dir-picker__create .confirm__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dir-picker__error {
+  font-size: 12px;
+  color: var(--danger);
+  word-break: break-all;
+}
+
 .dir-picker__list {
   height: 300px;
   overflow-y: auto;
@@ -5402,6 +5570,43 @@ body,
   display: flex;
   gap: 3px;
   flex-shrink: 0;
+}
+
+/* Separator between two chords that BOTH fire the same command (Delete / Backspace,
+   Ctrl+Shift+C / Ctrl+Insert) — they are alternatives, not a sequence. */
+.shortcut-or {
+  align-self: center;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 1px;
+}
+
+/* Footer route into Settings → Keyboard Shortcuts: the panel shows what is BOUND, that section
+   shows the whole remappable pool (and the commands that ship without a chord). */
+.shortcuts__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.shortcuts__customize {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.shortcuts__customize:hover {
+  background: rgba(var(--tint-rgb), 0.08);
 }
 
 /* ---- Command palette ---- */
@@ -6429,8 +6634,25 @@ button.group-node__setup:disabled {
   border: 1px solid rgba(var(--tint-rgb), 0.1);
   box-shadow: 0 12px 40px rgba(0, 0, 0, calc(0.5 * var(--shadow-k)));
   color: var(--text-strong);
+  /* Issue #503: each account is a tall block (label + Session/Weekly/Opus meters), so past
+     about four accounts the panel grew off the TOP of the window — the first account's header
+     and meter were clipped with no way to reach them. Capped to the space between the pill
+     (bottom: 34px) and the tab bar (44px at z 30, which paints over this panel in canvas mode),
+     with the blocks scrolling inside __body while the heading and footer action stay put. */
+  max-height: calc(100vh - 86px);
+  display: flex;
+  flex-direction: column;
 }
-.usage-popover__head { margin-bottom: 12px; }
+.usage-popover__body {
+  /* Every account is rendered — the list SCROLLS rather than truncating. A cap would have to
+     say so, and there is no honest way to say "and 3 accounts you cannot see". */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Without this a flex child refuses to shrink below its content height and the max-height
+     above would do nothing. */
+  min-height: 0;
+}
+.usage-popover__head { margin-bottom: 12px; flex: none; }
 .usage-popover__title { display: block; font-size: 15px; font-weight: 600; }
 .usage-popover__ago { font-size: 12px; color: rgba(var(--tint-rgb), 0.5); }
 .usage-popover__empty { font-size: 13px; color: rgba(var(--tint-rgb), 0.5); }
@@ -6513,6 +6735,8 @@ button.group-node__setup:disabled {
 .usage-popover__switch {
   display: block;
   width: 100%;
+  /* Stays put below the scrolling account list (issue #503). */
+  flex: none;
   margin-top: 10px;
   padding: 5px 8px;
   border: none;
@@ -7146,10 +7370,44 @@ button.group-node__setup:disabled {
 .sessions-sidebar__head-actions button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text); cursor: pointer; border-radius: 6px; }
 .sessions-sidebar__head-actions button:hover { background: var(--panel-header); }
 .sessions-sidebar__head-actions button.is-on { color: var(--accent); }
-.sessions-sidebar__search { margin: 8px 10px 4px; }
-.sessions-sidebar__search input { width: 100%; box-sizing: border-box; font-size: 12px; padding: 5px 8px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 7px; }
+.sessions-sidebar__search { margin: 8px 10px 4px; position: relative; }
+/* Right padding leaves room for the clear button, which overlays the field's trailing edge. */
+.sessions-sidebar__search input { width: 100%; box-sizing: border-box; font-size: 12px; padding: 5px 24px 5px 8px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 7px; }
+/* Issue #505: one action back to the full list. Quiet until hovered — it is an escape hatch,
+   not a control competing with the field. */
+.sessions-sidebar__search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sessions-sidebar__search-clear:hover { color: var(--text); background: var(--panel-header); }
 .sessions-sidebar__body { overflow-y: auto; padding: 4px 6px 8px; }
 .sessions-sidebar__empty { padding: 18px 12px; text-align: center; font-size: 12px; color: var(--muted); }
+.sessions-sidebar__empty-clear {
+  margin-top: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.sessions-sidebar__empty-clear:hover { border-color: var(--accent); color: var(--accent); }
 
 /* "Recently closed" — merged closed-projects/closed-sessions history at the bottom of the
    sidebar. Same head layout as .sessions-sidebar__head, just smaller/muted (it is a secondary
@@ -7223,6 +7481,47 @@ button.group-node__setup:disabled {
 }
 .sessions-sidebar__history-item:hover .sessions-sidebar__history-del { opacity: 1; }
 .sessions-sidebar__history-del:hover { background: rgba(255, 69, 58, 0.15); color: var(--danger); }
+
+/* "Read transcript" on a closed session row (issue #531) — same reveal-on-hover affordance as the
+   discard ×, beside it. Kept visible while DISABLED so the reason (in its title) is reachable:
+   a control that vanishes when it cannot act teaches nothing about why. */
+.sessions-sidebar__history-transcript {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+}
+.sessions-sidebar__history-item:hover .sessions-sidebar__history-transcript { opacity: 1; }
+.sessions-sidebar__history-transcript:hover { background: var(--panel-header); }
+.sessions-sidebar__history-transcript:disabled { cursor: default; opacity: 0; }
+.sessions-sidebar__history-item:hover .sessions-sidebar__history-transcript:disabled { opacity: 0.35; }
+
+/* The closed-session transcript dialog: a plain confirm box sized to hold the chat panel. */
+.closed-transcript {
+  width: min(760px, 92vw);
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.closed-transcript .term-chat {
+  height: min(60vh, 520px);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.closed-transcript__empty { display: flex; flex-direction: column; gap: 6px; }
+.closed-transcript__reason { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
 
 .ss-group__head { display: flex; align-items: center; gap: 6px; padding: 6px 6px; cursor: pointer; border-radius: 6px; border: 1px solid transparent; }
 .ss-group__head:hover { background: var(--panel-header); }
@@ -11657,3 +11956,169 @@ body.focus-mode .dock:hover {
 .trigger-node__run-time { color: rgba(255, 255, 255, 0.45); font-size: 10px; }
 .trigger-node__confirm { display: flex; flex-direction: column; gap: 6px; text-align: left; font-size: 12px; }
 .trigger-node__confirm .trigger-node__payload { max-height: 140px; }
+
+/* ---- Settings → Speech: the language picker (issue #586) ---- */
+/* Whisper knows 100 languages, so this is the app's searchable menu idiom (`.bind-select`
+   trigger + portaled `.tab-menu` with a pinned filter) rather than a native <select>, which
+   can neither be searched nor show a code it does not carry. */
+.speech-lang__trigger {
+  width: 260px;
+}
+.speech-lang__endonym {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.speech-lang__menu {
+  width: 320px;
+  max-width: calc(100vw - 24px);
+}
+.speech-lang__row {
+  gap: 8px;
+}
+/* Keyboard cursor. Same fill as :hover so arrowing and pointing look like one thing. */
+.speech-lang__row.is-active {
+  background: var(--panel-header);
+}
+.speech-lang__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.speech-lang__hint {
+  margin-left: auto;
+  padding-left: 8px;
+  flex-shrink: 0;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+.speech-lang__empty {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ── Node icons (emoji or picture) ─────────────────────────────────────────────────────────
+   One shared box for every surface that draws a node's icon — canvas header, kanban card, card
+   modal, sessions sidebar — so the same session reads the same in all four. Sized by the caller
+   (inline width/height) because a 13px sidebar row and a 16px modal header want different boxes;
+   everything else about how it draws is here.
+
+   `line-height: 1` matters more than it looks: an emoji inherits the surrounding line box, and a
+   header row that is exactly its own text height grows by a couple of px when one is inserted —
+   which nudges every chip beside it. */
+.node-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+  overflow: hidden;
+  /* Emoji fonts differ in how much of the em they fill; centering the glyph in a fixed box keeps
+     a 🚀 and a 🟢 optically the same size rather than the same font-size. */
+  text-align: center;
+}
+
+.node-icon img {
+  width: 100%;
+  height: 100%;
+  /* `contain`, not `cover`: an icon the user picked is usually a logo, and cropping a logo to a
+     square is the one thing that makes it unrecognizable at 14px. */
+  object-fit: contain;
+  border-radius: 3px;
+  display: block;
+}
+
+/* The canvas node header's icon is a button (click re-opens the picker) but must not look like
+   one — it sits between the color swatch and the title, which are both flat. */
+.term-node__icon {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+.term-node__icon:hover {
+  opacity: 1;
+}
+
+.kanban-card__row > .node-icon.kanban-card__icon {
+  margin-top: 4px; /* optically centers on the first title line, like the color dot beside it */
+}
+
+/* The card modal always offers the action, so its slot is present even with no icon set — muted
+   until it has one, so an unset icon reads as an affordance rather than as a missing image. */
+.kanban-modal__icon {
+  background: none;
+  border: none;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.kanban-modal__icon:hover {
+  background: rgba(var(--tint-rgb), 0.1);
+  color: var(--text);
+}
+.kanban-modal__icon--empty {
+  opacity: 0.5;
+}
+.kanban-modal__icon--empty:hover {
+  opacity: 1;
+}
+
+/* ── The icon picker dialog ───────────────────────────────────────────────────────────────── */
+.node-icon-dialog {
+  min-width: 340px;
+}
+
+.node-icon-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 2px;
+  margin: 10px 0 4px;
+}
+
+.node-icon-dialog__swatch {
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 0;
+  font-size: 18px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.node-icon-dialog__swatch:hover {
+  background: rgba(var(--tint-rgb), 0.12);
+}
+.node-icon-dialog__swatch.is-current {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.node-icon-dialog__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.node-icon-dialog__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-icon-dialog__error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--danger);
+}
