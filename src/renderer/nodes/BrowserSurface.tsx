@@ -4,6 +4,10 @@ import { BrowserStartPage } from './BrowserStartPage'
 import { useBrowserHistory } from '../state/browserHistory'
 import { useDiscardWhenHidden, webviewAudible } from './useDiscardWhenHidden'
 import { DiscardedPlate } from './DiscardedPlate'
+import { reloadWebview, type ReloadableWebview } from './webviewReload'
+import { describeLoadFailure, isReportableFailure, type WebviewLoadFailure } from './webviewError'
+import { WebviewErrorPlate } from './WebviewErrorPlate'
+import { WebviewLoadingBar } from './WebviewLoadingBar'
 
 // Minimal typing for the Electron <webview> element methods/events we use.
 type WebviewEl = HTMLElement & {
@@ -70,7 +74,11 @@ export function BrowserSurface({
   const [loading, setLoading] = useState(false)
   const [canBack, setCanBack] = useState(false)
   const [canFwd, setCanFwd] = useState(false)
-  const [failed, setFailed] = useState('')
+  /** A complaint about what was TYPED in the address bar, not about a page. Rendered as a strip
+   *  under the toolbar, so it never covers a page that is still perfectly readable. */
+  const [notice, setNotice] = useState('')
+  /** A main-frame load failure, which DOES cover the guest — see {@link WebviewErrorPlate}. */
+  const [failure, setFailure] = useState<WebviewLoadFailure | null>(null)
   // Memory saver (see `useDiscardWhenHidden`): the page is released while hidden and rebuilt on
   // reveal. `loadingRef` mirrors the `loading` state because the hook reads it at fire time, from
   // a callback that must not force the observer to be re-created.
@@ -92,6 +100,10 @@ export function BrowserSurface({
     const onStart = (): void => {
       loadingRef.current = true
       setLoading(true)
+      // The one unambiguous "we are trying again" signal, and the ONLY place the plate clears.
+      // `did-navigate` is not usable for it: Chromium navigates to its own error page under the
+      // very URL that just failed, so clearing there would wipe the plate the instant it appears.
+      setFailure(null)
     }
     const onStop = (): void => {
       loadingRef.current = false
@@ -115,7 +127,7 @@ export function BrowserSurface({
       restoringNavRef.current = null
       setAddress(u)
       locationRef.current = u
-      setFailed('')
+      setNotice('')
       if (echo) return
       // A genuine navigation re-opens the title gate below: the first title of the NEW page always
       // records, however it compares to the old page's.
@@ -140,11 +152,16 @@ export function BrowserSurface({
       if (lastUrlRef.current) useBrowserHistory.getState().record(lastUrlRef.current, title)
     }
     const onFail = (e: Event): void => {
-      const ev = e as unknown as { isMainFrame: boolean; errorCode: number; errorDescription: string }
-      if (ev.isMainFrame && ev.errorCode !== -3) {
+      const ev = e as unknown as {
+        isMainFrame: boolean
+        errorCode: number
+        errorDescription: string
+        validatedURL?: string
+      }
+      if (isReportableFailure(ev.isMainFrame, ev.errorCode)) {
         // A restore that never landed has no echo to swallow — disarm, or the next navigation pays.
         restoringNavRef.current = null
-        setFailed(ev.errorDescription || 'Failed to load')
+        setFailure(describeLoadFailure(ev.errorCode, ev.errorDescription, ev.validatedURL || locationRef.current))
       }
     }
     wv.addEventListener('did-start-loading', onStart)
@@ -196,9 +213,10 @@ export function BrowserSurface({
     onDiscard: () => {
       setDiscarded(true)
       setSrc('')
-      // A failure banner belongs to the page we just released; the restore re-navigates and will
-      // raise its own if the load fails again.
-      setFailed('')
+      // A failure belongs to the page we just released; the restore re-navigates and will raise
+      // its own if the load fails again.
+      setFailure(null)
+      setNotice('')
       onGuestDiscarded?.()
     },
     onRestore: () => {
@@ -233,11 +251,11 @@ export function BrowserSurface({
   const go = (): void => {
     const safe = searchOrUrl(address)
     if (!safe) {
-      setFailed('Enter a URL or search term')
+      setNotice('Enter a URL or search term')
       return
     }
     setAddress(safe)
-    setFailed('')
+    setNotice('')
     // A navigation with an initiator: whatever it navigates to is not a restore echo.
     restoringNavRef.current = null
     locationRef.current = safe
@@ -293,12 +311,16 @@ export function BrowserSurface({
               setSrc(u)
               setAddress(u)
               locationRef.current = u
-              setFailed('')
+              setNotice('')
             }}
           />
         )}
         {discarded && <DiscardedPlate />}
-        {failed && <div className="browser-node__error">{failed}</div>}
+        {failure && !discarded && (
+          <WebviewErrorPlate failure={failure} onRetry={() => reloadWebview(ref.current, false)} />
+        )}
+        {loading && <WebviewLoadingBar />}
+        {notice && <div className="browser-node__error">{notice}</div>}
       </div>
     </div>
   )
