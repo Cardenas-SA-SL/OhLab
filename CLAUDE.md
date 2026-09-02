@@ -891,7 +891,14 @@ session.
     disambiguated by probing the PARENT's listing instead (`classifyEmptyListing`, pure,
     `lib/filesNode.ts` — the idiom `SshProjectDialog.tsx:112-125` and `file-links.ts`'s
     `makeDirListingLookup` already use), which answers `missing` / `empty` / `unknown`: an unreadable
-    parent answers `unknown`, and we keep saying "empty" rather than claim a deletion we can't prove.
+    parent answers `unknown`, and we keep saying "empty" rather than claim a deletion we can't
+    prove. **`unknown` also covers every path whose parent CANNOT answer** — a non-`/`-absolute cwd
+    (an SSH project's `remoteCwd` defaults to **`~`**, where `parentDir` is `/` and `/` has no entry
+    named `~`, so an empty remote HOME reported a deletion), a `.git` cwd (both listing legs strip
+    it on purpose), and `.`/`..` segments; a case-folded match counts as present, for the
+    case-insensitive filesystems where `readdir` answers with the on-disk spelling. `missing` must
+    be the conclusion we are SURE of. Nothing is published until the verdict is in, so a deleted
+    folder never flashes "empty" on its way to the error.
     (b) Nothing reset the list on navigation, so "Loading…" was reachable only on the very first
     mount — every later directory change showed the PREVIOUS directory's rows. Fixed by storing the
     listing WITH the cwd it belongs to, so a cwd change IS the loading state by construction; a
@@ -902,17 +909,25 @@ session.
     (`displacedByWorktree`): it has no session to disturb, so it is caught by path wherever it sits.
     The patch is the pure `displacedFilesPatch` (`lib/filesNode.ts`), where `null` means LEAVE IT
     ALONE on the dead path — the parent probe above then tells the truth — because
-    `resetDisplacedCwd`'s fallback can be `undefined` and `FilesNode` reads `data.cwd || '/'`:
-    writing `undefined` through would have silently listed the filesystem ROOT instead. The title
+    `resetDisplacedCwd`'s fallback can be `undefined`, and writing that through would
+    have cost the node the only thing it knows about itself. **The READ side is guarded too**: a
+    files node with no `cwd` says so instead of falling back to `'/'` — `project.json` is
+    git-shared, hand-editable input that nothing validates for this kind, so guarding only the
+    writer left the silent root-browse reachable anyway. And `createFilesNode` places through
+    `placeNode`, not `placeAt`, so snap-to-grid applies to its size as well as its position (React
+    Flow resizes by adding a grid multiple to the START size, so an unsnapped box never lands on
+    the grid later). The title
     rewrites alongside when `titleAuto` holds — the ONE cwd write that does not go through `navigate`.
   - **"New terminal here" was broken on BOTH remote kinds, and not by this node's own doing.**
     `addTerminal` resolves the project from `activeProjectId` and `createTerminalNode` does
     `cwd: ssh ? ssh.remoteCwd : cwd` (`state/workspace.ts`) — on an SSH project the folder on screen
     was silently DISCARDED and the terminal opened at the project root, a pre-existing hole in
-    `addTerminal`'s `cwdOverride` contract affecting every caller, not just this one. Fixed by the
-    pure `sshBindingForCwd`, which rebinds `remoteCwd` to the named directory and keys on an EXPLICIT
-    override only — an SSH project can still carry a local `project.cwd`, and promoting that would
-    root remote terminals at a path from the wrong machine. On a RELAY tab there is no `ssh` to
+    `addTerminal`'s `cwdOverride` contract affecting every caller, not just this one. Fixed by routing the call
+    through the EXISTING `nodeSshFor`, which already carries this exact reasoning ("passing the
+    project's ssh unchanged silently REPLACES the caller's cwd") and which `addTerminal` simply
+    never used; it is handed `cwdOverride` and never the resolved `cwd`, because an SSH project can
+    still carry a local `project.cwd` that `scmCwd` falls back to, and promoting that would root
+    remote terminals at a path from the wrong machine. On a RELAY tab there is no `ssh` to
     rebind, so the row used to spawn a plain LOCAL terminal at the peer's remote path; it is now
     withheld there instead — spawning onto a peer's core is a real feature, not a one-liner.
   - Creation needs a project directory (`hasCwd`), and **the row degrades EXPLICITLY rather than
