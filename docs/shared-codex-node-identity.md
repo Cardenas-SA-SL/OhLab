@@ -66,7 +66,9 @@ Every ownership record is HMAC-signed by the **one** restart-stable 32-byte node
 It is **confidential and fail-closed**: a malformed/wrong-length persisted state **throws** rather
 than minting a fresh secret — rotating the key would orphan every bound thread on the machine — and
 the single-flight cache clears on rejection so a healed machine retries. It is wired at boot in both
-`src/main/index.ts` and `src/server/index.ts` via `setCodexThreadIdentityAuthSecret(...)`.
+`src/main/index.ts` and `src/server/index.ts` via `setCodexThreadIdentityAuthSecret(...)`. Arming
+the secret is not the same as writing records: only the desktop registers the handlers that write
+any — see the resolver section below.
 
 > No `safeStorage`-only secret module is introduced. @Corvin's `codex-node-auth-secret.ts` in
 > PR #112 is `safeStorage`-ciphertext-only and throws on a headless server; the merged both-shells
@@ -160,6 +162,20 @@ Without it, Codex hook status worked while canvas control and linked-context rea
 same first-class node as being outside nodeterm. The machine-neutral shim constants copied to SSH
 hosts deliberately omit the local record path; each local installer builds its own copy with its
 own `codexThreadIdentityRoot()`.
+
+**The shim half is shared; the RECORD half is desktop-only until the Server Edition registers the
+handlers.** Both statements matter, and reading only the first overstates what that edition has.
+The prelude reaches it byte-for-byte — `context-link.ts`'s `writeCliFiles` is core, and both shells
+arm the signing secret (above) — but `src/server/handlers/index.ts` deliberately registers no
+`setCodexThreadStartHandler` / `setCodexThreadBindHandler`, and `src/main/index.ts` is the only
+non-test caller of `writeCodexThreadIdentity` / `bindCodexThreadIdentity`. **No ownership record is
+ever written on that shell**, so the resolver always finds none and takes its fallback: it exports
+nothing, and the shims stay gated exactly as they were before this prelude existed. That is
+coherent rather than merely missing — the same file answers `UNKNOWN_CODEX_IDENTITY_CAPS`
+(`shared: false`), so a Codex node there launches the bare `codex` with its own app-server, and a
+tool shell whose identity would need recovering does not exist. It becomes a real gap the day the
+Server Edition grows the shared app-server, and what closes it is those two registrations — not a
+second copy of the prelude.
 
 The resolver:
 

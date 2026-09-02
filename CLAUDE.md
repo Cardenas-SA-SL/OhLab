@@ -1088,7 +1088,14 @@ else, and its context links must keep classifying across restarts).
     carry no record root or prelude, and `remote-hooks.ts` cannot even NAME a parameterised
     builder), because the failure is silent and one-sided: a remote shim carrying the prelude keeps
     working, and the only symptom is this machine's userData layout sitting in a file on someone
-    else's server.
+    else's server. **The prelude is shared; the RECORD it reads is desktop-only.** Those writers are
+    the two hook-server handlers `src/main/index.ts` registers, and
+    `src/server/handlers/index.ts` deliberately registers neither — so on the Server Edition the
+    file is byte-identical, the signing secret is armed, and the resolver still finds nothing and
+    takes its fallback. Coherent rather than missing: that shell answers `shared: false`
+    (`UNKNOWN_CODEX_IDENTITY_CAPS`), so its Codex nodes run their own app-server and no tool shell
+    needs recovering. It turns into a real gap only when that edition grows the shared app-server,
+    and the fix is the two registrations.
   - **That prelude EXPORTS WHAT THE RECORD SAYS — it never decides.** `NODETERM_AGENT_ID` and
     `NODETERM_CANVAS_CONTROL` were once constants there (`codex`, granted); both are
     `buildPtyEnv`'s answers about the PANE, which labels a node with its OWN agent id
