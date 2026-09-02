@@ -309,6 +309,7 @@ const sshConnect: SshConnectFn = (scopeId, conn, remoteCwd) =>
 const sshDisconnect = (scopeId: string): Promise<unknown> =>
   window.nodeTerminal.sshProject.disconnect(scopeId)
 import { opensInEditor } from '../lib/openTarget'
+import { displacedFilesPatch } from '../lib/filesNode'
 import { newEntryPath, parentDir } from '../lib/explorerCreate'
 import {
   explorerIsOpen,
@@ -4634,6 +4635,14 @@ export function Canvas() {
    * `data.fileMissing` instead of rewritten. The node stays on the canvas (never auto-closed: it
    * may hold unsaved Monaco edits the user hasn't copied out yet) and renders a persistent notice.
    *
+   * A files node is caught by path wherever it sits (it has no session to disturb, so the `under`
+   * restriction terminals get does not apply) and IS re-pointed — a directory can be, a dead file
+   * cannot. Two things are special because it SHOWS its cwd rather than merely running in it:
+   * with no fallback it is left alone rather than written `undefined`, since `FilesNode` reads
+   * `data.cwd || '/'` and would quietly start listing the filesystem root; and its title is
+   * rewritten alongside when `titleAuto` still holds, because this is the one cwd write that does
+   * not go through `navigate`, the only other place that pairs the two.
+   *
    * `respawn` separates the two callers (terminal only — editor/diff has no session to touch):
    *  - Remove (true): the directory is being deleted under live sessions, so their tmux sessions are
    *    destroyed and the terminals respawn straight into the fallback cwd.
@@ -4666,6 +4675,13 @@ export function Canvas() {
           if (!displaced.has(n.id)) return n
           if (n.type === 'editor' || n.type === 'diff') {
             return { ...n, data: { ...n.data, fileMissing: true } }
+          }
+          if (n.type === 'files') {
+            // A file manager SHOWS its cwd, so re-pointing it is not the same operation as
+            // re-pointing a terminal that merely runs in one. `null` = leave it alone; see
+            // `displacedFilesPatch` for both rules and why the no-fallback case must not write.
+            const patch = displacedFilesPatch(n.data, fallbackCwd)
+            return patch ? { ...n, data: { ...n.data, ...patch } } : n
           }
           return {
             ...n,

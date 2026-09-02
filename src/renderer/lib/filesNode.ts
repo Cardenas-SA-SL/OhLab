@@ -74,6 +74,32 @@ export function folderTitle(path: string): string {
  * entry depending on the leg, and mistaking one for "missing" is the false alarm this exists to
  * avoid.
  */
+/**
+ * How a files node is re-pointed when the worktree it was living in is removed
+ * (`resetDisplacedCwd`). It is caught by path wherever it sits, like an editor and unlike a
+ * terminal, because it has no session to disturb — and it is re-pointed rather than flagged
+ * `fileMissing`, because a directory can be re-pointed and a dead file cannot.
+ *
+ * `null` means LEAVE IT ALONE, and that is the interesting answer: with no fallback directory
+ * there is nowhere honest to send it, and writing `undefined` is worse than doing nothing —
+ * `FilesNode` reads `data.cwd || '/'`, so the node would silently begin listing the filesystem
+ * ROOT. Left on the dead path, the parent-listing probe says "Could not read this folder", which
+ * is the truth.
+ *
+ * The title rides along while `titleAuto` holds. This is the one cwd write that does NOT go
+ * through `navigate` — the only other place that pairs the two — so without it the node moves to
+ * a new directory still wearing the removed worktree's name.
+ */
+export function displacedFilesPatch(
+  data: { titleAuto?: unknown },
+  fallbackCwd: string | undefined
+): { cwd: string; title?: string } | null {
+  if (!fallbackCwd) return null
+  return data.titleAuto !== false
+    ? { cwd: fallbackCwd, title: folderTitle(fallbackCwd) }
+    : { cwd: fallbackCwd }
+}
+
 export type EmptyListingVerdict = 'empty' | 'missing' | 'unknown'
 
 export function classifyEmptyListing(

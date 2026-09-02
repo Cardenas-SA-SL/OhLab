@@ -3,6 +3,7 @@ import {
   breadcrumbs,
   childPath,
   classifyEmptyListing,
+  displacedFilesPatch,
   fileOpenTarget,
   filterEntries,
   folderTitle,
@@ -138,5 +139,25 @@ describe('classifyEmptyListing', () => {
     // Real callers pass `DirEntry[]`; a symlinked directory can arrive with `dir: false`.
     const listed: { name: string; dir: boolean }[] = [{ name: 'link', dir: false }]
     expect(classifyEmptyListing('/repo/link', listed)).toBe('empty')
+  })
+})
+
+describe('displacedFilesPatch', () => {
+  it('re-points to the fallback and renames while the title still tracks the folder', () => {
+    expect(displacedFilesPatch({}, '/repo/src')).toEqual({ cwd: '/repo/src', title: 'src' })
+  })
+
+  // The `titleAuto` contract: a name the user typed is never overwritten by a cwd change,
+  // whether that change came from navigating or from a worktree being removed underneath.
+  it('leaves a hand-typed title alone', () => {
+    expect(displacedFilesPatch({ titleAuto: false }, '/repo/src')).toEqual({ cwd: '/repo/src' })
+  })
+
+  // The one that matters: FilesNode reads `data.cwd || '/'`, so writing undefined would make a
+  // displaced node silently list the filesystem ROOT. Doing nothing leaves it on the dead path,
+  // where the parent-listing probe tells the truth instead.
+  it('refuses to write anything when there is no fallback directory', () => {
+    expect(displacedFilesPatch({}, undefined)).toBeNull()
+    expect(displacedFilesPatch({ titleAuto: false }, '')).toBeNull()
   })
 })
