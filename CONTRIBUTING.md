@@ -186,7 +186,23 @@ shell is forked by the account-scoped app-server, so it has `CODEX_THREAD_ID` bu
 `NODETERM_*`. Managed hooks, local `nodeterm.sh`, and local `context.sh` must prepend
 `codexThreadIdentityResolverSh(codexThreadIdentityRoot())` before checking `NODETERM_NODE_ID` or
 `NODETERM_CANVAS_CONTROL`. Keep the SSH shim constants machine-neutral: baking the desktop/server
-record path into a remote host is both wrong and a local-layout leak.
+record path into a remote host is both wrong and a local-layout leak. A guard test enforces that
+(`remote-shim-neutrality.guard.test.ts`), because the leak is silent — the remote shim keeps
+working, and nothing goes red.
+
+**That prelude may not decide anything a pane already decided.** It exports the agent id and the
+canvas-control grant the ownership RECORD carries, never constants. They used to be hardcoded
+(`codex`, granted) and both are `buildPtyEnv`'s answers: a custom agent inheriting the codex harness
+is `custom:<uuid>`, and the grant comes from `canControlCanvas`. If you add a field the prelude
+exports, put it inside the record's HMAC and have the desktop re-derive anything that grants a
+capability — never accept the client's word for that. Withhold rather than assume: a tool shell
+missing a verb its pane has is a bug report, a tool shell holding one its pane was denied is a
+security question.
+
+**A shell that forwards data into these records cannot be type-checked into correctness.** A
+handler that destructures the request without the new field, and a call that omits an optional
+trailing argument, are both well-typed — so the feature ships inert with a green suite. Pin the
+wiring at source level (`codex-identity-record-wiring.test.ts`, `hook-verified-parity.test.ts`).
 
 **A stream error is not a throw you can catch.** When a write to `process.stdout`/`stderr` fails —
 `EPIPE` down a closed pipe, `EIO` after macOS revokes a closed terminal's tty — node reports it by
