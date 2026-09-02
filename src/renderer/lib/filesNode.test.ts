@@ -133,6 +133,35 @@ describe('classifyEmptyListing', () => {
     expect(classifyEmptyListing('/', [])).toBe('empty')
   })
 
+  // Every case below would name-match FAIL and be reported as a deletion. Each is a readable
+  // directory, so `unknown` (which renders as "empty") is the only honest answer.
+
+  // The one that shipped: an SSH project's remoteCwd DEFAULTS to `~`. `ls ~` works, but
+  // parentDir('~') is '/' and '/' has no entry named '~' — so an empty remote HOME reported
+  // "Could not read this folder."
+  it('never calls a non-absolute path missing — `~` is an SSH project default, not a deletion', () => {
+    expect(classifyEmptyListing('~', [{ name: 'bin' }, { name: 'etc' }])).toBe('unknown')
+    expect(classifyEmptyListing('~/src', [{ name: 'bin' }])).toBe('unknown')
+    expect(classifyEmptyListing('relative/dir', [{ name: 'bin' }])).toBe('unknown')
+  })
+
+  // Both listing legs strip `.git` on purpose, so a node pointed at one can never find itself.
+  it('never calls a .git directory missing — both listing legs filter it out', () => {
+    expect(classifyEmptyListing('/repo/.git', [{ name: 'src' }, { name: 'README.md' }])).toBe('unknown')
+  })
+
+  it('never calls a dot segment missing — readdir and `ls -A` do not emit them', () => {
+    expect(classifyEmptyListing('/repo/.', [{ name: 'src' }])).toBe('unknown')
+    expect(classifyEmptyListing('/repo/..', [{ name: 'src' }])).toBe('unknown')
+  })
+
+  // APFS/NTFS list a directory fine under the wrong case, but readdir answers with the on-disk
+  // spelling. "Missing" has to be the conclusion we are SURE of.
+  it('accepts a case-folded match on a case-insensitive filesystem', () => {
+    expect(classifyEmptyListing('/repo/Docs', [{ name: 'docs' }])).toBe('empty')
+    expect(classifyEmptyListing('/repo/docs', [{ name: 'DOCS' }])).toBe('empty')
+  })
+
   // A symlinked directory can list as a non-dir entry depending on the leg; matching on `dir`
   // would call it missing. Name matching is what keeps that false alarm out.
   it('matches by name, not by entry kind', () => {

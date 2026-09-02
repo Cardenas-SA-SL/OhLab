@@ -57,10 +57,15 @@ export function breadcrumbs(path: string, max = 3): Crumb[] {
  * `fileMissing`, because a directory can be re-pointed and a dead file cannot.
  *
  * `null` means LEAVE IT ALONE, and that is the interesting answer: with no fallback directory
- * there is nowhere honest to send it, and writing `undefined` is worse than doing nothing —
- * `FilesNode` reads `data.cwd || '/'`, so the node would silently begin listing the filesystem
- * ROOT. Left on the dead path, the parent-listing probe says "Could not read this folder", which
- * is the truth.
+ * there is nowhere honest to send it, and writing `undefined` is worse than doing nothing — the
+ * node would lose the only thing it knows about itself. Left on the dead path, the parent-listing
+ * probe usually says "Could not read this folder", which is the truth.
+ *
+ * Two honest caveats. The branch is near-unreachable in practice (a worktree binding cannot exist
+ * without a project cwd, so a fallback almost always exists). And "usually": `git worktree remove`
+ * deletes the worktree but not the now-empty `<repo>.worktrees/` container, so removing the LAST
+ * one leaves the probe with an empty parent — `unknown`, which still renders as "empty". Doing
+ * nothing is still better than writing a path we cannot justify.
  *
  * The title rides along while `titleAuto` holds. This is the one cwd write that does NOT go
  * through `navigate` — the only other place that pairs the two — so without it the node moves to
@@ -112,10 +117,32 @@ export function classifyEmptyListing(
   /** The parent's entries, or `null` when the parent was not asked or could not be read. */
   parentEntries: readonly { name: string }[] | null
 ): EmptyListingVerdict {
+  const trimmed = cwd.replace(/\/+$/, '')
   const name = folderTitle(cwd)
-  if (name === '/' || !cwd.replace(/\/+$/, '')) return 'empty' // root: no parent, always exists
+  if (name === '/' || !trimmed) return 'empty' // root: no parent, always exists
+
+  // Below are the paths whose parent listing CANNOT answer the question. Each of them would
+  // otherwise fail to name-match and be reported as `missing` — a false "your folder is gone" on a
+  // directory that is perfectly readable, which is the one error this whole classifier exists to
+  // avoid making.
+  //
+  //  - Not `/`-absolute. `~` is the big one: an SSH project's `remoteCwd` DEFAULTS to `~`
+  //    (SshSection), `ls ~` works fine on the host, but `parentDir('~')` is `/` and `/` has no
+  //    entry called `~`. So an empty remote HOME reported "Could not read this folder."
+  //  - `.` / `..` segments — `readdir` and `ls -A` never emit them.
+  //  - `.git`, which BOTH listing legs strip on purpose (`core/fs-ops.ts`, `main/ssh-fs.ts`), so a
+  //    node pointed at one can never find itself in its parent.
+  if (!trimmed.startsWith('/') || name === '.' || name === '..' || name === '.git') return 'unknown'
+
   if (!parentEntries || parentEntries.length === 0) return 'unknown'
-  return parentEntries.some((e) => e.name === name) ? 'empty' : 'missing'
+  if (parentEntries.some((e) => e.name === name)) return 'empty'
+  // A case-insensitive filesystem (APFS, NTFS) lists a directory fine under a cwd whose case
+  // differs from the on-disk spelling, and `readdir` answers with the on-disk one. Treat that as
+  // present: a case-folded match is weaker evidence of existence, but "missing" needs to be the
+  // conclusion we are SURE of.
+  const lower = name.toLowerCase()
+  if (parentEntries.some((e) => e.name.toLowerCase() === lower)) return 'empty'
+  return 'missing'
 }
 
 /** Join a directory and an entry name. Trailing slashes on the dir are absorbed, so the root

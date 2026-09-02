@@ -493,7 +493,6 @@ import {
   createDinoNode,
   createTriggerNode,
   createFilesNode,
-  sshBindingForCwd,
   createDiffNode,
   createEditorNode,
   createGroupNode,
@@ -3601,11 +3600,16 @@ export function Canvas() {
       console.info(
         `[nodeterm] node-create agent=- project=${targetProjectId} group=${groupId ?? '-'} cwd=${cwd ?? '-'}`
       )
-      // In an SSH project the node is stamped remote (runs over the project's master) and
-      // `createTerminalNode` roots it at `ssh.remoteCwd`, which silently discards a caller's
-      // "here" — see `sshBindingForCwd` for the whole reasoning. With no override this is
-      // byte-identical to before.
-      const ssh = sshBindingForCwd(project?.ssh, cwdOverride)
+      // In an SSH project the node is stamped remote and `createTerminalNode` roots it at
+      // `ssh.remoteCwd`, silently discarding a caller's "here" — which is exactly the trap
+      // `nodeSshFor` was written for ("passing the project's ssh unchanged silently REPLACES the
+      // caller's cwd"). `addTerminal` simply never used it.
+      //
+      // `cwdOverride`, NOT the resolved `cwd`: an SSH project can still carry a local
+      // `project.cwd`, and `scmCwd` falls back to it, so passing the resolved value would launder
+      // a path from this machine into `remoteCwd`. With no override this is byte-identical to
+      // passing `project?.ssh` straight through.
+      const ssh = nodeSshFor(project?.ssh, cwdOverride)
       setNodes((ns) => {
         const node = createTerminalNode(ns.length, cwd, center ?? emptyNodePos(), initialCommand, ssh)
         return [...ns, groupId ? parentInto(node, groupId) : node]

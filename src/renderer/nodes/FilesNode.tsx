@@ -12,7 +12,13 @@
  * through the node's own session api — which is the local core for a local project and the PEER's
  * core for a relay tab, so a relay tab browses the machine its terminals are actually on. Getting
  * this from `useSession()` rather than `window.nodeTerminal` is the whole reason a relay tab works
- * here for free.
+ * here for free — **while `data.sshFs` is false.** When it is set, `sshFs(projectId)` reaches
+ * `window.nodeTerminal.sshFs`, i.e. THIS machine's preload, not the session's. That is inherited
+ * (`createEditorNode`/`createVideoNode` stamp and share the flag the same way) and it matters more
+ * here than for them: `sshFs` is written into the git-shared `project.json`, so a teammate who
+ * clones the repo locally gets a node flagged remote with a perfectly valid local cwd, and the
+ * unresolvable ref fails open to `[]` — a directory full of files reported as empty. Fixing it
+ * means routing `sshFs` through the session api for every consumer, which is its own change.
  *
  * **Opening is delegated, not reimplemented.** A file dispatches `nodeterm:open-file` — the event
  * `TerminalNode`'s Cmd+click links already use — so editor / image / video routing stays in
@@ -80,7 +86,18 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const [version, setVersion] = useState(0)
 
   const collapsed = !!data.collapsed
-  const cwd = (data.cwd as string) || '/'
+  /**
+   * The directory this node shows. It used to fall back to `'/'`, which meant a node with no `cwd`
+   * silently listed the FILESYSTEM ROOT — reachable with no bug on our side, because
+   * `.nodeterm/project.json` is git-shared, hand-editable input and nothing validates a files
+   * node's `cwd` on load. It is also the same failure `displacedFilesPatch` refuses on the WRITE
+   * side; guarding one end and not the other left the hole open under the commit named after it.
+   *
+   * No silent fallback now: with no cwd there is nothing to list and the node says so. `''` is
+   * inert for the rest of the component because the effect below never lists it, and reaching the
+   * root then takes a deliberate click on a crumb rather than happening by itself.
+   */
+  const cwd = typeof data.cwd === 'string' ? data.cwd.trim() : ''
   /** Null whenever the rows on screen do not belong to the directory being shown — i.e. the
    *  "Loading…" state, which is now reachable on every navigation and not just the first mount. */
   const entries = listing && listing.cwd === cwd ? listing.entries : null
@@ -98,6 +115,13 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   useEffect(() => {
     let live = true
     setError('')
+    if (!cwd) {
+      // Nothing to list, and listing `'/'` instead would be the silent root-browse this guard
+      // exists to stop. Name the state rather than showing an empty directory.
+      setListing({ cwd, entries: [] })
+      setError('This file manager has no folder.')
+      return
+    }
     void (async () => {
       let list: DirEntry[]
       try {
@@ -112,10 +136,21 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
         return
       }
       if (!live) return
-      setListing({ cwd, entries: list })
-      if (list.length > 0) return
+      if (list.length > 0) {
+        setListing({ cwd, entries: list })
+        return
+      }
       // Empty is ambiguous under the fail-open `FsApi` contract, so ask the parent who is right.
-      // A second listing, no new IPC, and only a definite absence is allowed to raise the error.
+      // Only a definite absence is allowed to raise the error.
+      //
+      // This is a SECOND `fs.list` — no new IPC *channel*, but a real extra round trip, and on an
+      // SSH project a real extra remote command. It is bounded (exactly one, never recursive),
+      // fails open, and is skipped entirely whenever the directory has any content, so it costs
+      // nothing on the common path.
+      //
+      // Nothing is published until the verdict is in: setting the empty listing first made a
+      // deleted folder render "This folder is empty." for one paint and then correct itself. While
+      // we are still deciding, "Loading…" is the true answer.
       const parent = parentDir(cwd)
       let parentEntries: DirEntry[] | null = null
       try {
@@ -124,6 +159,7 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
         parentEntries = null // could not ask ⇒ claim nothing
       }
       if (!live) return
+      setListing({ cwd, entries: list })
       if (classifyEmptyListing(cwd, parentEntries) === 'missing') {
         setError('Could not read this folder.')
       }

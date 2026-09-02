@@ -20,7 +20,6 @@ import {
   reparentNode,
   resolveNewNodeAccount,
   selectedRootIds,
-  sshBindingForCwd,
   ungroupNodes
 } from './workspace'
 import type { CanvasNode } from './workspace'
@@ -1078,34 +1077,5 @@ describe('createAgentNode prompt injection', () => {
   it('keeps argv injection byte-identical for codex and gemini', () => {
     expect(createAgentNode('codex', 0, undefined, undefined, 'do X').data.initialCommand).toBe("codex 'do X'")
     expect(createAgentNode('gemini', 0, undefined, undefined, 'do X').data.initialCommand).toBe("gemini 'do X'")
-  })
-})
-
-describe('sshBindingForCwd', () => {
-  const ssh = { server: { host: 'h', user: 'u' }, remoteCwd: '/srv/app' } as never
-
-  // The bug: "New terminal here" on an SSH project opened at the project root, because
-  // createTerminalNode does `cwd: ssh ? ssh.remoteCwd : cwd` and threw the request away.
-  it('rebinds remoteCwd to the directory the caller actually named', () => {
-    expect(sshBindingForCwd(ssh, '/srv/app/src/renderer')).toMatchObject({
-      remoteCwd: '/srv/app/src/renderer'
-    })
-  })
-
-  it('leaves the binding alone when no directory was named', () => {
-    expect(sshBindingForCwd(ssh, undefined)).toBe(ssh)
-  })
-
-  // An SSH project can still carry a LOCAL project.cwd. Promoting a resolved cwd instead of an
-  // explicit override would root remote terminals at a path from the wrong machine, so the
-  // trigger is the override and nothing else.
-  it('never invents a binding for a local project', () => {
-    expect(sshBindingForCwd(undefined, '/home/me/work')).toBeUndefined()
-  })
-
-  it('does not mutate the project\'s own binding', () => {
-    const before = { ...(ssh as object) }
-    sshBindingForCwd(ssh, '/elsewhere')
-    expect(ssh).toEqual(before)
   })
 })

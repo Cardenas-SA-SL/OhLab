@@ -302,26 +302,6 @@ export function nodeSshFor(
   return { server: projectSsh.server, remoteCwd: cwd || projectSsh.remoteCwd }
 }
 
-/**
- * The ssh binding a terminal should be created with when the caller named a directory.
- *
- * `createTerminalNode` roots a remote node at `ssh.remoteCwd` and ignores its `cwd` argument
- * (`cwd: ssh ? ssh.remoteCwd : cwd`). That is right for a plain "new terminal" and wrong for
- * every caller that meant a SPECIFIC directory — a file manager's "New terminal here", a Source
- * Control action scoped to a checkout — because on an SSH project the request was discarded in
- * silence and the terminal opened at the project root.
- *
- * Keyed on an EXPLICIT override, never on a resolved cwd: an SSH project can still carry a local
- * `project.cwd`, and promoting that to `remoteCwd` would root remote terminals at a path from the
- * wrong machine. With no override the binding is returned untouched.
- */
-export function sshBindingForCwd(
-  ssh: Project['ssh'] | undefined,
-  cwdOverride: string | undefined
-): Project['ssh'] | undefined {
-  return ssh && cwdOverride ? { ...ssh, remoteCwd: cwdOverride } : ssh
-}
-
 export function createTerminalNode(
   index: number,
   cwd?: string,
@@ -1058,10 +1038,12 @@ export function createFilesNode(
   return {
     id: nextId('files'),
     type: 'files',
-    position: placeAt(center, index, FILES_SIZE.width, FILES_SIZE.height),
-    width: FILES_SIZE.width,
-    height: FILES_SIZE.height,
-    style: { width: FILES_SIZE.width, height: FILES_SIZE.height },
+    // `placeNode`, not `placeAt`: it snaps POSITION AND SIZE to `settings.gridSize` when
+    // snap-to-grid is on, which is what every other factory does. `placeAt` alone left a new file
+    // manager sitting off-grid beside snapped neighbours, and off-grid in SIZE too — React Flow
+    // resizes by adding a grid multiple to the start size, so an unsnapped box can never be
+    // dragged onto the grid afterwards.
+    ...placeNode('files', center, index, FILES_SIZE.width, FILES_SIZE.height),
     data: {
       title: folderTitle(cwd),
       color: '#ffd60a',
