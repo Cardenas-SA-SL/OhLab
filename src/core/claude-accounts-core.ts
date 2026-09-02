@@ -49,7 +49,7 @@ export function remoteAccountConfigDirAbs(remoteHome: string, accountId: string)
   return `${remoteHome.replace(/\/+$/, '')}/.nodeterm/claude-accounts/${accountId}`
 }
 
-// ---- Observed config dirs (D1/D2: which account a RUNNING session is actually on) -----------
+// ---- Observed config dirs (which account a RUNNING session is actually on) ------------------
 //
 // The hook payload's `transcript_path` is the only account signal that exists for a session
 // nodeterm did not launch — a hand-run `CLAUDE_CONFIG_DIR=~/.claude-2 claude` in a plain terminal
@@ -163,7 +163,7 @@ function linkedDirOf(acct: ClaudeAccount): string | null {
 }
 
 /**
- * Classify an observed config dir into an `ObservedClaudeAccount` (design D2). PURE string
+ * Classify an observed config dir into an `ObservedClaudeAccount`. PURE string
  * matching — no fs, and deliberately host-agnostic, because the same classification has to answer
  * for a remote path an SSH node's hooks posted:
  *   1. `<userData>/claude-accounts/<id>` — this app's own managed root on THIS machine.
@@ -171,7 +171,7 @@ function linkedDirOf(acct: ClaudeAccount): string | null {
  *   3. a settings row's linked `configDir` — the user declared this dir an account.
  *   4. any `…/.claude` — the system default, on this machine or on the host (`accountId: null`).
  *   5. anything else — `known: false`; the UI labels it by its last path segment and offers to
- *      link it. NOTHING reads such a dir (D7): a forged POST must not make us open a file.
+ *      link it. NOTHING reads such a dir: a forged POST must not make us open a file.
  *
  * (1) and (2) answer with the id WITHOUT consulting settings: the path IS nodeterm's own root, so
  * the id in it is the id nodeterm minted — including for an account still `pending` its login,

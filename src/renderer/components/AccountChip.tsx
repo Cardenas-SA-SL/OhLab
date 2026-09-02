@@ -35,8 +35,9 @@ export function AccountChip({
 }
 
 /**
- * The chip for one node, resolved against live settings + agent status. `null` = render nothing
- * (D6: the system account with only one identity in play is the unremarkable case).
+ * The chip for one node, resolved against live settings + agent status. `null` = render nothing:
+ * the system account with only one identity in play is the unremarkable case, and a chip on every
+ * pane would say nothing.
  *
  * Reads the DEFAULT agent-status store on purpose: it is the store Canvas's `agent:status`
  * listener writes and the store every one of these surfaces already reads its `status` from, so

@@ -37,7 +37,7 @@ function projectsRoots(): string[] {
   for (const acct of accountsGetter?.() ?? []) {
     if (acct.host || acct.pending) continue
     try {
-      // A LINKED account indexes the user's OWN dir (design D4). Re-validated here rather than
+      // A LINKED account indexes the user's OWN dir. Re-validated here rather than
       // trusted — settings.json is hand-editable — and an unusable value falls back to the managed
       // path, which simply contributes an absent root.
       const dir = normalizeLinkedConfigDir(acct.configDir) ?? accountConfigDir(userData, acct.id)

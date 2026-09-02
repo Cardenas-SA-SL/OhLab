@@ -1517,7 +1517,7 @@ export function TerminalNode({
     (data.cwd as string | undefined) !== parentWtPath
   const status = useAgentStatus((s) => s.byId[id])
   /**
-   * Which Claude account this node is ACTUALLY on (D5). `data.accountId` is what nodeterm launched
+   * Which Claude account this node is ACTUALLY on. `data.accountId` is what nodeterm launched
    * it as and is immutable; `status.account` is what the session's hooks reported — the only
    * identity a plain terminal running `CLAUDE_CONFIG_DIR=~/.claude-2 claude` ever has.
    *
@@ -1802,7 +1802,7 @@ export function TerminalNode({
     sessionId: status?.sessionId,
     cwd: data.cwd as string | undefined,
     // A READER: the search hits the transcript index under whichever account the session is
-    // actually running as (D5), not the one the node was created with.
+    // actually running as, not the one the node was created with.
     accountId: accountForReads,
     // The transcript index reads claude's JSONL through the same resolver, so it is gated on the
     // claude-transcript fact, NOT on the meter's `showUsage` — see lib/transcriptGates.ts.
@@ -4603,8 +4603,9 @@ export function TerminalNode({
   // gemini's update_topic tool call. It is resolved at node creation and immutable thereafter, so
   // it does not belong in the dep array.
   //
-  // The ACCOUNT does not get that treatment any more: it is the effective one (D5), which for a
-  // plain terminal arrives with the first hook event, i.e. AFTER this effect mounted. It rides a
+  // The ACCOUNT does not get that treatment any more: it is the EFFECTIVE one (the account the
+  // session is observed running as), which for a plain terminal arrives with the first hook event,
+  // i.e. AFTER this effect mounted. It rides a
   // ref (`accountForReadsRef`, refreshed every render) rather than the deps so a late observation
   // is picked up by the very next poll instead of tearing down and restarting the timer chain.
   useEffect(() => {

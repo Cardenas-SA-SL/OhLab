@@ -163,7 +163,7 @@ export function registerClaudeAccountsIpc(deps: ClaudeAccountsDeps = {}): void {
       await remote.r.remove(remote.projectId, id)
       return
     }
-    // LINKED account (design D4/§3): the directory is the USER's — `~/.claude-2` with their real
+    // LINKED account: the directory is the USER's — `~/.claude-2` with their real
     // login in it — and removing the account only forgets the settings row (the renderer owns the
     // list). Forgetting is the whole operation here; `rm -rf` would delete a second Claude
     // identity the app never created.
@@ -177,8 +177,8 @@ export function registerClaudeAccountsIpc(deps: ClaudeAccountsDeps = {}): void {
   })
 
   /**
-   * Link a PRE-EXISTING Claude config dir as an account (design D4; validation is §3 verbatim).
-   * The renderer owns the settings list, so this returns the record and appends nothing itself.
+   * Link a PRE-EXISTING Claude config dir as an account. The renderer owns the settings list, so
+   * this returns the record and appends nothing itself.
    *
    * Every refusal is a distinct `Error` message because the Settings UI shows it: "that path does
    * not exist" and "that is already linked" need different fixes from the user, and one generic
@@ -198,9 +198,9 @@ export function registerClaudeAccountsIpc(deps: ClaudeAccountsDeps = {}): void {
     if (!configDir) {
       throw new Error(`Not an absolute path: ${typed}`)
     }
-    // The three STRING refusals run before the fs is touched at all. §3 lists exists/isDirectory
-    // first, but the order here is deliberate: a path we are going to refuse on its shape alone is
-    // a path we should not be stat'ing, and refusing `~/.claude` needs to say so even on a machine
+    // The three STRING refusals run before the fs is touched at all, and that ORDER is
+    // deliberate rather than incidental: a path we are going to refuse on its shape alone is a
+    // path we should not be stat'ing, and refusing `~/.claude` needs to say so even on a machine
     // where the dir has not been created yet ("no such directory" would be a misleading answer to
     // "why can't I link my system account?").
     if (configDir === normalizeLinkedConfigDir(path.join(homedir(), '.claude'))) {
@@ -233,7 +233,7 @@ export function registerClaudeAccountsIpc(deps: ClaudeAccountsDeps = {}): void {
     }
     if (!isDir) throw new Error(`Not a directory: ${configDir}`)
     // The ONLY read of the dir's contents, and only after the user asked for this dir by name.
-    // Missing / not-logged-in is `email: null`, NOT a failure (§3): linking a dir the user has not
+    // Missing / not-logged-in is `email: null`, NOT a failure: linking a dir the user has not
     // signed into yet is legitimate — the CLI writes the email when they do.
     let email: string | null = null
     try {

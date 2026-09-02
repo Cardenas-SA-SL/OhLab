@@ -232,7 +232,7 @@ export function AccountsSection({ isActive }: { isActive: boolean }): React.JSX.
   // the path still works, which is why Browse is a convenience and never the only way in.
   const [browseUnsupported, setBrowseUnsupported] = useState(false)
   /**
-   * Config dirs SEEN running on this core that we have no account for (D7) — the one-click Link
+   * Config dirs SEEN running on this core that we have no account for — the one-click Link
    * candidates. A primitive selector (newline-joined) so the settings page does not re-render on
    * every hook event of every node just to discover the same list again.
    */
@@ -845,7 +845,7 @@ export function AccountsSection({ isActive }: { isActive: boolean }): React.JSX.
             </div>
           )}
 
-          {/* LINK an existing config dir (D4). The other half of "several Claude logins": a user
+          {/* LINK an existing config dir. The other half of "several Claude logins": a user
               who already keeps `~/.claude-2` and drives it from their own shell function does not
               want a new managed dir — they want THIS one to have an id, so the chip, the transcript
               readers and the pickers stop treating their second login as a stranger. Local only:

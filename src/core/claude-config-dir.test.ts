@@ -52,7 +52,7 @@ describe('claudeConfigDirFor', () => {
   })
 })
 
-// ---- Linked accounts (design D4) ------------------------------------------------------------
+// ---- Linked accounts (a config dir the user already owns) ------------------------------------
 //
 // `claudeConfigDirFor` is THE resolver: env injection at spawn, the usage reader, the transcript
 // roots and the mirror's account list all call it and nothing else. So the linked branch is added

@@ -63,7 +63,7 @@ afterEach(() => {
   useSettings.setState({ settings: DEFAULT_SETTINGS })
 })
 
-describe('AccountChip (D6 visibility through the live stores)', () => {
+describe('AccountChip (chip visibility through the live stores)', () => {
   it('renders nothing for a system pane while it is the only identity in play', () => {
     useAgentStatus.setState({ byId: { n1: { unread: false, account: SYSTEM } } })
     const { host, root } = render({ observed: SYSTEM })

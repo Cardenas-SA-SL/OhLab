@@ -269,7 +269,7 @@ describe('wireAgentStatus', () => {
   })
 })
 
-// The transcript jail on THIS shell, and the linked half of it (design D4 / §3). Both raw
+// The transcript jail on THIS shell, and the LINKED half of it. Both raw
 // listeners have to learn the same widening or the Server Edition silently keeps the pre-fix
 // behavior for a pane running the user's own `CLAUDE_CONFIG_DIR` — the "both raw listeners change
 // together" rule, which this repo has broken three times.

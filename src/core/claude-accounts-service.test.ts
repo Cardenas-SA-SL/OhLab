@@ -188,7 +188,7 @@ describe('installHooksIntoLocalAccounts', () => {
   })
 })
 
-// ---- Linked accounts (design D4 / §3) --------------------------------------------------------
+// ---- Linked accounts (adopting a config dir the user already drives) -------------------------
 //
 // A linked account is a config dir the USER already owns (`~/.claude-2` driven by their own
 // `CLAUDE_CONFIG_DIR` shell function). Two properties matter more than the rest and are pinned

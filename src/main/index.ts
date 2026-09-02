@@ -1227,7 +1227,7 @@ app.whenReady().then(async () => {
   })
 
   settingsStore.init()
-  // The linked-account resolver's one source of truth on this shell (design D4). Registered as
+  // The linked-account resolver's one source of truth on this shell. Registered as
   // soon as settings exist — not down beside `initTranscriptIndex`, where the other account wiring
   // sits — because EVERY config-dir resolution has to be able to see it, including the earliest:
   // the mirror settings provider is a lazy callback and an agent-status flush can fire from the

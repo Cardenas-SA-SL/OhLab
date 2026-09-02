@@ -1870,8 +1870,7 @@ else, and its context links must keep classifying across restarts).
     correct (their credentials aren't on the host) but read as "multi-account is broken on SSH".
   - **Remote accounts** — selection + login + env injection, plus **usage** (below); no
     per-account transcript readers beyond env.
-  - **Linked accounts** (`ClaudeAccount.configDir`, design:
-    `docs/superpowers/plans/2026-09-01-claude-account-tracking.md`) — a PRE-EXISTING local config
+  - **Linked accounts** (`ClaudeAccount.configDir`) — a PRE-EXISTING local config
     dir the user already drives themselves (`export CLAUDE_CONFIG_DIR=~/.claude-2; claude …` in a
     plain terminal) adopted as a first-class account without a login node. Settings → Accounts →
     **Link existing config dir…** (or one click on a **Detected** dir) calls `claude-accounts:link`

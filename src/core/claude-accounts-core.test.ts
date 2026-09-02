@@ -258,7 +258,7 @@ describe('isSafeRemoteTranscriptPath', () => {
   })
 })
 
-// ---- Observed accounts (design D1/D2) --------------------------------------------------------
+// ---- Observed accounts (deriving a session's account from its transcript path) ----------------
 //
 // The whole feature turns on these three pure functions, so each is driven with BOTH path
 // dialects: the desktop that classifies an SSH node's POSIX `transcript_path` may itself be
@@ -421,8 +421,10 @@ describe('classifyClaudeConfigDir', () => {
       accountId: null,
       known: true
     })
-    // D2 is host-agnostic on purpose: an SSH node's `<remoteHome>/.claude` is that host's system
-    // account, and the observed dir is a label — nothing branches on it for permission.
+    // The classifier is host-agnostic on purpose: an SSH node's `<remoteHome>/.claude` is that
+    // host's system account, and the observed dir is a label — nothing branches on it for
+    // permission. (Which MACHINE the dir is on is the renderer's to record; see
+    // `ObservedClaudeAccount.remote`.)
     expect(at('/home/enes/.claude')).toEqual({
       configDir: '/home/enes/.claude',
       accountId: null,

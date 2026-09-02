@@ -150,7 +150,7 @@ function parseClientRevision(raw: string | string[] | undefined): number | undef
 }
 
 /**
- * The `account` LABEL for a claude hook payload (design D1/D2): `transcript_path` →
+ * The `account` LABEL for a claude hook payload: `transcript_path` →
  * `<configDir>/projects/…` → which account that dir is. Undefined for every other agent and for a
  * payload with no usable `transcript_path` — "we did not observe an account" and "the system
  * account" are different facts and must stay distinguishable (CONTRIBUTING: a failed read is never
@@ -158,7 +158,7 @@ function parseClientRevision(raw: string | string[] | undefined): number | undef
  *
  * NEVER throws: this sits on the 204 path, and a classification failure — a settings store mid-
  * write, a platform seam not yet initialized in an odd boot order — must cost the label, not the
- * event. NO filesystem access happens here (D7): the dir is classified as a string, so a forged
+ * event. NO filesystem access happens here: the dir is classified as a string, so a forged
  * POST naming `~/.ssh/projects/x.jsonl` gets a `known: false` label and nothing is opened.
  */
 function observedClaudeAccount(
@@ -754,7 +754,7 @@ class HookServer {
           // Raw listener first: it drives the transcript-tailing features (which need
           // transcript_path). Inside the try so a throwing raw listener still ends 204.
           this.rawListener?.(agentId, nodeId, payload, { verified })
-          // WHICH CLAUDE ACCOUNT this session is on (design D1/D3). A third LABEL alongside
+          // WHICH CLAUDE ACCOUNT this session is on. A third LABEL alongside
           // `verified`/`clientRevision`, computed HERE so ONE implementation serves both shells —
           // the "both raw listeners change together" rule is sidestepped rather than violated,
           // because neither raw listener changes. Claude only: `transcript_path` means a config

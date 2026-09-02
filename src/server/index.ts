@@ -186,7 +186,7 @@ export async function startServer(
   const workspaceStore = new WorkspaceStore()
 
   settingsStore.init()
-  // The linked-account resolver's one source of truth on this shell (design D4). Registered as
+  // The linked-account resolver's one source of truth on this shell. Registered as
   // soon as settings exist and BEFORE anything that resolves a config dir — the mirror settings
   // provider, `installHooksIntoLocalAccounts`, the transcript jail — because an unregistered
   // source means "no linked accounts", i.e. a linked row would resolve to a managed dir that does

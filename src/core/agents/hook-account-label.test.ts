@@ -1,6 +1,7 @@
 /**
- * `/hook/*` learns a THIRD label: which Claude account the posting session is actually on
- * (design D1/D3 of the claude-account-tracking plan).
+ * `/hook/*` learns a THIRD label: which Claude account the posting session is actually on,
+ * derived from the payload's `transcript_path` and attached in the hook server so ONE
+ * implementation serves both shells.
  *
  * Driven through the REAL server — a POST over the socket, not a call to a helper — because the
  * property under test is that the label is attached where `verified` / `clientRevision` are, i.e.
@@ -28,8 +29,8 @@ import type { NormalizedAgentEvent } from '../../shared/agents/normalize'
 import type { ClaudeAccount } from '../../shared/types'
 
 let dir = ''
-// The linked dir is a plain PATH here — nothing on disk is required, and that is itself the point
-// (D7): classification is string work, so a forged POST cannot make the server open anything.
+// The linked dir is a plain PATH here — nothing on disk is required, and that is itself the point:
+// classification is string work, so a forged POST cannot make the server open anything.
 const LINKED_DIR = '/home/test-user/.claude-2'
 const LINKED: ClaudeAccount = { id: 'linked-acct-1', label: 'second', configDir: LINKED_DIR, createdAt: 0 }
 
@@ -136,7 +137,7 @@ describe('hook server: the observed-account label on /hook/claude', () => {
     expect(events[0].account).toBeUndefined()
   })
 
-  it('leaves the RAW listener contract untouched (D3: neither raw listener changes)', async () => {
+  it('leaves the RAW listener contract untouched — neither raw listener changes', async () => {
     await post('claude', `${LINKED_DIR}/projects/-repo/s1.jsonl`)
     expect(raws).toHaveLength(1)
     expect('account' in raws[0].payload).toBe(false)

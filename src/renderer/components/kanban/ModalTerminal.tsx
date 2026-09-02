@@ -101,8 +101,8 @@ export function ModalTerminal({ nodeId, spawn, searchOpen, onCloseSearch }: Moda
   const fitRef = useRef<FitAddon | null>(null)
   const transportRef = useRef<LocalTransport | null>(null)
   const agentSessionId = useAgentStatus((s) => s.byId[nodeId]?.sessionId)
-  // MIRROR TerminalNode: transcript READS go to the account the session is actually running as
-  // (D5), which for a plain terminal is only ever the observed one. The spawn below keeps
+  // MIRROR TerminalNode: transcript READS go to the account the session is actually running as,
+  // which for a plain terminal is only ever the observed one. The spawn below keeps
   // `spawn.accountId` — launch identity stays creation-time.
   const observedAccount = useAgentStatus((s) => s.byId[nodeId]?.account)
   // …resolved against the live account list, so linking the dir repoints the reader at once.

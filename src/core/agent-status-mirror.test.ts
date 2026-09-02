@@ -2327,7 +2327,7 @@ describe('hibernated flag (Eco × phone — SLEEPING on external readers)', () =
   })
 })
 
-// ---- The observed Claude account (design D3/D4) ---------------------------------------------
+// ---- The observed Claude account (which account a RUNNING session is on) ---------------------
 //
 // For a HAND-LAUNCHED claude (a plain terminal running `CLAUDE_CONFIG_DIR=~/.claude-2 claude`)
 // the node's `data.accountId` is undefined forever, so this label is the only record of which

@@ -1,5 +1,5 @@
 // Resolve a Claude account's config dir under this app's persistent state root — or, for a LINKED
-// account, the pre-existing dir the user already owns (`ClaudeAccount.configDir`, design D4).
+// account, the pre-existing dir the user already owns (`ClaudeAccount.configDir`).
 // The account LIST + login lifecycle live in main/claude-accounts.ts; this is just the
 // impure path resolution (needs the platform seam for userDataDir) split out so core
 // modules (pty-manager, etc.) can use it without importing electron.
@@ -49,7 +49,7 @@ export function claudeAccountsSnapshot(): readonly ClaudeAccount[] {
  * A linked account's validated config dir, or null when the id names no linked account. The value
  * is re-validated (absolute, normalized, no `..`) at THIS point of use — it comes from a
  * hand-editable settings.json — and an unusable one yields null, which sends every caller back to
- * the managed path (§3: "never something more destructive than the default").
+ * the managed path — never something more destructive than the default.
  */
 export function linkedClaudeConfigDirFor(accountId: string): string | null {
   for (const a of claudeAccountsSnapshot()) {
