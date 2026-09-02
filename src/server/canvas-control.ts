@@ -46,8 +46,27 @@ export interface ServerCanvasControlDeps {
   cliCaps?: () => Promise<ClaudeCliCaps>
   /** Test seam for the boot-populated shared Codex capability answer. */
   codexSharedIdentity?: () => Promise<boolean>
-  /** The server's installHooks gate. False keeps every real agent config directory untouched. */
-  installAgentIntegrations?: boolean
+  /**
+   * Whether to write this server's discovery surface into the machine's REAL agent configuration
+   * directories: `~/.claude/skills/manage-nodeterm-canvas/SKILL.md`, the marker block in
+   * `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md`, and the same skill in every managed Claude
+   * account dir. `true` = the server's `installHooks` gate said yes; `false` = leave them alone.
+   *
+   * REQUIRED, and deliberately not defaulted. A service process editing files inside a user's
+   * `$HOME` is a documented hazard in this repo — those instruction files are loaded by EVERY
+   * agent session on the machine, nodeterm's or not, so a stray write follows the user into work
+   * that has nothing to do with this server (issue #490). The previous shape was an OPTIONAL flag
+   * read as `!== false`, which meant OMITTING the decision installed: the dangerous direction was
+   * the one you got by saying nothing, and a new call site or a test that simply forgot the field
+   * would rewrite the developer's own agent configuration with no diagnostic. Making it required
+   * turns "I did not think about this" into a compile error — the same asymmetry
+   * `session-memory-service.ts` uses for its `remote.isRemoteProject` dep, where
+   * reading-without-knowing is likewise refused at the type level.
+   *
+   * Production passes `config.installHooks !== false`; every test must pass `false` unless it is
+   * specifically exercising the install and has redirected `HOME` to a scratch directory first.
+   */
+  installAgentIntegrations: boolean
 }
 
 export interface ServerCanvasControl {
@@ -130,7 +149,10 @@ export async function initServerCanvasControl(
     }
   }
 
-  if (deps.installAgentIntegrations !== false) {
+  // Required field, so this is a plain read of a decision the caller had to make — never a
+  // default. See ServerCanvasControlDeps.installAgentIntegrations for why omission must not
+  // be spellable here.
+  if (deps.installAgentIntegrations) {
     installSkillInto(path.join(os.homedir(), '.claude'))
     installInstructions(path.join(os.homedir(), '.codex', 'AGENTS.md'), instructions)
     installInstructions(path.join(os.homedir(), '.gemini', 'GEMINI.md'), instructions)

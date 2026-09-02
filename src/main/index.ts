@@ -3242,6 +3242,11 @@ app.whenReady().then(async () => {
         return null
       }
     }
+  }, {
+    // The desktop app is the surface Context Link's discovery was designed for, so it installs
+    // the skill + instruction blocks. Stated rather than defaulted: the flag is required so no
+    // caller can reach the write by omission (see initContextLink, issue #490).
+    installAgentIntegrations: true
   })
   initCanvasControl()
   // Usage service + the mobile `usage` mirror block (mobile-usage-inbox): poll all local managed

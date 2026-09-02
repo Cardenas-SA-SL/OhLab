@@ -279,10 +279,27 @@ export function setContextLinks(map: ContextLinkMap): Promise<void> {
   return writeChain
 }
 
+/**
+ * Boot Context Link: register the hook-server read handler, (re)write the shim under `dataDir`,
+ * and — only when `options.installAgentIntegrations` says so — install the discovery surface into
+ * the machine's REAL agent configuration directories (`~/.claude/skills/get-linked-context`, plus
+ * the marker block in `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and opencode's `AGENTS.md`).
+ *
+ * `options` is REQUIRED and its flag is a plain `boolean`, deliberately: those instruction files
+ * belong to the user and are loaded by every agent session on the machine, ours or not, so
+ * writing them is a decision each caller owes an answer to (issue #490). The previous shape —
+ * an optional options bag whose flag was read as `!== false` — meant the WRITE was what you got
+ * by saying nothing, which is the wrong default direction for a filesystem effect outside our own
+ * data dir, and it is exactly how a unit test that never thought about `HOME` came to rewrite the
+ * developer's own `~/.codex/AGENTS.md` on every run. Same asymmetry as
+ * `session-memory-service.ts`'s required `remote.isRemoteProject`: acting-without-knowing is a
+ * compile error. `platformDeps` lost its default with it — every caller already passes one, and a
+ * defaulted parameter in front of a required one is unreachable anyway.
+ */
 export function initContextLink(
   ptyManager: PtyManager,
-  platformDeps: ContextLinkDeps = {},
-  options: { installAgentIntegrations?: boolean } = {}
+  platformDeps: ContextLinkDeps,
+  options: { installAgentIntegrations: boolean }
 ): void {
   pty = ptyManager
   deps = platformDeps
@@ -295,7 +312,7 @@ export function initContextLink(
       if (f.endsWith('.json')) fs.rmSync(path.join(d, f), { force: true })
     }
     writeCliFiles()
-    if (options.installAgentIntegrations !== false) {
+    if (options.installAgentIntegrations) {
       installSkill()
       installAgentInstructions()
     }
