@@ -389,7 +389,12 @@ ai-name / comments).
 
 **Verified corrections to the original assumptions:**
 
-1. **The `Notification` vocabulary is published and closed.** Grok 1.0.13 names `idle_prompt`,
+1. **The `Notification` vocabulary is published and closed** — it was previously written up here as
+   UNVERIFIED and able to fail in BOTH directions: silence (NEEDS YOU never lighting, since grok
+   documents no counterpart to claude's `PermissionRequest`) or over-firing (orca reports a
+   notification before *every* tool call, which the first mapping turned into an unread dot, a
+   chime, an OS notification and a phone card **per call**). Neither was a guess worth keeping:
+   the spec answers it. Grok 1.0.13 names `idle_prompt`,
    `permission_prompt`, and `task_complete` in `~/.grok/docs/user-guide/10-hooks.md:99`; `:162`
    explicitly says `permission_prompt` fires only while a permission UI is actually waiting. The
    normalizer therefore maps that exact type to `blocked`, maps exact `idle_prompt` through the
@@ -407,22 +412,7 @@ ai-name / comments).
 
 **Remaining gaps — state these, do not paper over them:**
 
-1. **The `Notification` vocabulary is unverified, and it can fail in BOTH directions.** Grok documents
-   no hook for "a permission prompt is on screen" — claude's `PermissionRequest` has no counterpart, and
-   `PermissionDenied` is a post-decision event — so NEEDS YOU may never light. But the opposite is just
-   as live: orca (a shipping integration) reports that grok fires a `permission_prompt` Notification
-   before **every** tool call, even under `bypassPermissions`, and our first mapping turned each of
-   those into `blocked`, i.e. an unread dot + chime + OS notification + phone inbox card **per tool
-   call**. That routine case is now suppressed exactly as orca suppresses it, and both spellings of a
-   genuine ask (`*permission*` and grok's own `approval_required`) still light the badge. Which of the
-   two failures is real is unknown until checklist **10** records the vocabulary — so watch for
-   **over**-firing as carefully as for silence.
-2. **An interrupted turn (Esc) fires no hook at all**, by grok's design, so a node can sit on RUNNING
-   until the next `UserPromptSubmit` re-syncs it. The only thing that can rescue it early is an idle
-   `Notification`, if grok emits one — detected from its **message** text (orca's four phrases), since
-   nothing in either source names an idle *type*. No watchdog was built; checklist **9** measures how
-   bad it feels, which is the input to deciding whether one is worth it.
-3. ~~The phone's per-node "what it's doing now" activity line does not work for grok.~~ **CLOSED,
+1. ~~The phone's per-node "what it's doing now" activity line does not work for grok.~~ **CLOSED,
    and the stated cause was wrong.** This said grok's file hooks "never send `PreToolUse`", so the
    `recordRawToolEvent` call was a no-op and was deleted. Measured on 1.0.13 (2026-09-02): grok DOES
    publish the event — it spells it **`pre_tool_use`**, its own snake_case, in both field dialects —
@@ -437,15 +427,15 @@ ai-name / comments).
    honest; one built on a guessed key renders wrong forever. Note grok's names collide with claude's
    by CASE alone in two places (`grep`/`Grep`, `write`/`Write`), so that switch must stay
    case-sensitive.
-4. **A remote (SSH) grok node's session name never resolves.** The shells build the session directory
+2. **A remote (SSH) grok node's session name never resolves.** The shells build the session directory
    from the **local** `grokSessionsDir()` while the payload's `cwd` came from the host. It degrades
    safely — a wrong name is never produced, only no name — but it is a real asymmetry: claude's leg
    right below handles remote via `setRemoteTranscriptReader`.
-5. **The `sessionId → dir` map is in-memory,** so after an app restart a grok name does not resolve
+3. **The `sessionId → dir` map is in-memory,** so after an app restart a grok name does not resolve
    until that session's next hook. This is the deliberate "derive, never search" trade (claude
    resolves immediately *because* it scans, which is the behaviour that made nodes adopt each other's
    names); the checklist records how it feels.
-6. **No live session-name poll in the browser** — see §7.
+4. **No live session-name poll in the browser** — see §7.
 6b. **The FIRST grok node in a cwd mints without checking the disk.** The taken-id set is warmed
    per cwd on demand (`renderer/state/grokSessionIds.ts`), so the first mint in a directory
    nobody has opened yet answers "nothing taken" and the fetch it triggers only helps the NEXT
@@ -454,7 +444,7 @@ ai-name / comments).
    leaves is a v4 UUID colliding with an existing session directory, which is not the failure
    this guard exists for — the real one is a node reusing an id from an earlier session, and
    that one IS caught once the cwd is warm.
-7. ~~Canvas-control discovery is unverified.~~ **MEASURED, and the premise holds.** `grok inspect
+5. ~~Canvas-control discovery is unverified.~~ **MEASURED, and the premise holds.** `grok inspect
    --json` on grok 1.0.13 lists `get-linked-context` with `vendor: claude` and
    `compatibilityStatus: enabled`, and `externalCompat.cells` reports
    `{surface: 'skills', enabled: true, source: 'default'}` — `source: 'default'` is the part that
@@ -467,7 +457,7 @@ ai-name / comments).
    while the skill is undiscoverable. **If grok does not list our skills, this changes shape** (a
    marker block into grok's own instruction file, as codex/gemini/opencode get) and should be
    re-planned, not forced.
-8. ~~The brand logo is a placeholder.~~ **CLOSED.** The official xAI mark now ships, inlined in
+6. ~~The brand logo is a placeholder.~~ **CLOSED.** The official xAI mark now ships, inlined in
    `agentIcons.tsx` as `GrokMark` (`fill="currentColor"`, the mark's own non-square 512×492 viewBox
    so it is never stretched). Inlining is what makes it theme-correct: the mark is a single
    monochrome path and the vendor's own usage is one ink that flips with the background, which
@@ -475,7 +465,7 @@ ai-name / comments).
    isolated document, so `currentColor` resolves against nothing and paints black, invisible on the
    default dark theme. That is also why the other four marks, which are multi-colour and carry their
    own fills, remain assets.
-9. **The local `$GROK_HOME` is read from an environment a GUI app does not have.** `grokHomeDir()`
+7. **The local `$GROK_HOME` is read from an environment a GUI app does not have.** `grokHomeDir()`
    defaults from `process.env`, but a desktop app launched from Finder/Dock/a `.desktop` entry never
    sourced the user's shell rc — while the grok CLI, started by the shell inside a tmux pane, did. For
    a user whose `export GROK_HOME=…` lives in `.zshrc`, we write the hook file under `~/.grok` and grok
@@ -581,44 +571,44 @@ State machine edges
     leaves the session working. Record whether `idle_prompt` follows as the bounded fallback. Also
     try cancel-and-send: it emits no stop hook and the replacement turn must stay RUNNING. No
     watchdog is needed because the session-level terminal event exists.
-10. Capture one real payload for each published `Notification` type and record which key carries the
+8. Capture one real payload for each published `Notification` type and record which key carries the
     kind (`notificationType`, `notification_type`, or `type`). The type vocabulary and semantics are
     already published in `10-hooks.md:99,162`; this capture is only to replace the remaining
     defensive key aliases with measured envelope shapes. Message prose and severity do not classify
     state.
-11. Force an API error (e.g. an invalid model). Does StopFailure clear the RUNNING badge?
-12. Quit with `/quit`. Does the session-close Stop stay silent (no "agent finished" notification)?
+9. Force an API error (e.g. an invalid model). Does StopFailure clear the RUNNING badge?
+10. Quit with `/quit`. Does the session-close Stop stay silent (no "agent finished" notification)?
 
 Session identity + restore
-13. Does the session chip fill in? The chip has exactly ONE source: the terminal-title OSC
+11. Does the session chip fill in? The chip has exactly ONE source: the terminal-title OSC
     (`term.onTitleChange`, path/prompt-looking titles ignored). The summary.json poll feeds the node
     TITLE instead — that is item 14 — so a blank chip with a correct title is not a bug.
-14. `/rename Something` in grok, then check the node title adopts it — and record WHICH
+12. `/rename Something` in grok, then check the node title adopts it — and record WHICH
     summary.json key held it. TITLE_KEYS[0] = 'title' is a GUESS; correct it if it differs, and
     replace __fixtures__/grok/summary.json with the real file while you are there.
-15. Rename the NODE by hand: does grok's own title change (the `/rename` write leg)?
-16. Reboot (or `tmux kill-server`) and reopen the project: does the node cold-restore with
+13. Rename the NODE by hand: does grok's own title change (the `/rename` write leg)?
+14. Reboot (or `tmux kill-server`) and reopen the project: does the node cold-restore with
     `grok --resume <id>` and land in the SAME conversation, in the right cwd? Note that after
     an app restart the session NAME will not resolve until that session's next hook (§8.5).
 
 Fixtures the unbuilt features need, modes, restart
-17. ~~CAPTURE `signals.json` from a live session.~~ **DONE, 22 sessions (1.0.13, 2026-09-02).** The
+15. ~~CAPTURE `signals.json` from a live session.~~ **DONE, 22 sessions (1.0.13, 2026-09-02).** The
     keys are `contextTokensUsed`, `contextWindowTokens` and `contextWindowUsage`; a total DOES
     appear, in all 22. Fixture at `core/__fixtures__/grok/signals.json`, survey in
     `evidence/grok-signals.txt`. What a NEW device should still check is the opposite case this item
     was written for: a session whose signals.json lacks `contextWindowTokens` (a future grok, an
     interrupted write). The meter must then vanish, not fall back to a guessed window.
-18. Settings → Agents → Auto: does the launched command carry `--permission-mode auto`, on a
+16. Settings → Agents → Auto: does the launched command carry `--permission-mode auto`, on a
     machine WITHOUT claude installed? (The claude gate must not touch grok.)
-19. Does `--permission-mode acceptEdits` launch cleanly, and what does grok actually do with it
+17. Does `--permission-mode acceptEdits` launch cleanly, and what does grok actually do with it
     (its hook payload only ever reports default/auto/plan/bypassPermissions)? Check a
     prompt-carrying launch too (transfer / open-agent / spawn-team): the flag must appear
     BEFORE the `--`.
-20. "Restart agent (resume)" on an idle grok node: does it `/quit`, wait for the shell, and
+18. "Restart agent (resume)" on an idle grok node: does it `/quit`, wait for the shell, and
     resume the same session? Is it refused while the node is RUNNING?
 
 Skills
-21. ~~`grok inspect --json`: are `manage-nodeterm-canvas` and `get-linked-context` listed?~~
+19. ~~`grok inspect --json`: are `manage-nodeterm-canvas` and `get-linked-context` listed?~~
     **ANSWERED on this machine, grok 1.0.13 (2026-09-02): yes.** `get-linked-context` comes back with
     `vendor: claude` and `compatibilityStatus: enabled`, and `externalCompat.cells` reports
     `{surface: 'skills', enabled: true, source: 'default'}`. Recorded in
@@ -627,10 +617,10 @@ Skills
     `[compat.claude] skills = false` in `~/.grok/config.toml`, and separately export
     `GROK_CLAUDE_SKILLS_ENABLED=false`. In each case `NODETERM_CANVAS_CONTROL=1` is still set while
     the skill is undiscoverable — i.e. the shim is armed and mute. Nobody has seen that state.
-22. From a grok session, run the canvas shim: does a node appear on the canvas? The path differs
+20. From a grok session, run the canvas shim: does a node appear on the canvas? The path differs
     per surface — LOCAL sessions get `<userData>/canvas-control/nodeterm.sh` (the path written
     into the skill's own SKILL.md), remote SSH sessions get `$HOME/.nodeterm/nodeterm.sh`.
-23. CAPTURE the `spawn_subagent` PreToolUse/PostToolUse payloads (Task 11 Step 1). ~~And
+21. CAPTURE the `spawn_subagent` PreToolUse/PostToolUse payloads (Task 11 Step 1). ~~And
     `updates.jsonl` (Task 10 Step 1).~~ **That half is done, and the file was the wrong one:** the
     readable conversation is `chat_history.jsonl`, its sibling; `updates.jsonl` is what the hook
     payloads advertise, and following the advertisement fails silently. The fixture cut from a real
@@ -639,44 +629,44 @@ Skills
     linked to a grok node **should both read**. On a new device, check exactly that.
 
 SSH
-24. Connect an SSH project, then on the host: `cat $HOME/.grok/hooks/nodeterm-status.json`.
+22. Connect an SSH project, then on the host: `cat $HOME/.grok/hooks/nodeterm-status.json`.
     Present, with the `.*` matcher?
-25. Does a REMOTE grok node show badges? (Reverse tunnel + remote script.) Its session NAME will
+23. Does a REMOTE grok node show badges? (Reverse tunnel + remote script.) Its session NAME will
     not resolve — that is the known asymmetry in §8.4, not a new bug.
-26. If the host sets GROK_HOME, did the file land there and not in `$HOME/.grok`? NOTE the
+24. If the host sets GROK_HOME, did the file land there and not in `$HOME/.grok`? NOTE the
     trap: we probe it with `printf %s "${GROK_HOME:-}"` over a NON-LOGIN ssh exec, so a host that
     exports GROK_HOME only from `.bashrc` reports EMPTY and silently gets `~/.grok` — the wrong
     directory, with no symptom at all. If it bites, give the probe the login-shell + PATH
     treatment `SshProjectManager.connect` uses for the remote `claude --version`.
 
 Surfaces
-27. Server Edition in a browser: grok badges, unread dot, notch N/A — and now a context meter too
+25. Server Edition in a browser: grok badges, unread dot, notch N/A — and now a context meter too
     (both shells create the signals.json tail). Also confirm the node title does NOT adopt grok's
     session name there (readSessionName is stubbed).
-28. Phone: does a grok node appear in the inbox with the right state, AND does its "what it's doing
+26. Phone: does a grok node appear in the inbox with the right state, AND does its "what it's doing
     now" line now read grok's own phrases ("Reading fichero.txt", "Searching the code")? That line
     was absent until the `pre_tool_use` spelling was translated at the shells (§8.3). A claude phrase
     or a bare tool name appearing there means the vocabulary was bypassed.
-29. macOS notch: does the grok mark pulse and bloom while it works, on the black capsule, next to
+27. macOS notch: does the grok mark pulse and bloom while it works, on the black capsule, next to
     claude's walking critter without looking out of place?
-30. Kanban board + card modal: badges, the 💬 comments panel, and the meter row — which now HAS
+28. Kanban board + card modal: badges, the 💬 comments panel, and the meter row — which now HAS
     something to show on a grok card.
 
 Two traps with no code fix — appended so the numbering above stays stable
-31. `echo $GROK_HOME` in a nodeterm terminal, then check where the hook file actually went. The app
+29. `echo $GROK_HOME` in a nodeterm terminal, then check where the hook file actually went. The app
     resolves it from the APP's environment, and a GUI launch (Finder/Dock/`.desktop`) never sourced
     your shell rc — so an `export GROK_HOME=…` in `.zshrc`/`.bashrc` splits the two sides and
     EVERYTHING silently stops working: no badge, no unread, no notification, no session name, no
     error (§8.9). Compare a shell launch (`npm start`) with a GUI launch (`open -a nodeterm`): a
     difference between them IS the trap. Report whether you set the variable at all — that answer
     decides whether a login-shell probe gets built.
-32. **Shift+Enter in a grok node.** nodeterm remaps it universally to `\x1b\r` (ESC+CR / M-Enter,
+30. **Shift+Enter in a grok node.** nodeterm remaps it universally to `\x1b\r` (ESC+CR / M-Enter,
     `terminalKeyAction` / `SHIFT_ENTER_SEQ`), which is what claude and codex want for "insert a
     newline, don't submit". Grok's own key handling is unverified here — orca records a
     `ctrlEnterEncoding: 'csi-u'` for it, i.e. a different encoding family — so check both: does
     Shift+Enter insert a newline (not submit), and does plain Enter still submit? If the remap fights
     grok, the fix is a per-agent encoding in `terminal-config.ts`, not a global change.
-33. **Does a grok elicitation survive its turn end?** Open an ask (whatever produces
+31. **Does a grok elicitation survive its turn end?** Open an ask (whatever produces
     `elicitation_dialog` / `agent_needs_input`) and watch what the node does when the turn finishes.
     Codex has exactly this shape — its `request_user_input` ends the turn with the question still
     open, the answer arriving as a fresh `UserPromptSubmit` — so `normalizeCodex` marks the ask
@@ -685,7 +675,7 @@ Two traps with no code fix — appended so the numbering above stays stable
     like codex, a grok node goes green while it is still waiting on you; if it does not, setting the
     flag would pin NEEDS YOU on a node that genuinely finished. Report which happens — a green node
     over an open question means grok joins the `awaitingInput` path, one line in `normalizeGrok`.
-34. **The Grok mark, at 16 px, in BOTH themes.** It is the official mark inlined with
+32. **The Grok mark, at 16 px, in BOTH themes.** It is the official mark inlined with
     `fill="currentColor"` (§8.8), so readability is guaranteed by construction — it takes the label
     colour, black-on-light and white-on-dark, the way xAI uses it. What is *not* guaranteed is
     legibility at that size: it is a fine diagonal glyph, and thin strokes can turn to mush where the
