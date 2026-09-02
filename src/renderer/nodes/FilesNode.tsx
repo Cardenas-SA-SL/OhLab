@@ -24,7 +24,15 @@ import { NodeResizer, useReactFlow, type NodeProps } from '@xyflow/react'
 import type { DirEntry } from '@shared/types'
 import { NODE_MIN_SIZES } from '../lib/nodeSizing'
 import { COLLAPSED_HEIGHT, NODE_COLORS, type CanvasNode } from '../state/workspace'
-import { breadcrumbs, childPath, fileOpenTarget, filterEntries, folderTitle, parentDir } from '../lib/filesNode'
+import {
+  breadcrumbs,
+  childPath,
+  classifyEmptyListing,
+  fileOpenTarget,
+  filterEntries,
+  folderTitle,
+  parentDir
+} from '../lib/filesNode'
 import { ancestorDirs, createTargetDir, newEntryPath } from '../lib/explorerCreate'
 import { sshFs } from '../terminal/ssh-fs'
 import { useSession } from '../session/session'
@@ -56,7 +64,12 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const [showColors, setShowColors] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleBefore, setTitleBefore] = useState('')
-  const [entries, setEntries] = useState<DirEntry[] | null>(null)
+  /** Kept WITH the directory it belongs to. Deriving `entries` from a cwd match is what makes
+   *  "Loading…" reachable: before this, nothing ever reset the list, so navigating showed the
+   *  PREVIOUS folder's rows until the new promise resolved and the loading state existed only on
+   *  the very first mount. A `version` bump (re-list after a create) deliberately keeps the rows,
+   *  since that is the same directory being re-read. */
+  const [listing, setListing] = useState<{ cwd: string; entries: DirEntry[] } | null>(null)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
@@ -65,6 +78,9 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
 
   const collapsed = !!data.collapsed
   const cwd = (data.cwd as string) || '/'
+  /** Null whenever the rows on screen do not belong to the directory being shown — i.e. the
+   *  "Loading…" state, which is now reachable on every navigation and not just the first mount. */
+  const entries = listing && listing.cwd === cwd ? listing.entries : null
   const isSshFs = !!data.sshFs
   const { api, source } = useSession()
   const activeProjectId = useProjects((s) => s.activeProjectId)
@@ -78,16 +94,36 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   useEffect(() => {
     let live = true
     setError('')
-    void fs
-      .list(cwd)
-      .then((list) => {
-        if (live) setEntries(list)
-      })
-      .catch(() => {
+    void (async () => {
+      let list: DirEntry[]
+      try {
+        list = await fs.list(cwd)
+      } catch {
+        // Only a transport-level rejection lands here (a dropped ws/relay socket, an
+        // unsupported namespace). Every filesystem failure resolves `[]` instead — which is
+        // exactly what the empty branch below has to disambiguate.
         if (!live) return
-        setEntries([])
+        setListing({ cwd, entries: [] })
         setError('Could not read this folder.')
-      })
+        return
+      }
+      if (!live) return
+      setListing({ cwd, entries: list })
+      if (list.length > 0) return
+      // Empty is ambiguous under the fail-open `FsApi` contract, so ask the parent who is right.
+      // A second listing, no new IPC, and only a definite absence is allowed to raise the error.
+      const parent = parentDir(cwd)
+      let parentEntries: DirEntry[] | null = null
+      try {
+        if (parent !== cwd) parentEntries = await fs.list(parent)
+      } catch {
+        parentEntries = null // could not ask ⇒ claim nothing
+      }
+      if (!live) return
+      if (classifyEmptyListing(cwd, parentEntries) === 'missing') {
+        setError('Could not read this folder.')
+      }
+    })()
     return () => {
       live = false
     }
@@ -96,6 +132,14 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
     // change `cwd`'s meaning and are covered by the deps that are here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, isSshFs, activeProjectId, version])
+
+  // The filter belongs to the directory it was typed in, so ONE owner clears it — keyed on `cwd`
+  // rather than done inside `navigate`, because navigation is not the only way the cwd changes:
+  // a removed worktree re-points it through `resetDisplacedCwd`, which never calls `navigate`.
+  // A filter surviving that lands the user in a new folder showing "Nothing matches …".
+  useEffect(() => {
+    setQuery('')
+  }, [cwd])
 
   const navigate = useCallback(
     (to: string) => {
@@ -106,7 +150,6 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
       const patch: Record<string, unknown> = { cwd: to }
       if (data.titleAuto !== false) patch.title = folderTitle(to)
       updateNodeData(id, patch)
-      setQuery('')
     },
     [id, updateNodeData, data.titleAuto]
   )

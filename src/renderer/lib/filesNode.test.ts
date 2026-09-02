@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { breadcrumbs, childPath, fileOpenTarget, filterEntries, folderTitle, parentDir } from './filesNode'
+import {
+  breadcrumbs,
+  childPath,
+  classifyEmptyListing,
+  fileOpenTarget,
+  filterEntries,
+  folderTitle,
+  parentDir
+} from './filesNode'
 
 describe('breadcrumbs', () => {
   it('walks a shallow path in full', () => {
@@ -90,5 +98,45 @@ describe('fileOpenTarget', () => {
     expect(fileOpenTarget('/a/installer.dmg', { remote: true })).toBe('canvas')
     expect(fileOpenTarget('/a/bundle.zip', { remote: true })).toBe('canvas')
     expect(fileOpenTarget('/a/notes.md', { remote: true })).toBe('canvas')
+  })
+})
+
+describe('classifyEmptyListing', () => {
+  const parent = [{ name: 'docs' }, { name: 'src' }, { name: 'README.md' }]
+
+  // The case the fourth empty state exists for, and could not reach before: a removed worktree.
+  // `listDir` answers [] for a directory that is gone, exactly as it does for an empty one.
+  it('says missing when the parent lists real entries and ours is not among them', () => {
+    expect(classifyEmptyListing('/repo/gone', parent)).toBe('missing')
+  })
+
+  it('says empty when the parent lists us — the folder is there and simply has nothing in it', () => {
+    expect(classifyEmptyListing('/repo/docs', parent)).toBe('empty')
+    expect(classifyEmptyListing('/repo/docs/', parent)).toBe('empty')
+  })
+
+  // "A failed read is never evidence of absence" (SshFs.readTextChecked). Under the same
+  // fail-open contract an empty PARENT means unreadable-or-gone, not childless — so we learned
+  // nothing and must not tell the user their folder was deleted.
+  it('says unknown when the parent itself came back empty', () => {
+    expect(classifyEmptyListing('/repo/docs', [])).toBe('unknown')
+  })
+
+  it('says unknown when the parent could not be asked at all', () => {
+    expect(classifyEmptyListing('/repo/docs', null)).toBe('unknown')
+  })
+
+  // Root has no parent to interrogate and always exists.
+  it('says empty at the root rather than interrogating a parent that does not exist', () => {
+    expect(classifyEmptyListing('/', null)).toBe('empty')
+    expect(classifyEmptyListing('/', [])).toBe('empty')
+  })
+
+  // A symlinked directory can list as a non-dir entry depending on the leg; matching on `dir`
+  // would call it missing. Name matching is what keeps that false alarm out.
+  it('matches by name, not by entry kind', () => {
+    // Real callers pass `DirEntry[]`; a symlinked directory can arrive with `dir: false`.
+    const listed: { name: string; dir: boolean }[] = [{ name: 'link', dir: false }]
+    expect(classifyEmptyListing('/repo/link', listed)).toBe('empty')
   })
 })

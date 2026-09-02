@@ -45,6 +45,48 @@ export function folderTitle(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? '/'
 }
 
+/**
+ * What an EMPTY listing actually means.
+ *
+ * `FsApi` is fail-open by contract — `core/fs-ops.listDir` and `SshFs.listDir` both end
+ * `catch { return [] }`, and the SSH IPC resolves `[]` even for a project whose ControlMaster is
+ * down. So a `.catch` on `list()` fires only when the transport itself rejects, and a directory
+ * that was deleted (a removed worktree, most obviously) comes back indistinguishable from one
+ * that is genuinely empty. That is why the node's "could not read" state was unreachable.
+ *
+ * We do not ask `fs.exists`. It is `stat`-based, so it answers TRUE for a directory you can stat
+ * but not `readdir`, and on SSH its `false` cannot separate "gone" from "the master died" — which
+ * `SshFs.readTextChecked` singles out precisely so it can refuse to conflate them: *a failed read
+ * is never evidence of absence*. Instead we ask the PARENT's listing, the same way
+ * `SshProjectDialog` and `file-links.ts`'s `makeDirListingLookup` already answer this question.
+ *
+ * Three answers, and the third is the point:
+ *  - `missing` — the parent listed real entries and ours is not among them. Only this earns the
+ *    error state.
+ *  - `empty`   — the parent lists us, so the directory is there and simply has nothing in it.
+ *    Root takes this too: it has no parent to ask and always exists.
+ *  - `unknown` — the parent itself came back empty, which under the same fail-open contract means
+ *    the parent is unreadable or gone rather than childless. We learned nothing, so we claim
+ *    nothing; the caller keeps saying "empty". Understating beats telling someone their folder
+ *    was deleted because a network hiccup ate one `ls`.
+ *
+ * Matching is by NAME, not by `dir`, deliberately: a symlinked directory can list as a non-dir
+ * entry depending on the leg, and mistaking one for "missing" is the false alarm this exists to
+ * avoid.
+ */
+export type EmptyListingVerdict = 'empty' | 'missing' | 'unknown'
+
+export function classifyEmptyListing(
+  cwd: string,
+  /** The parent's entries, or `null` when the parent was not asked or could not be read. */
+  parentEntries: readonly { name: string }[] | null
+): EmptyListingVerdict {
+  const name = folderTitle(cwd)
+  if (name === '/' || !cwd.replace(/\/+$/, '')) return 'empty' // root: no parent, always exists
+  if (!parentEntries || parentEntries.length === 0) return 'unknown'
+  return parentEntries.some((e) => e.name === name) ? 'empty' : 'missing'
+}
+
 /** Join a directory and an entry name. Trailing slashes on the dir are absorbed, so the root
  *  ('/') does not produce a doubled separator. */
 export function childPath(dir: string, name: string): string {
