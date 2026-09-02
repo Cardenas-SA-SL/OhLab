@@ -40,6 +40,7 @@ import { useProjects } from '../state/projects'
 import { promptDialog } from '../components/promptDialog'
 import { ContextMenu, type MenuItem } from '../components/ContextMenu'
 import { isBrowserRuntime } from '../bridge/runtime'
+import { canUseLocalShell } from '../lib/download'
 
 /** Surface a transient error the way every other node does (Canvas listens for this). */
 const toast = (message: string): void => {
@@ -87,9 +88,10 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const fs = isSshFs && activeProjectId ? sshFs(activeProjectId) : api.fs
   /** A listing this machine's OS cannot act on: an SSH host's files, or a relay peer's. */
   const remote = isSshFs || source === 'relay'
-  /** `shell.*` is Electron-only — in the browser the reveal row would be a button that does
-   *  nothing, which teaches less than not offering it. */
-  const canReveal = !remote && !isBrowserRuntime()
+  /** The ONE precondition every `shell.*` path action shares: an Electron shell, and a path on
+   *  THIS machine. Both members are `noop` stubs in a browser tab, so an ungated call is a dead
+   *  click — which is what "Reveal" was written to avoid and what `openPath` still did. */
+  const localShell = canUseLocalShell({ browser: isBrowserRuntime(), ssh: isSshFs, source })
 
   useEffect(() => {
     let live = true
@@ -162,6 +164,14 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
         return
       }
       if (fileOpenTarget(path, { remote }) === 'os') {
+        // `fileOpenTarget` has already refused a remote path, so the only way to be here without
+        // a usable shell is a browser tab — where `openPath` is an inert stub and the click would
+        // simply do nothing. Say so instead: an unavailable feature that explains itself reads
+        // better than an app that looks broken.
+        if (!localShell) {
+          toast(`“${entry.name}” can only be opened by the desktop app — a browser tab cannot hand a file to your operating system.`)
+          return
+        }
         api.shell.openPath(path)
         return
       }
@@ -171,7 +181,7 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
         new CustomEvent('nodeterm:open-file', { detail: { path, ssh: isSshFs } })
       )
     },
-    [cwd, navigate, remote, api, isSshFs]
+    [cwd, navigate, remote, api, isSshFs, localShell]
   )
 
   /** Create a file or a folder under `dir`, then re-list. Shared by both menu rows because the
@@ -242,12 +252,12 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
         label: 'Copy path',
         onClick: () => api.clipboard.writeText(path)
       })
-      if (canReveal) {
+      if (localShell) {
         items.push({ label: 'Reveal in file manager', onClick: () => api.shell.reveal(path) })
       }
       setMenu({ x: e.clientX, y: e.clientY, items })
     },
-    [cwd, open, create, api, canReveal]
+    [cwd, open, create, api, localShell]
   )
 
   const toggleCollapse = () =>
