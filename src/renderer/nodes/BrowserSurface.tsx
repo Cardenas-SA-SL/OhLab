@@ -259,7 +259,7 @@ export function BrowserSurface({
     // A navigation with an initiator: whatever it navigates to is not a restore echo.
     restoringNavRef.current = null
     locationRef.current = safe
-    if (safe === src) ref.current?.reload()
+    if (safe === src) reloadWebview(ref.current, false)
     else setSrc(safe)
   }
 
@@ -274,8 +274,8 @@ export function BrowserSurface({
         </button>
         <button
           className="browser-node__btn"
-          onClick={() => (loading ? ref.current?.stop() : ref.current?.reload())}
-          title={loading ? 'Stop' : 'Reload'}
+          onClick={(e) => (loading ? ref.current?.stop() : reloadWebview(ref.current, e.shiftKey))}
+          title={loading ? 'Stop' : 'Reload (Shift to bypass the cache)'}
         >
           {loading ? '✕' : '⟳'}
         </button>

@@ -173,6 +173,15 @@ export default function WebNode({ id, data, selected }: NodeProps<CanvasNode>) {
           {title}
         </span>
         <span className="term-node__spacer" />
+        {live && (
+          <button
+            className="term-node__close"
+            title="Reload (Shift to bypass the cache)"
+            onClick={(e) => reloadWebview(wvRef.current, e.shiftKey)}
+          >
+            ⟳
+          </button>
+        )}
         {url && (
           <button
             className="term-node__close"
