@@ -65,6 +65,8 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const [showColors, setShowColors] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleBefore, setTitleBefore] = useState('')
+  /** `titleAuto` as it stood before the rename began — Escape has to put BOTH halves back. */
+  const [autoBefore, setAutoBefore] = useState(true)
   /** Kept WITH the directory it belongs to. Deriving `entries` from a cwd match is what makes
    *  "Loading…" reachable: before this, nothing ever reset the list, so navigating showed the
    *  PREVIOUS folder's rows until the new promise resolved and the loading state existed only on
@@ -335,7 +337,11 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
                 setEditingTitle(false)
               } else if (e.key === 'Escape') {
                 e.preventDefault()
-                updateNodeData(id, { title: titleBefore })
+                // Restore `titleAuto` as well as the text. `onChange` sets it false on the first
+                // keystroke, so cancelling a rename you never committed used to leave the title
+                // permanently detached from the folder — the node stopped following navigation
+                // and nothing said why.
+                updateNodeData(id, { title: titleBefore, titleAuto: autoBefore })
                 setEditingTitle(false)
               }
             }}
@@ -346,6 +352,7 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
             title="Click to rename"
             onClick={() => {
               setTitleBefore((data.title as string) ?? '')
+              setAutoBefore(data.titleAuto !== false)
               setEditingTitle(true)
             }}
           >

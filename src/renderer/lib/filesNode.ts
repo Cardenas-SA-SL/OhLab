@@ -6,11 +6,21 @@
  * Paths are `/`-separated absolutes throughout, remote ones included — the node talks to an
  * `FsApi`, which is the same shape for the local filesystem, an SSH project's host over the
  * ControlMaster, and a relay peer's core.
+ *
+ * **Windows is a known, INHERITED gap.** Every split here is on `/` alone, so `C:\\x\\y` reads as a
+ * single segment: one breadcrumb, and `folderTitle` returning the whole path. This is shared with
+ * `lib/explorerCreate.ts` (`parentDir`, `newEntryPath`, `ancestorDirs`), which the Explorer drawer
+ * and the canvas "New file…" already run on, so a files node is not the thing that introduces it —
+ * but Windows is being brought up as a first-class desktop target, and `quality-windows` now runs
+ * on this branch. When it is closed, close it in ONE place for both: the path dialect belongs to
+ * the filesystem-owning CORE, not the viewer, which is the rule `terminal/file-links.ts` already
+ * implements and the one to copy.
  */
 import { isVideoFile } from '../state/workspace'
 import { opensInEditor } from './openTarget'
+import { folderTitle } from './explorerCreate'
 
-export { parentDir } from './explorerCreate'
+export { folderTitle, parentDir } from './explorerCreate'
 
 /** One breadcrumb: what to show, and where clicking it goes. */
 export interface Crumb {
@@ -40,10 +50,33 @@ export function breadcrumbs(path: string, max = 3): Crumb[] {
   return [all[0], ellipsis, ...all.slice(all.length - max)]
 }
 
-/** The node's title: the directory's own name, or '/' at the root. */
-export function folderTitle(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? '/'
+/**
+ * How a files node is re-pointed when the worktree it was living in is removed
+ * (`resetDisplacedCwd`). It is caught by path wherever it sits, like an editor and unlike a
+ * terminal, because it has no session to disturb — and it is re-pointed rather than flagged
+ * `fileMissing`, because a directory can be re-pointed and a dead file cannot.
+ *
+ * `null` means LEAVE IT ALONE, and that is the interesting answer: with no fallback directory
+ * there is nowhere honest to send it, and writing `undefined` is worse than doing nothing —
+ * `FilesNode` reads `data.cwd || '/'`, so the node would silently begin listing the filesystem
+ * ROOT. Left on the dead path, the parent-listing probe says "Could not read this folder", which
+ * is the truth.
+ *
+ * The title rides along while `titleAuto` holds. This is the one cwd write that does NOT go
+ * through `navigate` — the only other place that pairs the two — so without it the node moves to
+ * a new directory still wearing the removed worktree's name.
+ */
+export function displacedFilesPatch(
+  data: { titleAuto?: unknown },
+  fallbackCwd: string | undefined
+): { cwd: string; title?: string } | null {
+  if (!fallbackCwd) return null
+  return data.titleAuto !== false
+    ? { cwd: fallbackCwd, title: folderTitle(fallbackCwd) }
+    : { cwd: fallbackCwd }
 }
+
+export type EmptyListingVerdict = 'empty' | 'missing' | 'unknown'
 
 /**
  * What an EMPTY listing actually means.
@@ -74,34 +107,6 @@ export function folderTitle(path: string): string {
  * entry depending on the leg, and mistaking one for "missing" is the false alarm this exists to
  * avoid.
  */
-/**
- * How a files node is re-pointed when the worktree it was living in is removed
- * (`resetDisplacedCwd`). It is caught by path wherever it sits, like an editor and unlike a
- * terminal, because it has no session to disturb — and it is re-pointed rather than flagged
- * `fileMissing`, because a directory can be re-pointed and a dead file cannot.
- *
- * `null` means LEAVE IT ALONE, and that is the interesting answer: with no fallback directory
- * there is nowhere honest to send it, and writing `undefined` is worse than doing nothing —
- * `FilesNode` reads `data.cwd || '/'`, so the node would silently begin listing the filesystem
- * ROOT. Left on the dead path, the parent-listing probe says "Could not read this folder", which
- * is the truth.
- *
- * The title rides along while `titleAuto` holds. This is the one cwd write that does NOT go
- * through `navigate` — the only other place that pairs the two — so without it the node moves to
- * a new directory still wearing the removed worktree's name.
- */
-export function displacedFilesPatch(
-  data: { titleAuto?: unknown },
-  fallbackCwd: string | undefined
-): { cwd: string; title?: string } | null {
-  if (!fallbackCwd) return null
-  return data.titleAuto !== false
-    ? { cwd: fallbackCwd, title: folderTitle(fallbackCwd) }
-    : { cwd: fallbackCwd }
-}
-
-export type EmptyListingVerdict = 'empty' | 'missing' | 'unknown'
-
 export function classifyEmptyListing(
   cwd: string,
   /** The parent's entries, or `null` when the parent was not asked or could not be read. */

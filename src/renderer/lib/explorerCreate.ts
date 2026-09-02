@@ -35,3 +35,16 @@ export function ancestorDirs(baseDir: string, name: string): string[] {
   }
   return out
 }
+
+/**
+ * The name of a directory — its last segment, or '/' at the root.
+ *
+ * Lives HERE rather than beside the file manager's other pure helpers because `state/workspace.ts`
+ * needs it too (`createFilesNode`'s title) and `lib/filesNode.ts` imports `isVideoFile` FROM
+ * workspace, so importing back would close a cycle. This module imports nothing, which is what
+ * makes it the right home. `lib/filesNode.ts` re-exports it, so every existing call site is
+ * unchanged.
+ */
+export function folderTitle(path: string): string {
+  return path.split('/').filter(Boolean).pop() ?? '/'
+}

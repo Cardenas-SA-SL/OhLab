@@ -23,6 +23,7 @@ import { mintFreeGrokSessionId } from '@shared/agents/grok-session-mint'
 import { projectLaunchInfoNow } from './projectLaunchInfo'
 import { isAgentEnabled, launchableDefaultAgent } from './agentAvailability'
 import { codexSharedIdentity } from './codexIdentity'
+import { folderTitle } from '../lib/explorerCreate'
 import { sshHostKey } from '@shared/ssh'
 import { normalizeNodeIcon } from '@shared/node-icon'
 import { useSettings } from './settings'
@@ -1062,7 +1063,7 @@ export function createFilesNode(
     height: FILES_SIZE.height,
     style: { width: FILES_SIZE.width, height: FILES_SIZE.height },
     data: {
-      title: cwd.split('/').filter(Boolean).pop() || '/',
+      title: folderTitle(cwd),
       color: '#ffd60a',
       group: null,
       cwd,
