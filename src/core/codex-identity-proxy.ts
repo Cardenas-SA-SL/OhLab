@@ -27,6 +27,17 @@
  * rejected, so an account can never be edited to speak for another's threads. Records written
  * before this slice carry no `accountId=` line and are verified with the original 3-tuple preimage
  * at the system scope only — the one back-compat door, and it is a system-scope door.
+ *
+ * AGENT IDENTITY: a record also carries `agentId=` and `canvasControl=`, because the prelude
+ * re-exports both into a tool shell and used to HARDCODE them (`codex`, granted). Hardcoding
+ * mislabels every custom agent that inherits the codex harness (`custom:<uuid>`, not `codex`) and
+ * asserts a grant the pane may not hold — `buildPtyEnv` gates it on `canControlCanvas`, and
+ * `SHARED_IDENTITY_CAPABLE ⊆ CANVAS_CONTROL_CAPABLE` is the only reason the two agree today, a
+ * coincidence the list's own comment invites the next agent to break. The HMAC therefore binds the
+ * 6-tuple (threadId, accountScope, nodeId, hookEndpoint, agentId, canvasControl). A record with no
+ * `agentId=` line is pre-agent and is read with the implied values `codex` + granted, which is
+ * exactly what it meant when it was written; the preimages are SELECTED by shape, never tried in
+ * turn, so a record that names an agent can never be verified by one that ignores it.
  */
 import {
   chmodSync,
@@ -112,6 +123,45 @@ export function isSafeThreadId(id: string): boolean {
   )
 }
 
+/**
+ * The agent identity a record may carry, and the canvas-control grant that goes with it.
+ *
+ * WHY THE RECORD CARRIES THIS AT ALL: the sh prelude re-exports a tool shell's `NODETERM_*`, and it
+ * used to HARDCODE `NODETERM_AGENT_ID=codex` and `NODETERM_CANVAS_CONTROL=1`. Both are facts about
+ * the PANE that only `hookServer.buildPtyEnv` knows — it sets `NODETERM_AGENT_ID` to the node's own
+ * agent id (which is `custom:<uuid>` for a custom agent declaring `baseAgent: 'codex'`, not
+ * `codex`) and gates the grant on `canControlCanvas`. A constant in the prelude is the prelude
+ * asserting what it cannot know: it mislabels every custom codex-based agent, and it hands out a
+ * grant the pane may not hold. Recording them is what lets the prelude EXPORT WHAT THE RECORD SAYS.
+ *
+ * The grant is not merely derived from the agent id here because the prelude is POSIX sh and cannot
+ * evaluate `canControlCanvas` — the membership list plus the custom-agent base resolver live in
+ * TypeScript. So the decision is made once, on the desktop, by the same predicate `buildPtyEnv`
+ * uses, and travels as a boolean.
+ *
+ * BOTH FIELDS ARE INSIDE THE SIGNATURE. They name a capability the prelude then exports into an
+ * agent's environment, which is exactly the class of field `identitySignature` exists to protect —
+ * an unsigned `canvasControl=1` line would be a grant anyone who can write the file could add.
+ */
+export interface CodexThreadAgent {
+  /** The node's own agent id — `codex`, or a `custom:<uuid>` inheriting it. */
+  agentId: string
+  /** Whether `canControlCanvas` granted this node canvas control at spawn. */
+  canvasControl: boolean
+}
+
+/**
+ * Agent ids are `codex` or `custom:<uuid>`, so the alphabet needs `:` on top of the node-id one.
+ * Bounded and re-validated for the same reason every other recovered field is: the value becomes an
+ * environment variable in an agent's shell, and the file it comes from is data we parse, not code.
+ */
+const AGENT_ID_CHARSET = /^[A-Za-z0-9._:-]+$/
+const MAX_AGENT_ID = 128
+
+export function isSafeCodexAgentId(id: string): boolean {
+  return typeof id === 'string' && id.length > 0 && id.length <= MAX_AGENT_ID && AGENT_ID_CHARSET.test(id)
+}
+
 let identityAuthSecret: Buffer | null = null
 
 /** Injected by the shell once, from the same keychain-backed secret the hook server signs with. */
@@ -139,11 +189,35 @@ export function codexThreadIdentityRoot(): string {
 }
 
 /**
- * The current 4-tuple preimage: HMAC-SHA256(threadId ␀ accountScope ␀ nodeId ␀ hookEndpoint). The
- * account scope binds the record to ONE account; without it a record for account A could be moved,
- * byte-for-byte, into account B's directory and still verify.
+ * The current 6-tuple preimage:
+ * HMAC-SHA256(threadId ␀ accountScope ␀ nodeId ␀ hookEndpoint ␀ agentId ␀ canvasControl).
+ *
+ * The account scope binds the record to ONE account; without it a record for account A could be
+ * moved, byte-for-byte, into account B's directory and still verify. The agent id and the grant
+ * joined the preimage for the same reason they joined the record: the prelude exports both, so an
+ * unsigned copy of either would be a capability anyone able to write the file could edit.
  */
 function identitySignature(
+  threadId: string,
+  scope: string,
+  nodeId: string,
+  hookEndpoint: string,
+  agent: CodexThreadAgent
+): string {
+  if (!identityAuthSecret) throw new Error('NodeTerm Codex identity authentication is unavailable')
+  return createHmac('sha256', identityAuthSecret)
+    .update(
+      `${threadId}\0${scope}\0${nodeId}\0${hookEndpoint}\0${agent.agentId}\0${agent.canvasControl ? '1' : '0'}`
+    )
+    .digest('base64url')
+}
+
+/**
+ * The pre-agent 4-tuple preimage (no agent dimension). Accepted ONLY for a record that carries no
+ * `agentId=` line — one written before this slice. See `recordSignatureValid` for why the two
+ * preimages are mutually exclusive rather than tried in turn.
+ */
+function accountScopedIdentitySignature(
   threadId: string,
   scope: string,
   nodeId: string,
@@ -187,6 +261,18 @@ function signatureEquals(presented: string, expected: string): boolean {
  * scope, so a scope-less signature can never be honoured under a managed account. (The mutations
  * that redden these tests are the HMAC one and the `scope === SYSTEM_ACCOUNT_SCOPE` fallback guard;
  * check (1) is redundant with the scope-bound HMAC and is documented as such.)
+ *
+ * THREE PREIMAGE GENERATIONS, SELECTED — NOT TRIED IN TURN. Which one applies is decided by which
+ * LINES the record carries, and exactly one branch runs:
+ *   - an `agentId=` line ⇒ the current 6-tuple, and ONLY that;
+ *   - no agent line but an `accountId=` line ⇒ the 4-tuple (an S6-era record);
+ *   - neither, at the system scope ⇒ the 3-tuple (a pre-S6 record).
+ * Selecting rather than falling through is the load-bearing part. A record that DOES name an agent
+ * must never verify under a preimage that ignores the agent: that is the door through which an
+ * `agentId=custom:…` line could be stripped or rewritten and the record still accepted, putting the
+ * prelude back to guessing `codex` — the precise defect this generation exists to close. A caller
+ * that wants the old behaviour must present an old-SHAPED record, and an old-shaped record gets the
+ * documented implied values (see `parseCodexThreadIdentity`), never a mix of the two.
  */
 function recordSignatureValid(threadId: string, dirScope: string, record: ParsedRecord): boolean {
   if (!record.signature || !identityAuthSecret) return false
@@ -195,32 +281,46 @@ function recordSignatureValid(threadId: string, dirScope: string, record: Parsed
     const lineScope = record.accountId || SYSTEM_ACCOUNT_SCOPE
     if (lineScope !== scope) return false
   }
-  let expected = ''
   try {
-    expected = identitySignature(threadId, scope, record.nodeId, record.hookEndpoint)
-  } catch {
-    return false
-  }
-  if (signatureEquals(record.signature, expected)) return true
-  if (!record.accountLinePresent && scope === SYSTEM_ACCOUNT_SCOPE) {
-    try {
+    if (record.agentDeclared) {
       return signatureEquals(
+        record.signature,
+        identitySignature(threadId, scope, record.nodeId, record.hookEndpoint, {
+          agentId: record.agentId,
+          canvasControl: record.canvasControl
+        })
+      )
+    }
+    if (record.accountLinePresent) {
+      return signatureEquals(
+        record.signature,
+        accountScopedIdentitySignature(threadId, scope, record.nodeId, record.hookEndpoint)
+      )
+    }
+    return (
+      scope === SYSTEM_ACCOUNT_SCOPE &&
+      signatureEquals(
         record.signature,
         legacyIdentitySignature(threadId, record.nodeId, record.hookEndpoint)
       )
-    } catch {
-      return false
-    }
+    )
+  } catch {
+    return false
   }
-  return false
 }
 
-export interface CodexThreadIdentity {
+export interface CodexThreadIdentity extends CodexThreadAgent {
   /** '' for the system account; a managed account id otherwise. */
   accountId: string
   nodeId: string
   hookEndpoint: string
   signature: string
+  /**
+   * Whether the record NAMED its agent, as opposed to implying `codex` by being pre-agent. Callers
+   * that rewrite a record need the difference: re-writing an implication as a signed claim is how a
+   * custom codex-based node's guess would become permanent (see `bindCodexThreadIdentity`).
+   */
+  agentDeclared: boolean
 }
 
 interface ParsedRecord extends CodexThreadIdentity {
@@ -253,11 +353,24 @@ function parseCodexThreadIdentity(raw: string): ParsedRecord {
     // line cannot be smuggled in to disagree with the first.
     if (!(key in values)) values[key] = line.slice(separator + 1)
   }
+  // THE IMPLIED VALUES OF A PRE-AGENT RECORD, and why they are safe. Every record written before
+  // this slice was written by this same Codex identity spine, so its node ran the codex CLI —
+  // `codex` is the right agent id for it, and `codex` is unconditionally in
+  // `CANVAS_CONTROL_CAPABLE`, so its implied grant reproduces today's behaviour exactly. This is
+  // therefore a faithful reading of an old record, not a guess about a new one.
+  //
+  // The fallback is keyed on the LINE BEING ABSENT (`'agentId' in values`), never on the value
+  // being empty or unparseable. A record that names an agent is read as naming that agent; there is
+  // no input that carries an agent id and still lands on `codex`.
+  const agentLinePresent = 'agentId' in values
   return {
     accountId: values.accountId ?? '',
     nodeId: values.nodeId ?? '',
     hookEndpoint: values.endpoint ?? '',
     signature: values.signature ?? '',
+    agentId: agentLinePresent ? (values.agentId ?? '') : 'codex',
+    canvasControl: agentLinePresent ? values.canvasControl === '1' : true,
+    agentDeclared: agentLinePresent,
     accountLinePresent: 'accountId' in values
   }
 }
@@ -283,12 +396,19 @@ export function readIdentityCandidate(
   }
   const record = parseCodexThreadIdentity(raw)
   if (!validCodexIdentity(record.nodeId, record.hookEndpoint)) return undefined
+  // An agent id that reached the record is re-validated before the signature check, exactly as the
+  // node id and endpoint are: the value becomes an environment variable in an agent's shell, and a
+  // valid signature only proves WE wrote the bytes, not that they are still a shape we accept.
+  if (record.agentDeclared && !isSafeCodexAgentId(record.agentId)) return undefined
   if (!recordSignatureValid(threadId, norm, record)) return undefined
   return {
     accountId: record.accountId,
     nodeId: record.nodeId,
     hookEndpoint: record.hookEndpoint,
-    signature: record.signature
+    signature: record.signature,
+    agentId: record.agentId,
+    canvasControl: record.canvasControl,
+    agentDeclared: record.agentDeclared
   }
 }
 
@@ -375,19 +495,36 @@ export function codexThreadIdentityHasLiveConflict(
   return liveOwners.size > 1
 }
 
-/** Write (or replace) the record for `threadId` under its account scope, atomically. */
+/**
+ * Write (or replace) the record for `threadId` under its account scope, atomically.
+ *
+ * `agent` is what the prelude will export as this thread's `NODETERM_AGENT_ID` /
+ * `NODETERM_CANVAS_CONTROL`. Omitting it writes a PRE-AGENT record — the old shape, read back with
+ * the documented implied values (`codex`, grant on). That is the honest degrade for a caller that
+ * genuinely does not know the node's agent id, and it reproduces the behaviour this slice replaced;
+ * it is not a default to reach for when the id IS available.
+ */
 export function writeCodexThreadIdentity(
   threadId: string,
   nodeId: string,
   hookEndpoint: string,
   root = codexThreadIdentityRoot(),
-  accountId?: string
+  accountId?: string,
+  agent?: CodexThreadAgent
 ): void {
   if (!isSafeThreadId(threadId) || !validCodexIdentity(nodeId, hookEndpoint)) {
     throw new Error('Invalid NodeTerm Codex thread identity')
   }
+  if (agent && !isSafeCodexAgentId(agent.agentId)) {
+    throw new Error('Invalid NodeTerm Codex thread identity')
+  }
   const scope = accountScope(accountId) // throws on an id that could escape the mapping directory
-  const signature = identitySignature(threadId, scope, nodeId, hookEndpoint)
+  const signature = agent
+    ? identitySignature(threadId, scope, nodeId, hookEndpoint, agent)
+    : accountScopedIdentitySignature(threadId, scope, nodeId, hookEndpoint)
+  const agentLines = agent
+    ? `agentId=${agent.agentId}\ncanvasControl=${agent.canvasControl ? '1' : '0'}\n`
+    : ''
   const file = identityFile(threadId, scope, root)
   const dir = path.dirname(file)
   const tmp = path.join(dir, `.${threadId}.${process.pid}.${Date.now()}`)
@@ -396,7 +533,7 @@ export function writeCodexThreadIdentity(
   try {
     writeFileSync(
       tmp,
-      `accountId=${accountId ?? ''}\nnodeId=${nodeId}\nendpoint=${hookEndpoint}\nsignature=${signature}\n`,
+      `accountId=${accountId ?? ''}\nnodeId=${nodeId}\nendpoint=${hookEndpoint}\n${agentLines}signature=${signature}\n`,
       {
         encoding: 'utf8',
         mode: 0o600
@@ -427,7 +564,8 @@ export function bindCodexThreadIdentity(
   hookEndpoint: string,
   isNodeLive: (nodeId: string) => boolean,
   root = codexThreadIdentityRoot(),
-  accountId?: string
+  accountId?: string,
+  agent?: CodexThreadAgent
 ): void {
   if (!isSafeThreadId(threadId) || !validCodexIdentity(nodeId, hookEndpoint)) {
     throw new Error('Invalid NodeTerm Codex thread identity')
@@ -437,8 +575,31 @@ export function bindCodexThreadIdentity(
   if (existing && existing.nodeId !== nodeId && isNodeLive(existing.nodeId)) {
     throw new Error('Codex thread is already bound to another live node')
   }
-  if (existing && existing.nodeId === nodeId && existing.hookEndpoint === hookEndpoint) return
-  writeCodexThreadIdentity(threadId, nodeId, hookEndpoint, root, accountId)
+  // NEVER DOWNGRADE A RECORD THAT ALREADY NAMES ITS AGENT. A rebind arriving without an agent id
+  // (an older client, or a pane whose NODETERM_AGENT_ID did not survive) must not strip the line
+  // and send the prelude back to guessing `codex` — the same rule `recordSignatureValid` enforces
+  // at the signature, applied at the write. What we already know is kept; only what we are told
+  // replaces it. `agentDeclared` and not a truthy `agentId` is the test, because a PRE-AGENT record
+  // reads back as `codex` by implication and re-writing that implication as a signed claim is
+  // exactly the mislabel — for a custom codex-based node it would make the guess permanent.
+  const carried =
+    agent ??
+    (existing?.agentDeclared
+      ? { agentId: existing.agentId, canvasControl: existing.canvasControl }
+      : undefined)
+  // A rebind that would change nothing writes nothing. The agent identity is part of "nothing" now,
+  // so a caller that learns the id later still upgrades a pre-agent record in place.
+  if (
+    existing &&
+    existing.nodeId === nodeId &&
+    existing.hookEndpoint === hookEndpoint &&
+    existing.agentDeclared === !!carried &&
+    (!carried ||
+      (existing.agentId === carried.agentId && existing.canvasControl === carried.canvasControl))
+  ) {
+    return
+  }
+  writeCodexThreadIdentity(threadId, nodeId, hookEndpoint, root, accountId, carried)
 }
 
 /**
@@ -664,6 +825,7 @@ if [ "\${1-}" = resume ]; then
   # live node owns it; two clients on one thread is worse than one plain session, so we fall back.
   if nt_post 20 --data-urlencode "nodeId=$NODETERM_NODE_ID" --data-urlencode "threadId=\${2-}" \\
       --data-urlencode "accountId=\${NODETERM_CODEX_ACCOUNT_ID-}" \\
+      --data-urlencode "agentId=\${NODETERM_AGENT_ID-}" \\
       "http://localhost:\${NODETERM_HOOK_PORT-0}/codex-thread/bind" >/dev/null; then
     exec codex --remote unix:// "$@"
   fi
@@ -671,8 +833,14 @@ if [ "\${1-}" = resume ]; then
   exec codex "$@"
 fi
 
+# THIS PANE'S OWN LABEL travels with both calls, and the pane is the only durable holder of it:
+# tmux sessions outlive the app, so a bind arriving after a restart is the common case and nothing
+# server-side still remembers what agent this node runs. The server re-derives the canvas-control
+# grant from it rather than trusting a claim (see handleCodexThread); an absent or unparseable
+# value writes a pre-agent record and the prelude falls back to codex, i.e. the old behaviour.
 nt_thread=$(nt_post ${CODEX_THREAD_START_CLIENT_MAX_S} --data-urlencode "nodeId=$NODETERM_NODE_ID" --data-urlencode "cwd=$PWD" \\
   --data-urlencode "accountId=\${NODETERM_CODEX_ACCOUNT_ID-}" \\
+  --data-urlencode "agentId=\${NODETERM_AGENT_ID-}" \\
   "http://localhost:\${NODETERM_HOOK_PORT-0}/codex-thread/start") || nt_thread=''
 nt_thread=$(printf %s "$nt_thread" | tr -d '\\r\\n')
 case "$nt_thread" in

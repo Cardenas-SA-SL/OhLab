@@ -10,7 +10,7 @@ import type { CodexIdentityEvent } from '../../shared/types'
 import type { NodeTokenVerdict } from './node-auth-token'
 import { nodeTokenDir } from './node-token-files'
 import { isForeignKidToken, isSafeNodeId, verifyNodeToken } from './node-auth-token'
-import { isSafeThreadId } from '../codex-identity-proxy'
+import { isSafeCodexAgentId, isSafeThreadId, type CodexThreadAgent } from '../codex-identity-proxy'
 import { isSafeAccountId } from '../../shared/codex-account'
 import {
   controlPolicy,
@@ -285,6 +285,7 @@ class HookServer {
         cwd: string
         hookEndpoint: string
         accountId?: string
+        agent?: CodexThreadAgent
       }) => Promise<string>)
     | null = null
   private codexThreadBindHandler:
@@ -293,6 +294,7 @@ class HookServer {
         threadId: string
         hookEndpoint: string
         accountId?: string
+        agent?: CodexThreadAgent
       }) => Promise<void>)
     | null = null
   private codexIdentityListener: ((e: CodexIdentityEvent) => void) | null = null
@@ -956,6 +958,30 @@ class HookServer {
       return
     }
     const accountId = rawAccountId || undefined
+    // THE PANE'S OWN AGENT LABEL, echoed back so the ownership record can carry it.
+    //
+    // Why the client is asked at all, when `hookEndpoint` below is deliberately the server's own
+    // answer: the agent id is a fact about a tmux session that OUTLIVES this process, and the
+    // launcher POSTing here runs inside that pane with the `NODETERM_AGENT_ID` `buildPtyEnv` put
+    // there. Nothing on the server side is as durable — an in-memory map from `buildPtyEnv` is
+    // empty for every node whose pane predates this app run, which is the norm after a restart and
+    // permanent for a node in a project the user has not opened.
+    //
+    // It is not a capability claim. A caller only reaches this line by presenting a token this
+    // instance minted FOR THIS NODE (`nodeTokenVerified` above, strict), so it is the node; the
+    // record it shapes is re-exported into that same node's own tool shells and nowhere else; and
+    // the env var it sets is not what authorizes anything (see `identityGate` — the per-node token
+    // is). Lying about it buys the liar the label they already had.
+    //
+    // THE GRANT IS NOT ECHOED. It is derived here by `canControlCanvas` — the same predicate, in
+    // the same process, that `buildPtyEnv` used to gate the pane — so there is exactly ONE decider
+    // and a forged agent id cannot manufacture a grant the table would refuse. An unparseable or
+    // absent id writes a PRE-AGENT record, which reads back with the documented implied values:
+    // the behaviour that shipped before this field existed.
+    const rawAgentId = form.agentId ?? ''
+    const agent: CodexThreadAgent | undefined = isSafeCodexAgentId(rawAgentId)
+      ? { agentId: rawAgentId, canvasControl: canControlCanvas(rawAgentId) }
+      : undefined
     if (verb === 'start') {
       const cwd = form.cwd ?? ''
       if (!path.isAbsolute(cwd)) {
@@ -969,7 +995,8 @@ class HookServer {
           nodeId,
           cwd,
           hookEndpoint: this.endpointFilePath(),
-          accountId
+          accountId,
+          agent
         })
         // Same predicate the record store gates on, so a thread id the store would refuse can
         // never be handed back to a launcher that will then `resume` it.
@@ -998,7 +1025,8 @@ class HookServer {
         nodeId,
         threadId,
         hookEndpoint: this.endpointFilePath(),
-        accountId
+        accountId,
+        agent
       })
       this.codexIdentityListener?.({ nodeId, mode: 'shared' })
       res.writeHead(204)
