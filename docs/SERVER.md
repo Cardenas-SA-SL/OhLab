@@ -557,6 +557,12 @@ way to create (issue #313).
 - **No remote (SSH) accounts.** The Server Edition has no SSH-project manager, so an account
   context carrying a `projectId` takes the **local** path — the same degrade the desktop takes
   before its manager exists.
+- **"Link existing config dir…" is a path on the SERVER.** The handler `stat`s the directory and
+  writes into it (the account's `settings.json`, the managed status hook) as the **server user**,
+  wherever that user can reach — and a `~` typed in the browser expands to the **server's** home,
+  not the browser user's. That is the same rule every other path field on this edition follows
+  (the folder picker browses the server's disk), but it is worth saying out loud here, because the
+  dir a person is linking is usually one they created by hand and think of as "mine".
 
 ### Managed Codex accounts (S6)
 
