@@ -4,6 +4,7 @@ import {
   accountChipFor,
   accountKey,
   configDirLabel,
+  observationIsRemote,
   distinctAccountKeys,
   effectiveAccountId,
   hasMultipleAccountKeys,
@@ -32,7 +33,7 @@ const system = observed()
 const managed = observed({ configDir: '/data/claude-accounts/a1', accountId: 'a1' })
 const unlinked = observed({ configDir: '/home/me/.claude-2', accountId: null, known: false })
 
-describe('effectiveAccountId (D5)', () => {
+describe('effectiveAccountId (which account a node’s readers use)', () => {
   it('prefers the node\u2019s own account over the observed one', () => {
     // Launch identity is what the env actually injected; an observation cannot outrank it.
     expect(effectiveAccountId('a1', managed)).toBe('a1')
@@ -52,7 +53,7 @@ describe('effectiveAccountId (D5)', () => {
   })
 })
 
-describe('accountKey (D6)', () => {
+describe('accountKey (the identity a node counts as)', () => {
   it('keys the system account as "sys" only when it is actually observed', () => {
     expect(accountKey(undefined, system)).toBe(SYSTEM_ACCOUNT_KEY)
     // Unobserved is NOT the system account: a plain shell nobody ran claude in must not count as
@@ -131,7 +132,7 @@ describe('configDirLabel', () => {
   })
 })
 
-describe('accountChipFor (D6 visibility, D7 unlinked naming)', () => {
+describe('accountChipFor (chip visibility, and naming an unlinked dir)', () => {
   const accounts = [acct(), acct({ id: 'a2', label: 'personal', email: undefined, configDir: '/home/me/.claude-2' })]
 
   it('shows no chip for a system node while one identity is in play', () => {
@@ -422,5 +423,111 @@ describe('unlinking flows through every reader of the observation', () => {
       tooltip: 'Unknown account',
       kind: 'managed'
     })
+  })
+})
+
+// ── A pane on an SSH host reports a dir on the HOST's filesystem ───────────────────────────────
+// The hook server's classifier is host-agnostic on purpose (two of its rules exist to name a
+// remote dir), and core cannot tell which machine posted — so the renderer stamps `remote` at the
+// one point the label enters the store, and every LOCAL affordance below must refuse it. The dirs
+// here deliberately spell the SAME absolute path on both machines: that is the ordinary case
+// whenever the two share a username, not a corner one.
+describe('a REMOTE observation is never treated as a dir on this machine', () => {
+  const remoteUnlinked = observed({ configDir: '/home/me/.claude-2', known: false, remote: true })
+
+  it('never offers an SSH node’s unknown dir for linking', () => {
+    // The named test. Settings → Accounts spends this list on `claudeAccounts.link`, which
+    // `stat`s and writes where the CORE runs — so a Link button here either errors on a path that
+    // is absent locally or, worse, silently adopts a different directory of the same name.
+    expect(unlinkedConfigDirs({ n1: { account: remoteUnlinked } })).toEqual([])
+    // …while the identical dir seen on a LOCAL pane is still a candidate, so this narrows exactly
+    // one thing and nothing else.
+    expect(unlinkedConfigDirs({ n1: { account: unlinked } })).toEqual(['/home/me/.claude-2'])
+  })
+
+  it('tells the user what the dir is instead of pointing at a Link it cannot perform', () => {
+    const accounts: ClaudeAccount[] = []
+    const chip = accountChipFor({ observed: remoteUnlinked, accounts, multiple: true })
+    expect(chip?.kind).toBe('unlinked') // the chip stays: naming what a session runs as is true
+    expect(chip?.short).toBe('.claude-2') // …by the same path rule as a local one
+    expect(chip?.tooltip).toContain('/home/me/.claude-2')
+    expect(chip?.tooltip).toContain('remote host')
+    expect(chip?.tooltip).not.toContain('Settings')
+    // The LOCAL wording is byte-identical to before the flag existed.
+    expect(accountChipFor({ observed: unlinked, accounts, multiple: true })?.tooltip).toBe(
+      'Unlinked Claude config dir /home/me/.claude-2 — link it in Settings → Accounts'
+    )
+  })
+
+  it('is never matched against a local account that happens to hold the same path', () => {
+    // `ClaudeAccount.configDir` is written by `claudeAccounts.link`, a LOCAL adoption, so this
+    // account's `/home/me/.claude-2` is a directory on THIS machine. Matching the host's dir to it
+    // would label the remote pane with a local identity — and `effectiveAccountId` would then aim
+    // the local transcript / session-name / usage readers at that account's dir.
+    const localLink = acct({ id: 'lnk', label: 'second', email: undefined, configDir: '/home/me/.claude-2' })
+    expect(resolveObserved(remoteUnlinked, [localLink])).toBe(remoteUnlinked)
+    expect(effectiveAccountId(undefined, remoteUnlinked, [localLink])).toBeUndefined()
+    // The local pane on the same path still upgrades — the refusal is about remoteness, not the
+    // path, so linking has not been broken for the case it exists for.
+    expect(resolveObserved(unlinked, [localLink])?.accountId).toBe('lnk')
+  })
+
+  it('does not dir-match on the fallback path either, when the observed id has gone away', () => {
+    // `resolveObserved`'s other direction: a known id that no longer exists falls back to its dir.
+    // A remote one must degrade to the bare dir rather than re-home on a local account.
+    const goneRemote = observed({ configDir: '/home/me/.claude-2', accountId: 'old', known: true, remote: true })
+    const localLink = acct({ id: 'lnk', configDir: '/home/me/.claude-2' })
+    expect(resolveObserved(goneRemote, [localLink])).toEqual({ ...goneRemote, accountId: null, known: false })
+  })
+
+  it('still resolves a MANAGED REMOTE account — the thing that must not regress', () => {
+    // The classifier's managed-remote rule (`~/.nodeterm/claude-accounts/<id>`) reports a real id
+    // with `known: true`, and a remote account is in the account list with `host` set. That route
+    // is ID-based, never path-based, so the refusal above cannot reach it.
+    const remoteAcct = acct({ id: 'r1', label: 'ops@example.com', host: 'me@host.example.com' })
+    const managedRemote = observed({
+      configDir: '/home/me/.nodeterm/claude-accounts/r1',
+      accountId: 'r1',
+      known: true,
+      remote: true
+    })
+    expect(resolveObserved(managedRemote, [remoteAcct])).toBe(managedRemote)
+    expect(effectiveAccountId(undefined, managedRemote, [remoteAcct])).toBe('r1')
+    expect(accountKey(undefined, managedRemote, [remoteAcct])).toBe('r1')
+    expect(accountChipFor({ observed: managedRemote, accounts: [remoteAcct], multiple: false })?.kind).toBe(
+      'managed'
+    )
+    // …and it is never a Link candidate, because it is a known account.
+    expect(unlinkedConfigDirs({ n1: { account: managedRemote } }, [remoteAcct])).toEqual([])
+  })
+
+  it('leaves the host’s own system account reading the system root', () => {
+    const remoteSystem = observed({ configDir: '/home/me/.claude', accountId: null, known: true, remote: true })
+    expect(effectiveAccountId(undefined, remoteSystem, [acct()])).toBeUndefined()
+    expect(accountKey(undefined, remoteSystem)).toBe(SYSTEM_ACCOUNT_KEY)
+  })
+})
+
+describe('observationIsRemote (which machine the observed dir is on)', () => {
+  it('asks the node and the project, and either one is enough', () => {
+    // `data.ssh` / `data.sshRemoteTmux` is the precise answer…
+    expect(observationIsRemote({ node: { ssh: { host: 'h' } }, projectIsSsh: false })).toBe(true)
+    expect(observationIsRemote({ node: { sshRemoteTmux: true }, projectIsSsh: false })).toBe(true)
+    // …but a node created before its project's ControlMaster came up carries neither yet, so the
+    // project has to answer for it.
+    expect(observationIsRemote({ node: {}, projectIsSsh: true })).toBe(true)
+    expect(observationIsRemote({ node: undefined, projectIsSsh: true })).toBe(true)
+  })
+
+  it('is false for an ordinary local node — the byte-identical case', () => {
+    expect(observationIsRemote({ node: {}, projectIsSsh: false })).toBe(false)
+    expect(observationIsRemote({ node: { ssh: undefined }, projectIsSsh: false })).toBe(false)
+  })
+
+  it('treats a node it cannot place as REMOTE', () => {
+    // Hook events for a node id no canvas holds — a tmux session outliving the node that named it.
+    // A wrong `false` puts a Link button on a directory that is not here; a wrong `true` costs one
+    // withheld offer. Only one of those two guesses is destructive, so it is the one not made.
+    expect(observationIsRemote(undefined)).toBe(true)
   })
 })

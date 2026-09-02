@@ -1,9 +1,9 @@
 import type { ClaudeAccount, ObservedClaudeAccount } from '@shared/types'
+import { isRemoteSessionNode } from '@shared/worktree'
 import { accountChipLabel, systemAccountDisplay } from '../state/workspace'
 
 /**
- * Per-node Claude account labelling — the pure half of the account chip (plan §5 WP-B.2,
- * decisions D5–D7).
+ * Per-node Claude account labelling — the pure half of the account chip.
  *
  * A node's account has TWO possible sources and they routinely disagree:
  *  - `data.accountId` — the managed/linked account the node was CREATED with. Immutable, and the
@@ -76,6 +76,38 @@ export function configDirsMatch(a: string | undefined | null, b: string | undefi
   return !!left && left === normalizeConfigDirForCompare(b)
 }
 
+/** The two facts about the node an observation arrived for, as the renderer can see them. */
+export interface ObservationOrigin {
+  /** The node itself — the live React Flow `node.data` for the active project, or the serialized
+   *  `CanvasNodeState` for any other. Both carry `ssh` / `sshRemoteTmux`. */
+  node?: { ssh?: unknown; sshRemoteTmux?: unknown }
+  /** Does the project that owns the node run on an SSH host? */
+  projectIsSsh: boolean
+}
+
+/**
+ * Is this observation's filesystem on ANOTHER machine? (`ObservedClaudeAccount.remote`)
+ *
+ * Two independent claims are OR-ed, and both are needed. `isRemoteSessionNode` asks the node
+ * (`data.ssh` / `data.sshRemoteTmux` — never `data.remote`, a field nothing on a canvas node
+ * sets), which is the precise answer; but a node created before its project's ControlMaster came
+ * up does not carry those yet, so the project's own SSH-ness has to answer for it. Same shape as
+ * `session-memory-service.ts`'s two claims of remoteness, for the same reason: a source that says
+ * "no" while momentarily uninformed would publish another machine's dir as this one's.
+ *
+ * **`undefined` — we cannot say whose node this is — is REMOTE.** Every consumer of the flag
+ * degrades a remote observation to "show the label, offer nothing local", while a wrong `false`
+ * puts a Link button on a directory that does not exist here: the failure the flag was added to
+ * stop. Guessing local is the only guess with a destructive outcome, so it is the guess not made.
+ * The case is narrow — hook events for a node id no canvas holds, i.e. a tmux session outliving
+ * the node that named it — and a stored observation captured while the node DID exist keeps the
+ * `remote: false` it was captured with, so nothing already detected is retracted by this.
+ */
+export function observationIsRemote(origin: ObservationOrigin | undefined): boolean {
+  if (!origin) return true
+  return origin.projectIsSsh || isRemoteSessionNode(origin.node)
+}
+
 /**
  * Re-resolve an observation against the CURRENT account list.
  *
@@ -96,36 +128,60 @@ export function configDirsMatch(a: string | undefined | null, b: string | undefi
  * The system account (`known` with `accountId: null`) is never touched: it has no record to lose.
  * `data.accountId` is likewise untouched — a NODE created under a removed account still reads
  * "Unknown account", which is correct: that binding really is dangling.
+ *
+ * **A REMOTE observation is never dir-matched against a local account** (`observed.remote`), in
+ * either direction. `ClaudeAccount.configDir` is set only by `claudeAccounts.link`, which is a
+ * LOCAL adoption — the path it stores names a directory on this machine — while a remote pane's
+ * dir names one on its host, and `~/.claude-2` on a server and `~/.claude-2` here spell the same
+ * string whenever the two machines share a username, which is the ordinary case rather than a
+ * corner. Matching them would label the remote pane with a local account's identity, and
+ * `effectiveAccountId` would then hand that id to the LOCAL transcript, session-name and usage
+ * readers. Managed-remote observations are unaffected: they arrive `known: true` carrying a real
+ * `accountId` (classifier rule 2, `~/.nodeterm/claude-accounts/<id>`), and the id-based branch
+ * above resolves them against the account list without ever looking at a path.
  */
 export function resolveObserved(
   observed: ObservedClaudeAccount | undefined,
   accounts: readonly ClaudeAccount[] = []
 ): ObservedClaudeAccount | undefined {
   if (!observed) return observed
+  // A dir on another machine may never be matched against a local account's dir; the id-based
+  // resolution below it is safe for both, because an id is not a path.
+  const dirMatchable = !observed.remote
   if (observed.known) {
     if (!observed.accountId) return observed // the system default — nothing to lose
     if (accounts.some((a) => a.id === observed.accountId)) return observed
     // The id is gone (unlinked/removed since the observation). Fall back to the dir — unless there
     // is none, in which case there is nothing better to say than the id we already have.
     if (!observed.configDir) return observed
-    const relinked = accounts.find((a) => configDirsMatch(a.configDir, observed.configDir))
+    const relinked = dirMatchable
+      ? accounts.find((a) => configDirsMatch(a.configDir, observed.configDir))
+      : undefined
     return relinked
       ? { ...observed, accountId: relinked.id, known: true }
       : { ...observed, accountId: null, known: false }
   }
-  if (!observed.configDir) return observed
+  if (!observed.configDir || !dirMatchable) return observed
   const match = accounts.find((a) => configDirsMatch(a.configDir, observed.configDir))
   return match ? { ...observed, accountId: match.id, known: true } : observed
 }
 
 /**
- * D5 — the account a node's READERS (transcript root, session name, context meter, ⌘M chat) must
- * use: the node's own account when it has one, else whatever the session was observed running as.
+ * The account a node's READERS (transcript root, session name, context meter, ⌘M chat) must use:
+ * the node's own account when it has one, else whatever the session was observed running as.
  *
  * `known` is what makes the observed id meaningful: an unrecognised config dir reports
  * `accountId: null`, and must resolve to `undefined` (→ the system account's readers) rather than
  * to some other account's transcripts. Deliberately NOT used for spawn/env — launch identity stays
  * creation-time.
+ *
+ * A REMOTE observation needs no branch of its own here, because `resolveObserved` already refuses
+ * to dir-match one: an unlinked remote dir stays `known: false` and yields `undefined`, so a
+ * remote pane can never hand a LOCAL account's id to the local transcript / session-name / usage
+ * readers. What it can still yield is an id from the two ID-based routes, and both are right — a
+ * managed-remote account (`~/.nodeterm/claude-accounts/<id>`) is a real record whose reads are
+ * scoped by that id on whichever host runs them, and the host's own system `~/.claude` yields
+ * `undefined`, which is the system root on either machine.
  */
 export function effectiveAccountId(
   dataAccountId?: string,
@@ -141,7 +197,7 @@ export function effectiveAccountId(
 }
 
 /**
- * D6 — the identity key a node counts as, for "is more than one account in play?".
+ * The identity key a node counts as, for "is more than one account in play?".
  *
  *  - `<accountId>` — a managed or linked account (from the node, or observed);
  *  - `'sys'`       — the system default (`~/.claude`), which has no id of its own;
@@ -150,6 +206,18 @@ export function effectiveAccountId(
  *  - `null`        — nothing is known about this node's account. NOT a key: an unobserved plain
  *                    terminal must not count as a second identity (it would put a chip on every
  *                    system pane the moment one shell was opened), and it gets no chip.
+ *
+ * A REMOTE observation keys exactly like a local one, deliberately. The key is an opaque identity
+ * token — it is never spent on a filesystem action and, since `resolveObserved` refuses to
+ * dir-match a remote observation, it can no longer be produced by mistaking a host's dir for a
+ * local account's. The residual is a COLLISION: a host's `/home/u/.claude-2` and this machine's
+ * `/home/u/.claude-2`, both unlinked, key the same and count as one identity. That is accepted,
+ * not overlooked. It costs at most one chip — `multiple` is the only consumer, and it gates the
+ * chip on SYSTEM panes alone, so the two dirs themselves still chip (with different tooltips) —
+ * which is this module's standing failure direction: one chip fewer, never a wrong one. The
+ * alternative, a second key dialect for remote dirs, would mean the chip has to parse two shapes
+ * to recover a path, and one resolution feeding chip + keys + detected list is the invariant that
+ * keeps them from disagreeing.
  */
 export function accountKey(
   dataAccountId?: string,
@@ -168,7 +236,7 @@ export function accountKey(
 }
 
 /** The distinct account keys across a set of nodes (see `accountKey`); unknown nodes contribute
- *  nothing. `size >= 2` is D6's "there's multiple". */
+ *  nothing. `size >= 2` is what the chip means by "more than one identity is in play". */
 export function distinctAccountKeys(
   entries: Iterable<{ dataAccountId?: string; observed?: ObservedClaudeAccount }>,
   accounts: readonly ClaudeAccount[] = []
@@ -191,7 +259,8 @@ export function distinctAccountKeys(
  *
  * The store only knows OBSERVED accounts, so other nodes' creation-time `data.accountId` is not
  * counted — a managed node that has never posted a hook is invisible here. That is the cheap,
- * store-only reading of D6 and it fails in the safe direction: one chip fewer, never a wrong one.
+ * store-only reading of "how many identities" and it fails in the safe direction: one chip fewer,
+ * never a wrong one.
  */
 export function hasMultipleAccountKeys(
   byId: Record<string, { account?: ObservedClaudeAccount }>,
@@ -211,7 +280,7 @@ export function hasMultipleAccountKeys(
 
 /**
  * The config dirs seen running on this core that nodeterm has no account for — Settings →
- * Accounts lists these as one-click "Link" candidates (D7).
+ * Accounts lists these as one-click "Link" candidates.
  *
  * Derived from OBSERVATIONS only: a dir gets in here because a session posted a hook from it, so
  * the list is a record of what actually ran, and nothing here reads the filesystem (a forged POST
@@ -221,6 +290,14 @@ export function hasMultipleAccountKeys(
  * never be both "belongs to an account" (chipped as linked) and "detected" (offered for linking),
  * in either direction: linking removes it from this list at once, and unlinking puts it back at
  * once, with no hook event in between.
+ *
+ * **A REMOTE observation is skipped** (`observed.remote`). This list is a list of LINK candidates,
+ * and Settings → Accounts spends it on `claudeAccounts.link`, which `stat`s and writes on the
+ * machine the core runs on. A dir an SSH-project pane reported lives on its HOST, so the button
+ * would `stat` a path that is either absent here (an error the user cannot act on) or — with the
+ * same username on both machines, the ordinary case — a DIFFERENT directory of the same name,
+ * silently adopting the wrong account. The dir is still shown on the pane's own chip: naming what
+ * a session runs as is a true statement wherever it runs; only the local offer is withdrawn.
  */
 export function unlinkedConfigDirs(
   byId: Record<string, { account?: ObservedClaudeAccount }>,
@@ -228,6 +305,7 @@ export function unlinkedConfigDirs(
 ): string[] {
   const dirs = new Set<string>()
   for (const entry of Object.values(byId)) {
+    if (entry.account?.remote) continue
     const a = resolveObserved(entry.account, accounts)
     if (!a || a.known || !a.configDir) continue
     dirs.add(a.configDir)
@@ -253,7 +331,8 @@ function shortAccountLabel(label: string): string {
 }
 
 /**
- * Last segment of a config dir path, for an unlinked dir's chip (D7 — named by path, never read).
+ * Last segment of a config dir path, for an unlinked dir's chip: such a dir is named by its path
+ * and never read, so its last segment is the only name there is.
  *
  * The owning filesystem is NOT known here: the dir string comes from a hook that may have run on
  * this machine, on an SSH host, or on Windows. So the separator is picked from the SHAPE of the
@@ -276,7 +355,7 @@ export function configDirLabel(configDir: string): string {
 /**
  * The chip for one node, or `null` for no chip.
  *
- * D6 visibility: a node that is NOT on the system account always gets a chip (it is the exception
+ * Visibility: a node that is NOT on the system account always gets a chip (it is the exception
  * the user needs to see), and system nodes get one only when `multiple` — i.e. when at least two
  * identities are in play, so two panes side by side are always told apart.
  */
@@ -295,7 +374,7 @@ export function accountChipFor({
   systemLabel?: string
   /** The detected `~/.claude` login email (`state/systemAccount`), when known. */
   systemEmail?: string | null
-  /** D6: are ≥ 2 distinct account keys in play on this core? (`hasMultipleAccountKeys`) */
+  /** Are ≥ 2 distinct account keys in play on this core? (`hasMultipleAccountKeys`) */
   multiple?: boolean
 }): AccountChipInfo | null {
   // Resolved against the CURRENT list: linking a detected dir must repaint every chip on it
@@ -315,12 +394,18 @@ export function accountChipFor({
     }
   }
   if (key.startsWith('ext:')) {
-    // D7: named by its path and NEVER read. The tooltip is the whole affordance — it says what the
-    // dir is and where to turn it into a real account.
+    // An unlinked dir is named by its path and NEVER read (no `stat`, no open — a forged POST must
+    // not make us touch the filesystem). The tooltip is the whole affordance, so it must not point
+    // anywhere the user cannot go: Settings → Accounts links a dir on the machine the core runs
+    // on, which is not the machine a REMOTE pane's dir is on. The chip itself stays either way —
+    // naming what the session runs as is true wherever it runs — and the remote wording says whose
+    // filesystem the path belongs to instead of offering an impossible action.
     const dir = key.slice('ext:'.length)
     return {
       short: shortAccountLabel(configDirLabel(dir)),
-      tooltip: `Unlinked Claude config dir ${dir} — link it in Settings → Accounts`,
+      tooltip: observed?.remote
+        ? `Claude config dir ${dir} on the remote host — not a config dir on this machine`
+        : `Unlinked Claude config dir ${dir} — link it in Settings → Accounts`,
       kind: 'unlinked'
     }
   }

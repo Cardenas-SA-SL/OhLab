@@ -179,6 +179,19 @@ describe('AccountsSection — detected config dirs', () => {
     root.unmount()
   })
 
+  it('never lists a dir an SSH node reported — Link would stat the wrong machine', () => {
+    // The section's Link button calls `claudeAccounts.link`, which `stat`s and writes where the
+    // CORE runs. A dir an SSH-project pane reported lives on its HOST, and with the same username
+    // on both machines it spells a path that exists here too — a different directory entirely.
+    useAgentStatus.setState({
+      byId: { n1: { unread: false, account: observed({ remote: true }) } }
+    })
+    const { host, root } = renderSection()
+    expect(host.textContent).not.toContain('Detected config dirs')
+    expect(byLabel(host, `Link ${CLAUDE_2}`)).toBeUndefined()
+    root.unmount()
+  })
+
   it('renders nothing when every observed dir is already known', () => {
     useAgentStatus.setState({
       byId: {

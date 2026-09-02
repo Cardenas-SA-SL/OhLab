@@ -413,6 +413,40 @@ describe('observed Claude account persistence (a plain terminal knows it nowhere
     expect(reloaded.useAgentStatus.getState().byId['n1']?.account).toEqual(claude2)
   })
 
+  it('round-trips `remote` — losing it would put a Link button back on a host\u2019s dir', async () => {
+    // The loader rebuilds the account object field by field, so a field it forgets is dropped
+    // silently — and this one's absence reads as LOCAL, which is the exact state the flag exists
+    // to prevent (`unlinkedConfigDirs` would offer the dir again, `resolveObserved` would match it
+    // against a local account of the same path).
+    const store = memStorage()
+    vi.stubGlobal('localStorage', store)
+    const { useAgentStatus } = await import('./agentStatus')
+    useAgentStatus.getState().setAccount('n1', { ...claude2, remote: true })
+    expect(JSON.parse(store.getItem('nodeterm.agentStatus')!).n1.account.remote).toBe(true)
+
+    vi.resetModules()
+    vi.stubGlobal(
+      'localStorage',
+      memStorage({ 'nodeterm.agentStatus': store.getItem('nodeterm.agentStatus')! })
+    )
+    const reloaded = await import('./agentStatus')
+    expect(reloaded.useAgentStatus.getState().byId['n1']?.account?.remote).toBe(true)
+  })
+
+  it('hydrates a pre-flag entry byte-identically — absent stays absent, never `false`', async () => {
+    vi.stubGlobal(
+      'localStorage',
+      memStorage({
+        'nodeterm.agentStatus': JSON.stringify({
+          n5: { unread: false, account: { configDir: '/home/me/.claude-2', accountId: null, known: false } }
+        })
+      })
+    )
+    const { useAgentStatus } = await import('./agentStatus')
+    expect(useAgentStatus.getState().byId['n5']?.account).toEqual(claude2)
+    expect('remote' in (useAgentStatus.getState().byId['n5']!.account as object)).toBe(false)
+  })
+
   it('is the ONLY durable field an account-only entry needs to survive', async () => {
     // `save` skips entries carrying nothing durable — an observed account on an otherwise blank
     // node (no unread, no session id, no agent) has to be enough to keep the entry.

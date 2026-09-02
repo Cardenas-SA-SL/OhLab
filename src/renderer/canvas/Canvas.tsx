@@ -154,6 +154,7 @@ import {
   type AddHandlers
 } from '../lib/addMenuSpec'
 import { planSetProjectFolder } from '../lib/setProjectFolder'
+import { observationIsRemote, type ObservationOrigin } from '../lib/accountChip'
 import { transferConversationItems } from '../lib/transferItems'
 import { reopenVariants } from '../lib/reopenVariants'
 import { modelsForAgent } from '@shared/agents/model-gateway'
@@ -11029,13 +11030,41 @@ export function Canvas() {
       const t = (s ?? '').replace(/\s+/g, ' ').trim()
       return t.length <= max ? t : `${t.slice(0, max - 1)}…`
     }
+    /**
+     * Where the node a hook event names actually lives — the two facts `observationIsRemote`
+     * needs. Read through `.getState()` rather than closed over, because this effect has `[]`
+     * deps and must see the CURRENT projects, not the ones that existed at mount.
+     *
+     * The active project's nodes come from React Flow (the single live source of truth for those);
+     * every other project answers from its serialized nodes, which carry `ssh`/`sshRemoteTmux` at
+     * the same names, so `isRemoteSessionNode` reads both. A node in NO project returns
+     * `undefined`, which `observationIsRemote` deliberately treats as remote.
+     */
+    const originOf = (nodeId: string): ObservationOrigin | undefined => {
+      const { projects, activeProjectId: activeId } = useProjects.getState()
+      const live = nodesRef.current.find((n) => n.id === nodeId)
+      if (live) {
+        const active = projects.find((p) => p.id === activeId)
+        return { node: live.data, projectIsSsh: !!active?.ssh }
+      }
+      const owner = projects.find((p) => p.nodes.some((n) => n.id === nodeId))
+      if (!owner) return undefined
+      return { node: owner.nodes.find((n) => n.id === nodeId), projectIsSsh: !!owner.ssh }
+    }
     return api.onAgentStatus((e: NormalizedAgentEvent) => {
       const cs = useAgentStatus.getState()
       if (e.sessionId) cs.setSessionId(e.nodeId, e.sessionId)
-      // Which Claude account the posting session is ACTUALLY on (hook-derived label, D3). Captured
+      // Which Claude account the posting session is ACTUALLY on — a hook-derived LABEL, captured
       // off any event that carries one, exactly like `sessionId` above: a plain terminal running
       // `CLAUDE_CONFIG_DIR=~/.claude-2 claude` announces its identity nowhere else.
-      if (e.account) cs.setAccount(e.nodeId, e.account)
+      //
+      // The `remote` flag is stamped HERE and nowhere else. The classifier in core is deliberately
+      // host-agnostic — two of its rules exist precisely to name a REMOTE dir — and core holds only
+      // the hook payload, which never says which machine posted it. This listener is the first
+      // layer that can ask, because it can reach the node and the project that owns it, and a dir
+      // that names another machine's filesystem must not reach any LOCAL affordance (see
+      // `observationIsRemote` and the consumers in lib/accountChip.ts).
+      if (e.account) cs.setAccount(e.nodeId, { ...e.account, remote: observationIsRemote(originOf(e.nodeId)) })
       const agentLabel = agentConfig(e.agentId)?.label ?? 'Agent'
       // "<folder> — Claude finished" + last assistant message as the body.
       const alert = (statusText: string, fallbackBody: string, sound: 'done' | 'needsYou') => {

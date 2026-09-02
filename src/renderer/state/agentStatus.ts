@@ -327,7 +327,14 @@ export function createAgentStatusSession(
           out[id].account = {
             configDir: v.account.configDir,
             accountId: typeof v.account.accountId === 'string' ? v.account.accountId : null,
-            known: v.account.known
+            known: v.account.known,
+            // `remote` MUST round-trip. This loader rebuilds the object field by field, so a field
+            // it forgets is silently dropped — and for this one the dropped value reads as LOCAL,
+            // which puts a Link button back on an SSH host's config dir at the first reload and
+            // matches it against local accounts again. The absent-is-local default is only correct
+            // for an entry written before the field existed, where nothing remote was ever
+            // recorded; a `false` is not stored, so those entries hydrate byte-identically.
+            ...(v.account.remote ? { remote: true } : {})
           }
         }
         // Only when set: an absent flag stays absent, so an entry saved before this field

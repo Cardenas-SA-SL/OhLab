@@ -1206,6 +1206,23 @@ export interface ObservedClaudeAccount {
   configDir: string
   accountId: string | null
   known: boolean
+  /**
+   * The observation came from a session whose FILESYSTEM IS ON ANOTHER MACHINE (an SSH-project
+   * pane), so every LOCAL affordance — offering the dir for linking, matching it against a local
+   * account's `configDir` — must refuse it. `~/.claude-2` on a host and `~/.claude-2` here are
+   * different directories that spell the same string, and the same username on both machines is
+   * the common case, not the exotic one.
+   *
+   * It is NOT set by the classifier: `classifyClaudeConfigDir` is deliberately host-agnostic (its
+   * managed-remote and basename-`.claude` rules exist precisely to name a REMOTE dir) and core
+   * holds only the payload, which says nothing about which machine posted it. The RENDERER is the
+   * only layer that knows a node's project and `data.ssh`, so the flag is attached there, once, at
+   * the point the label enters the store.
+   *
+   * Optional and trailing: an observation without it is a local one, which is what every
+   * observation was before the field existed.
+   */
+  remote?: boolean
 }
 
 export interface SpeechSettings {
