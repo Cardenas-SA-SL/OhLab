@@ -355,6 +355,14 @@ from the target's `pendingLaunch` (`renderer/lib/edgeModel.ts`), and the context
 writes stays hidden underneath it. One `open-claude --after` used to land three edges on one node.
 `src/renderer/canvas/edge-model.source.test.ts` pins both halves.
 
+**React Flow's `fitView` is queued, not immediate — never use it to frame something automatically.**
+Calling it sets `fitViewQueued` and the fit runs from a later `setNodes` (only once every node is
+measured) or the next `updateNodeInternals`, against whatever the node lookup holds by then; a fit
+set that comes out empty parks the canvas origin in the middle of the screen. Compute the viewport
+yourself and apply it with `setViewport` (`renderer/lib/nodeFocus.ts`, `canvas/fit-view.ts`), which
+lands now and against the canvas you meant. `fitAll` is the one deliberate exception: an explicit
+user gesture on a settled canvas.
+
 ## Testing
 
 `npm test` must pass, and `npm run typecheck` is the fastest gate.

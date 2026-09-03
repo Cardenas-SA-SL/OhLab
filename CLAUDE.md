@@ -2725,20 +2725,41 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   `main/index.ts` intercepts it in `before-input-event` and forwards `app:zoom-actual-size`, which
   re-asks the same refusals. Server Edition needs no intercept (no menu; Chrome/Firefox hand ⌘0 to
   the page) and stubs the subscription.
-- **"Go to node" (`goToNode`)** — the one camera-travel path (notification click, sessions
-  sidebar, ⌘K jump, presence travel, minimap double-click, double-click focus). It frames the node
-  with `fitView({nodes:[{id}]})` **only when React Flow has MEASURED it**: `getFitViewNodes` filters
-  the fit set by `measured` (no `width`/`height` fallback in there), so an unmeasured node leaves the
-  set EMPTY, its bounds collapse to `{0,0,0,0}` and the camera lands on the canvas **ORIGIN** at max
-  zoom — empty canvas, node off-screen. That is the state every node is in for the first tick after
-  its project loads, which is why **cross-project** focus (the load and the focus happen in the same
-  tick, and measuring can lose the race — heavier canvas = more likely) used to land on nothing and
-  only work on a second try. `renderer/lib/nodeFocus.ts` computes the identical framing from the
-  node's PERSISTED size for that window (`nodeFitRect` resolves the group-parent chain →
-  `viewportForRect` → `setViewport`), and the measured check reads React Flow's **store**
-  (`getInternalNode`), not our node object — `measured` reaches our state one render later (via
-  `onNodesChange`), so our copy lies about nodes the store has long sized. Unknowable size ⇒ the
-  camera **stands still**; never fall back to a bare `fitView` there, that IS the origin jump.
+- **"Go to node" (`goToNode` → `frameNode`)** — the one camera-travel path (notification click,
+  sessions sidebar, ⌘K jump, presence travel, minimap double-click, double-click focus).
+  **It computes the viewport itself and applies it with `setViewport`. It must never go through
+  `fitView`.** React Flow's `fitView` frames nothing when you call it: it sets `fitViewQueued` and
+  the fit is RESOLVED LATER — from a subsequent `setNodes` (and only once EVERY node is measured,
+  `nodesInitialized`) or from the next `updateNodeInternals` — against whatever `nodeLookup` holds
+  by then. Its fit set is also filtered by `measured` (no `width`/`height` fallback in
+  `getFitViewNodes`), so a set that comes out EMPTY collapses the bounds to `{0,0,0,0}` and
+  `getViewportForBounds` parks the canvas **ORIGIN** in the middle of the screen at max zoom. On a
+  canvas whose nodes sit thousands of px out that is the field report verbatim: right project,
+  empty stretch of canvas, *sometimes*. **Cross-project** focus lands in that window every time —
+  switch project → load its nodes → frame the target, all before the mount-time measuring has
+  settled — and the second click always works, which is what makes it read as intermittent.
+  The geometry is `renderer/lib/nodeFocus.ts`: the node's rect from React Flow's own measurement
+  when it has one (`getInternalNode` — `measured` reaches OUR node objects one render later via
+  `onNodesChange`, and `internals.positionAbsolute` also accounts for `extent:'parent'` clamping),
+  else `nodeFitRect` from the PERSISTED size, resolving the group-parent chain. Then
+  `viewportForRect`: **centred in the pane, and nothing else.** Framing a single focused node
+  against the chrome-free rectangle was tried twice and is wrong both ways — centred IN that rect
+  ("too far right on an ultrawide, half off-screen on a laptop") and centred in the pane then
+  nudged clear of it ("still not in the middle") — because `.sessions-sidebar` is a 300px absolute
+  OVERLAY and it is open exactly when this feature is used, so either rule pushes the node right by
+  most of its width. The couple of dozen pixels that end up behind the sidebar cost far less than
+  losing the centre. The free-rect solve (`solveFitFrame` / `solveFitPadding`) stays where it earns
+  its keep: `fitAll`, which fits EVERY node and would otherwise tuck them under the dock.
+  Unknowable size or no pane ⇒ the camera **stands still**.
+  `settings.focusZoomToNode` (Behavior, default ON) is the escape hatch for the rescale: off, the
+  camera keeps the zoom `getZoom()` reports and only pans, and that zoom is passed through
+  **unclamped** — it is one the canvas is already displaying, and re-clamping it to the framing
+  range would rescale the view the option exists to leave alone. Two rules a refactor must not
+  undo: framing goes through `frameNode` and nothing else (`canvas-wiring.test.tsx` pins that it
+  contains no `fitView(`), and a "stands still" branch must never be "helpfully" replaced by a bare
+  `fitView` — that IS the origin jump. `fitAll` still uses `fitView` deliberately: it is an
+  explicit user gesture on a settled canvas and its fit set is every node, but it carries the same
+  deferral, so do not reach for it from anything automatic.
 - **Breadcrumb trail** (`renderer/lib/breadcrumbs.ts` — all the pure logic lives there) — every
   deliberate `goToNode` landing records a `NavStop` ({nodeId, at, note}) for the ACTIVE project, and
   **Cmd+[ / Cmd+]** (`canvas.goBack` / `canvas.goForward`, bound in `shared/keybindings.ts`) plus the

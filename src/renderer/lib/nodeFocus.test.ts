@@ -148,6 +148,40 @@ describe('viewportForRect', () => {
   })
 })
 
+describe('viewportForRect — the framing "go to node" applies', () => {
+  const rect = { x: 5000, y: 4000, width: 600, height: 400 }
+
+  it('centres the node in the pane, whatever chrome floats over it', () => {
+    // Twice-reported regression: framing against the chrome-free rectangle — centred in it, or
+    // centred in the pane and then nudged clear of it — pushes the node right by most of its width,
+    // because the sessions sidebar is a 300px OVERLAY and it is open exactly when this is used.
+    // "Go to node" puts the node where the eye is; the free-rect solve belongs to fitAll.
+    const wide = viewportForRect(rect, 3440, 1400)!
+    expect(wide.x + 5300 * wide.zoom).toBeCloseTo(1720, 0)
+    expect(wide.y + 4200 * wide.zoom).toBeCloseTo(700, 0)
+    const laptop = viewportForRect(rect, 1440, 900)!
+    expect(laptop.x + 5300 * laptop.zoom).toBeCloseTo(720, 0)
+    expect(laptop.y + 4200 * laptop.zoom).toBeCloseTo(450, 0)
+  })
+
+  it('keeps a given zoom and only pans (settings.focusZoomToNode off)', () => {
+    // The point of the option: a user who settled on a zoom level loses their sense of place when
+    // a jump also rescales the canvas. The node is still centred.
+    const vp = viewportForRect(rect, 1440, 900, 0.5)!
+    expect(vp.zoom).toBe(0.5)
+    expect(vp.x + 5300 * 0.5).toBeCloseTo(720, 0)
+    expect(vp.y + 4200 * 0.5).toBeCloseTo(450, 0)
+  })
+
+  it('passes an out-of-framing-range zoom through — it is one the canvas already shows', () => {
+    // Re-clamping to FIT_NODE_OPTIONS would rescale the very view this option exists to leave
+    // alone; the canvas's own limits already bound what getZoom() can return.
+    expect(viewportForRect(rect, 1440, 900, 1.9)!.zoom).toBe(1.9)
+    expect(viewportForRect(rect, 1440, 900, 0.1)!.zoom).toBe(0.1)
+    expect(viewportForRect(rect, 1440, 900, 0)).toBeNull()
+  })
+})
+
 describe('isMeasured', () => {
   it('reads React Flow measurements from either node shape, and tolerates a missing node', () => {
     expect(isMeasured({ measured: { width: 600, height: 400 } })).toBe(true)

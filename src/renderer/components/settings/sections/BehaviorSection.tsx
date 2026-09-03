@@ -36,6 +36,10 @@ const ROWS = {
   },
   panHover: { title: 'Pan-hover delay (ms)', keywords: ['pan', 'hover', 'delay', 'focus', 'guard'] },
   doubleClick: { title: 'Double-click to focus', keywords: ['double', 'click', 'focus'] },
+  focusZoom: {
+    title: 'Zoom when going to a node',
+    keywords: ['zoom', 'focus', 'go to', 'node', 'jump', 'camera', 'session', 'sidebar']
+  },
   mdPreview: {
     title: 'Open Markdown in preview',
     keywords: ['markdown', 'md', 'preview', 'render', 'editor', 'docs', 'readme', 'file']
@@ -212,6 +216,19 @@ export function BehaviorSection({ isActive }: { isActive: boolean }): React.JSX.
               checked={settings.doubleClickFocus}
               onChange={(v) => update({ doubleClickFocus: v })}
               ariaLabel="Double-click to focus"
+            />
+          }
+        />
+      </SearchableRow>
+      <SearchableRow {...ROWS.focusZoom}>
+        <FieldRow
+          label="Zoom when going to a node"
+          description="Off: going to a node keeps your current zoom and only pans to it."
+          control={
+            <Switch
+              checked={settings.focusZoomToNode}
+              onChange={(v) => update({ focusZoomToNode: v })}
+              ariaLabel="Zoom when going to a node"
             />
           }
         />

@@ -278,7 +278,6 @@ import {
   folderName
 } from '../lib/projectOpen'
 import {
-  FIT_NODE_OPTIONS,
   absolutePosition,
   isMeasured,
   nodeFitRect,
@@ -6648,54 +6647,53 @@ export function Canvas() {
    * The ONE framing implementation behind both deliberate focus (`goToNode`) and breadcrumb
    * back/forward (`stepAndFrame`) — extracted so CLAUDE.md's "Go to node" invariant has a single
    * copy to regress. Fit the node in view instead of centering at a fixed zoom — `zoom:
-   * max(current, 1)` overshot large terminals (their body never fit the viewport). fitView sizes
-   * the zoom to the node and resolves group-relative positions itself; the clamp keeps a small
-   * node from filling the whole screen and a huge one from being fit microscopic.
+   * max(current, 1)` overshot large terminals (their body never fit the viewport). The clamp keeps
+   * a small node from filling the whole screen and a huge one from being fit microscopic.
    *
-   * …but ONLY once React Flow has MEASURED the node. Its fit set is filtered by `measured`
-   * (no width/height fallback in there), so an unmeasured node leaves the set EMPTY, the
-   * bounds collapse to {0,0,0,0} and the camera flies to the canvas ORIGIN at max zoom —
-   * empty canvas, node off-screen. That is precisely the state a node is in for the first
-   * tick after its project loads, i.e. on every CROSS-PROJECT focus (OS-notification click,
-   * sessions sidebar, ⌘K jump, presence travel): the load and the focus happen in the same
-   * tick, so measuring can lose the race and only a second attempt would work. In that
-   * window we frame the node ourselves from its persisted size — see lib/nodeFocus.
+   * **It computes the camera itself and applies it with `setViewport`. It must never go through
+   * `fitView`.** React Flow's `fitView` does not frame anything when you call it: it sets
+   * `fitViewQueued` and runs LATER, from `setNodes` (and only once EVERY node is measured) or from
+   * the next `updateNodeInternals`. So the fit is resolved against whatever `nodeLookup` holds by
+   * then, not against the canvas the user clicked on — and its fit set is filtered by `measured`
+   * with no width/height fallback, so a set that comes out EMPTY collapses the bounds to
+   * {0,0,0,0} and the camera flies to the canvas ORIGIN at max zoom. On a canvas whose nodes sit
+   * thousands of px out that reads exactly as the field report: right project, empty stretch of
+   * canvas, "sometimes". A cross-project focus lands in that window every time (switch project →
+   * load its nodes → frame the target, all before the mount-time measuring has settled), and a
+   * second click works because by then everything is measured.
    *
-   * The measured check must read React Flow's OWN store (`getInternalNode`), not our node
-   * object: `measured` only reaches our state one render later, when `onNodesChange` applies
-   * the dimensions change, so our copy says "unmeasured" for nodes the store has long sized.
+   * So the geometry is ours: the node's rect from React Flow's measurement when it has one (its
+   * `positionAbsolute` also accounts for `extent: 'parent'` clamping) and from the PERSISTED size
+   * otherwise — which needs no layout — then the chrome-free frame, then `setViewport`, which
+   * applies immediately. See lib/nodeFocus and canvas/fit-view.
    *
-   * The framing itself is solved against the CURRENT chrome layout, exactly like `fitAll`:
-   * a flat 20% ratio has to reserve enough slack for the dock/minimap on EVERY side, which
-   * is what kept a big node (a group frame most of all) further away than it needed to be.
-   * The free-rect solver reclaims the space the chrome does not actually occupy, so the node
-   * is framed tighter without sliding underneath anything. Falls back to the flat ratio when
-   * there is nothing sensible to solve — the same ratio the unmeasured branch uses.
+   * The frame is solved against the CURRENT chrome layout, exactly like `fitAll`: a flat 20% ratio
+   * has to reserve enough slack for the dock/minimap on EVERY side, which is what kept a big node
+   * (a group frame most of all) further away than it needed to be. Falls back to the flat ratio
+   * against the whole pane when there is nothing sensible to solve.
    */
   const frameNode = useCallback(
     (node: Node) => {
       const internal = getInternalNode(node.id)
-      if (isMeasured(internal)) {
-        const wrap = flowWrapRef.current
-        const size = internal?.measured
-        const solved =
-          wrap && size?.width && size?.height ? solveFitPadding(wrap, size.width, size.height) : null
-        void fitView({
-          nodes: [{ id: node.id }],
-          duration: 300,
-          ...FIT_NODE_OPTIONS,
-          padding: solved ?? FIT_NODE_OPTIONS.padding
-        })
-        return
-      }
-      const rect = nodeFitRect(node as FocusableNode, nodesRef.current as FocusableNode[])
-      const wrap = flowWrapRef.current?.getBoundingClientRect()
-      const viewport = rect && wrap ? viewportForRect(rect, wrap.width, wrap.height) : null
+      const rect = isMeasured(internal)
+        ? {
+            ...internal!.internals.positionAbsolute,
+            width: internal!.measured.width as number,
+            height: internal!.measured.height as number
+          }
+        : nodeFitRect(node as FocusableNode, nodesRef.current as FocusableNode[])
+      const wrap = flowWrapRef.current
       // Size unknowable / no pane yet: leave the camera where it is. Standing still beats
-      // teleporting the user to the origin, which is the bug this branch exists for.
+      // teleporting the user to the origin, which is the failure this whole path exists for.
+      if (!rect || !wrap) return
+      const box = wrap.getBoundingClientRect()
+      // `focusZoomToNode` off: keep the zoom the user settled on and only pan — the node still
+      // lands in the middle, only the rescale is dropped.
+      const keepZoom = useSettings.getState().settings.focusZoomToNode ? undefined : getZoom()
+      const viewport = viewportForRect(rect, box.width, box.height, keepZoom)
       if (viewport) void setViewport(viewport, { duration: 300 })
     },
-    [fitView, setViewport, getInternalNode]
+    [setViewport, getInternalNode, getZoom]
   )
 
   const goToNode = useCallback(

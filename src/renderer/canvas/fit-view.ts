@@ -140,14 +140,18 @@ export function rectToPadding(outer: FitRect, rect: FitRect): FitPadding {
 }
 
 /**
- * Solve the fit-view padding for the current chrome layout and content shape.
- * Returns null when there is nothing sensible to solve, so callers can fall back to plain fitView.
+ * The chrome-free rectangle for this content, in the pane's OWN coordinates (0,0 = the pane's
+ * top-left) rather than the window's. Null when there is nothing sensible to solve.
+ *
+ * Pane-local because that is the space a viewport transform lives in: a caller that computes the
+ * camera itself (`viewportForRectInFrame`) needs the frame in the same coordinates as the
+ * transform, and converting at each call site is how the two would drift.
  */
-export function solveFitPadding(
+export function solveFitFrame(
   wrap: HTMLElement,
   contentW: number,
   contentH: number
-): FitPadding | null {
+): FitRect | null {
   if (contentW <= 0 || contentH <= 0) return null
   const v = wrap.getBoundingClientRect()
   const outer: FitRect = { left: v.left, top: v.top, right: v.right, bottom: v.bottom }
@@ -159,5 +163,28 @@ export function solveFitPadding(
   }
   if (width(viewport) < 1 || height(viewport) < 1) return null
   const rect = largestFreeRect(viewport, chromeObstacles(viewport), contentW, contentH)
-  return rect ? rectToPadding(outer, rect) : null
+  return rect
+    ? {
+        left: rect.left - outer.left,
+        top: rect.top - outer.top,
+        right: rect.right - outer.left,
+        bottom: rect.bottom - outer.top
+      }
+    : null
+}
+
+/**
+ * Solve the fit-view padding for the current chrome layout and content shape.
+ * Returns null when there is nothing sensible to solve, so callers can fall back to plain fitView.
+ */
+export function solveFitPadding(
+  wrap: HTMLElement,
+  contentW: number,
+  contentH: number
+): FitPadding | null {
+  const frame = solveFitFrame(wrap, contentW, contentH)
+  if (!frame) return null
+  const v = wrap.getBoundingClientRect()
+  // `frame` is pane-local, so the pane's own box IS the outer rect at the origin.
+  return rectToPadding({ left: 0, top: 0, right: v.width, bottom: v.height }, frame)
 }

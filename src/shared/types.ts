@@ -1359,6 +1359,12 @@ export interface Settings {
   /** ms to dwell over a terminal before it takes pointer focus (pan-across guard). */
   panHoverDelay: number
   doubleClickFocus: boolean
+  /** "Go to node" (sessions sidebar, notification click, ⌘K jump, breadcrumb steps, presence
+   *  travel) fits the node in view. Off: the camera keeps the CURRENT zoom and only pans, which is
+   *  what a user who has settled on a zoom level wants — a jump that also rescales the whole canvas
+   *  costs them the sense of where they were. Either way the node is centred and kept clear of the
+   *  floating chrome (renderer/lib/nodeFocus). */
+  focusZoomToNode: boolean
   /** Open Markdown files (.md, .markdown, …) in rendered preview instead of the code editor.
    *  Only picks the view an editor node OPENS in — the node's Preview/Edit toggle (and the
    *  markdown-toggle chord) still switches either way. Default ON since the release after
@@ -1669,6 +1675,7 @@ export const DEFAULT_SETTINGS: Settings = {
   worktreePathTemplate: DEFAULT_WORKTREE_PATH_TEMPLATE,
   panHoverDelay: 600,
   doubleClickFocus: true,
+  focusZoomToNode: true,
   openMarkdownPreview: true,
   openMarkdownPreviewMigrated: true,
   terminalMiddleClickPaste: false,
