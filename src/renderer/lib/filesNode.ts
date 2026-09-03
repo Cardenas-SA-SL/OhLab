@@ -81,7 +81,7 @@ export function displacedFilesPatch(
     : { cwd: fallbackCwd }
 }
 
-export type EmptyListingVerdict = 'empty' | 'missing' | 'unknown'
+export type EmptyListingVerdict = 'empty' | 'missing' | 'unreachable' | 'unknown'
 
 /**
  * What an EMPTY listing actually means.
@@ -98,15 +98,18 @@ export type EmptyListingVerdict = 'empty' | 'missing' | 'unknown'
  * is never evidence of absence*. Instead we ask the PARENT's listing, the same way
  * `SshProjectDialog` and `file-links.ts`'s `makeDirListingLookup` already answer this question.
  *
- * Three answers, and the third is the point:
+ * Four answers, and the last two are the point:
  *  - `missing` — the parent listed real entries and ours is not among them. Only this earns the
  *    error state.
  *  - `empty`   — the parent lists us, so the directory is there and simply has nothing in it.
  *    Root takes this too: it has no parent to ask and always exists.
- *  - `unknown` — the parent itself came back empty, which under the same fail-open contract means
- *    the parent is unreadable or gone rather than childless. We learned nothing, so we claim
- *    nothing; the caller keeps saying "empty". Understating beats telling someone their folder
- *    was deleted because a network hiccup ate one `ls`.
+ *  - `unreachable` — the parent came back empty or could not be read at all. It cannot be
+ *    childless, since it contains us, so this says we could not see the filesystem. We still
+ *    cannot tell "the whole subtree is gone" from "the connection is down", so the verdict names
+ *    the doubt instead of guessing.
+ *  - `unknown` — the path SHAPE means no parent listing could ever answer (see below). Genuinely
+ *    no information, so the caller keeps saying "empty". Understating beats telling someone their
+ *    folder was deleted because a network hiccup ate one `ls`.
  *
  * Matching is by NAME, not by `dir`, deliberately: a symlinked directory can list as a non-dir
  * entry depending on the leg, and mistaking one for "missing" is the false alarm this exists to
@@ -134,7 +137,15 @@ export function classifyEmptyListing(
   //    node pointed at one can never find itself in its parent.
   if (!trimmed.startsWith('/') || name === '.' || name === '..' || name === '.git') return 'unknown'
 
-  if (!parentEntries || parentEntries.length === 0) return 'unknown'
+  // The parent could not be read. Note it cannot legitimately be EMPTY either: it contains the
+  // directory we are standing in, so an empty listing means we could not see it, exactly as the
+  // fail-open contract allows. That is real information and it used to be thrown away as
+  // `unknown`, leaving the node saying "This folder is empty." over a dead ControlMaster, which
+  // is the most common cause of an empty remote listing and the most reassuring possible lie.
+  //
+  // We still cannot say WHICH (the whole subtree deleted, or the filesystem out of reach), so the
+  // verdict names the doubt rather than picking one.
+  if (!parentEntries || parentEntries.length === 0) return 'unreachable'
   if (parentEntries.some((e) => e.name === name)) return 'empty'
   // A case-insensitive filesystem (APFS, NTFS) lists a directory fine under a cwd whose case
   // differs from the on-disk spelling, and `readdir` answers with the on-disk one. Treat that as

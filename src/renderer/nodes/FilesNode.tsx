@@ -48,6 +48,14 @@ import { ContextMenu, type MenuItem } from '../components/ContextMenu'
 import { isBrowserRuntime } from '../bridge/runtime'
 import { canUseLocalShell } from '../lib/download'
 
+/**
+ * Shown when the parent listing could not be read either. It deliberately names BOTH possible
+ * causes rather than picking one: the fail-open `FsApi` contract gives an empty array for a
+ * deleted directory and for a dead ControlMaster alike, so the honest thing is to say we could
+ * not see it and let the user tell the two apart.
+ */
+const UNREACHABLE_MESSAGE = 'Could not reach this folder. It may be gone, or its filesystem may be unavailable.'
+
 /** Surface a transient error the way every other node does (Canvas listens for this). */
 const toast = (message: string): void => {
   window.dispatchEvent(new CustomEvent('nodeterm:toast', { detail: { kind: 'error', message } }))
@@ -156,13 +164,17 @@ export function FilesNode({ id, data, selected }: NodeProps<CanvasNode>) {
       try {
         if (parent !== cwd) parentEntries = await fs.list(parent)
       } catch {
-        parentEntries = null // could not ask ⇒ claim nothing
+        parentEntries = null // could not ask, so claim nothing
       }
       if (!live) return
       setListing({ cwd, entries: list })
-      if (classifyEmptyListing(cwd, parentEntries) === 'missing') {
-        setError('Could not read this folder.')
-      }
+      // Only `empty` and `unknown` fall through to "This folder is empty.", and they are the two
+      // cases where that sentence is true or at least not a claim. The other two each get their
+      // own, because saying "empty" over a folder that is gone, or over a filesystem we simply
+      // could not see, is the reassuring kind of wrong.
+      const verdict = classifyEmptyListing(cwd, parentEntries)
+      if (verdict === 'missing') setError('Could not read this folder.')
+      else if (verdict === 'unreachable') setError(UNREACHABLE_MESSAGE)
     })()
     return () => {
       live = false

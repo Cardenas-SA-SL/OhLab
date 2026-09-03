@@ -965,9 +965,12 @@ session.
     (`main/ssh-fs.ts:164-176`) refuses, on the rule "a failed read is never evidence of absence". Now
     disambiguated by probing the PARENT's listing instead (`classifyEmptyListing`, pure,
     `lib/filesNode.ts` — the idiom `SshProjectDialog.tsx:112-125` and `file-links.ts`'s
-    `makeDirListingLookup` already use), which answers `missing` / `empty` / `unknown`: an unreadable
-    parent answers `unknown`, and we keep saying "empty" rather than claim a deletion we can't
-    prove. **`unknown` also covers every path whose parent CANNOT answer** — a non-`/`-absolute cwd
+    `makeDirListingLookup` already use), which answers `missing` / `empty` / `unreachable` /
+    `unknown`. The parent CONTAINS the directory we are standing in, so it cannot legitimately be
+    childless: an empty parent listing means we could not see it, which is `unreachable` and gets
+    its own sentence naming both possible causes. That case used to answer `unknown` and render as
+    "This folder is empty." over a dead ControlMaster, the commonest cause of an empty remote
+    listing and the most reassuring possible lie. **`unknown` is reserved for the paths whose parent CANNOT answer** — a non-`/`-absolute cwd
     (an SSH project's `remoteCwd` defaults to **`~`**, where `parentDir` is `/` and `/` has no entry
     named `~`, so an empty remote HOME reported a deletion), a `.git` cwd (both listing legs strip
     it on purpose), and `.`/`..` segments; a case-folded match counts as present, for the
@@ -1033,7 +1036,11 @@ session.
   - **The `/`-separator assumption is a KNOWN gap, shared with `explorerCreate`** (the Explorer
     drawer and canvas "New file…" already run on the same helpers) — `C:\x\y` reads as one segment.
     To be closed in ONE place for both, using the core-owns-the-dialect rule `terminal/file-links.ts`
-    already implements.
+    already implements. The TRAVERSAL half is closed: `newEntryPath` splits its `..` check on
+    `[\\/]` and refuses a Windows-absolute name, because a guard that reads `\` as ordinary text is
+    wrong about the machine that resolves the path. The construction half deliberately is not: on
+    POSIX a backslash is legal filename text, so the join stays `/` and `weird\name.txt` is still
+    one file. Guard on both dialects, construct in one.
   - **Mobile**: N/A — *nodeterm mobile* attaches to tmux sessions over the transport protocol and
     has no canvas or file-browsing concept; adding one means extending that protocol.
 - **dino** (`DinoNode.tsx`) — a small self-contained T-Rex-style runner on a canvas (no PTY);
