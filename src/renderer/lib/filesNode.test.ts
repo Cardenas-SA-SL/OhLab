@@ -116,15 +116,25 @@ describe('classifyEmptyListing', () => {
     expect(classifyEmptyListing('/repo/docs/', parent)).toBe('empty')
   })
 
-  // "A failed read is never evidence of absence" (SshFs.readTextChecked). Under the same
-  // fail-open contract an empty PARENT means unreadable-or-gone, not childless — so we learned
-  // nothing and must not tell the user their folder was deleted.
-  it('says unknown when the parent itself came back empty', () => {
-    expect(classifyEmptyListing('/repo/docs', [])).toBe('unknown')
+  // The parent contains us, so it cannot legitimately be childless: an empty listing means we
+  // could not see it. That is real information, and reporting it as `unknown` let the node say
+  // "This folder is empty." over a dead ControlMaster, which is the commonest cause of an empty
+  // remote listing.
+  it('says unreachable when the parent itself came back empty', () => {
+    expect(classifyEmptyListing('/repo/docs', [])).toBe('unreachable')
   })
 
-  it('says unknown when the parent could not be asked at all', () => {
-    expect(classifyEmptyListing('/repo/docs', null)).toBe('unknown')
+  it('says unreachable when the parent could not be asked at all', () => {
+    expect(classifyEmptyListing('/repo/docs', null)).toBe('unreachable')
+  })
+
+  // The distinction that keeps `unreachable` honest: a path whose parent could never answer is
+  // still `unknown`, so a `~` root or a `.git` cwd does not start claiming the host is down.
+  it('keeps unknown for the paths no parent listing could ever answer', () => {
+    expect(classifyEmptyListing('~', null)).toBe('unknown')
+    expect(classifyEmptyListing('~', [])).toBe('unknown')
+    expect(classifyEmptyListing('/repo/.git', [])).toBe('unknown')
+    expect(classifyEmptyListing('relative/dir', [])).toBe('unknown')
   })
 
   // Root has no parent to interrogate and always exists.
