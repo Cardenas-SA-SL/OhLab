@@ -208,9 +208,11 @@ export function wireAgentStatus(
       // `updates.jsonl`, which holds no readable conversation, so this path deliberately ignores
       // the advertised value and derives the session directory instead. Core
       // owns the node/session/directory transition (`applyGrokHookSession`) so desktop and Server
-      // Edition cannot implement different event branches — including the one thing only it does:
-      // PostCompact mints a NEW session id, so the PRIOR id is retired there and not only on
-      // SessionEnd. Written inline, that transition existed in two copies and neither knew it.
+      // Edition cannot implement different event branches. Written inline, that transition existed
+      // in two copies and neither knew it. (An earlier version of this comment claimed PostCompact
+      // mints a NEW session id and retires the prior one. Measured on 1.0.13: it does not —
+      // `pre_compact` and `post_compact` carry the SAME id — and the branch that acted on the
+      // belief is gone. SessionEnd is the only event that retires an id.)
       //
       // What stays HERE is what needs a shell to exist: the per-shell context tail and the phone
       // mirror. `plan` carries the decoded event/session/cwd, so the dialect is still decoded in

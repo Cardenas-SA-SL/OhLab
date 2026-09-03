@@ -17,8 +17,8 @@ export interface GrokHookSessionDeps {
 
 /**
  * Decode the two Grok hook dialects and decide the session-map transition once for both shells.
- * Grok 1.0.13 gives PostCompact a newly minted session id, so that event retires the prior id;
- * SessionEnd retires the id carried by the event itself.
+ * SessionEnd is the only event that retires an id, and it retires the one the event itself carries.
+ * Measured on grok 1.0.13: compaction does NOT mint a new id (see the note in the body).
  */
 export function planGrokHookSession(
   payload: Record<string, unknown>,
