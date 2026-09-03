@@ -1,21 +1,26 @@
 import { getViewportForBounds, type Rect, type Viewport } from '@xyflow/system'
 
 /**
- * "Zoom to this node" geometry, computed WITHOUT React Flow's measurements.
+ * "Zoom to this node" geometry, computed without React Flow's `fitView`.
  *
  * Why this exists: `fitView({ nodes: [{ id }] })` is the natural way to frame one node, and it is
- * what `Canvas.goToNode` uses — but React Flow filters the fit set down to nodes it has already
- * MEASURED (`getFitViewNodes` keys off `measured.width && measured.height`; there is no
- * `width`/`height` fallback there). A node that was handed to React Flow a tick ago has no
- * measurement yet, so the fit set comes out EMPTY, its bounds collapse to `{0,0,0,0}` and the
- * camera flies to the canvas ORIGIN at max zoom — an empty stretch of canvas, nowhere near the
- * node. That is exactly the window a cross-project focus lands in: switch project → load its nodes
- * → focus the target, all before React Flow's mount-time measuring has run. (Clicking an OS
- * notification for a session in another project is the everyday path into it; the same node focuses
- * correctly on a second try, once it is measured.)
+ * what `Canvas.goToNode` used to do — but it frames nothing when you call it. It sets
+ * `fitViewQueued` and the fit is RESOLVED LATER: from a subsequent `setNodes` (and only once EVERY
+ * node is measured) or from the next `updateNodeInternals`. Whatever `nodeLookup` holds by then is
+ * what gets framed. And the fit set is filtered down to nodes React Flow has already MEASURED
+ * (`getFitViewNodes` keys off `measured.width && measured.height`; there is no `width`/`height`
+ * fallback there), so a set that comes out EMPTY collapses the bounds to `{0,0,0,0}` and the camera
+ * flies to the canvas ORIGIN at max zoom — an empty stretch of canvas, nowhere near the node.
  *
- * So for the unmeasured case we do the same maths ourselves from the size the node was persisted
- * with — which needs no layout — and drive the camera with `setViewport`.
+ * Both halves fire on the same everyday path. A cross-project focus (sessions sidebar, OS
+ * notification, ⌘K jump, presence travel) switches project → loads its nodes → frames the target,
+ * all before the mount-time measuring has settled: the queued fit then waits for a later node
+ * update, and by the time it runs the canvas may have moved on. The second click always works,
+ * because by then everything is measured — which is what makes it read as "sometimes".
+ *
+ * So the maths is ours, from React Flow's measurement when it has one and from the size the node
+ * was persisted with when it does not — neither needs layout — and the camera is driven with
+ * `setViewport`, which applies immediately.
  */
 
 /** The subset of a React Flow node this module needs. Loose on purpose: it must accept both a
@@ -30,9 +35,9 @@ export interface FocusableNode {
   style?: { width?: number | string | null; height?: number | string | null }
 }
 
-/** Zoom/padding for framing a single node. Kept beside the maths so the fallback path and
- *  `fitView` cannot drift apart: the clamp keeps a small node from filling the screen and a
- *  huge one from being fit microscopic. */
+/** Zoom/padding for framing a single node, shared by both framing paths here so the whole-pane
+ *  and chrome-free-frame answers cannot drift apart: the clamp keeps a small node from filling the
+ *  screen and a huge one from being fit microscopic. */
 export const FIT_NODE_OPTIONS = { padding: 0.2, minZoom: 0.25, maxZoom: 1.38 } as const
 
 /** A `parentId` chain longer than this is a data bug (or a cycle) — stop walking. */
@@ -100,6 +105,36 @@ export function viewportForRect(
     FIT_NODE_OPTIONS.maxZoom,
     FIT_NODE_OPTIONS.padding
   )
+}
+
+/** A rectangle inside the flow pane, in the pane's OWN coordinates (0,0 = its top-left) — the
+ *  chrome-free area a node should be framed into. Structurally the `FitRect` of `canvas/fit-view`,
+ *  restated here so this module stays free of anything that touches the DOM. */
+export interface FitFrame {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+/**
+ * The viewport that puts `rect` in the middle of `frame`, at the zoom that fits it there.
+ *
+ * The counterpart to `viewportForRect` for callers that solved a chrome-free frame first: the node
+ * is centred in the space it can actually be seen in, rather than in the whole pane and then
+ * nudged out from under a panel. Null when either box has no usable size.
+ */
+export function viewportForRectInFrame(rect: Rect, frame: FitFrame): Viewport | null {
+  const frameW = frame.right - frame.left
+  const frameH = frame.bottom - frame.top
+  if (!(frameW > 0) || !(frameH > 0) || !(rect.width > 0) || !(rect.height > 0)) return null
+  const fit = Math.min(frameW / rect.width, frameH / rect.height)
+  const zoom = Math.min(Math.max(fit, FIT_NODE_OPTIONS.minZoom), FIT_NODE_OPTIONS.maxZoom)
+  return {
+    x: (frame.left + frame.right) / 2 - (rect.x + rect.width / 2) * zoom,
+    y: (frame.top + frame.bottom) / 2 - (rect.y + rect.height / 2) * zoom,
+    zoom
+  }
 }
 
 /** Whether React Flow already knows this node's on-screen size — i.e. whether `fitView` will

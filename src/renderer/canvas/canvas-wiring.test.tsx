@@ -155,6 +155,21 @@ describe('breadcrumb wiring the CLAUDE.md bullet calls load-bearing', () => {
     expect(CANVAS_SRC.match(/isMeasured\(internal\)/g) ?? []).toHaveLength(1)
   })
 
+  it('frameNode computes the camera itself and never routes through fitView', () => {
+    // React Flow's fitView is QUEUED, not immediate: it runs from a later setNodes (and only once
+    // EVERY node is measured) or the next updateNodeInternals, so it frames whatever nodeLookup
+    // holds by then. Resolved after the node set moved on, its fit set comes out empty, the bounds
+    // collapse to {0,0,0,0} and the camera flies to the canvas ORIGIN — the "right project, empty
+    // canvas, sometimes" report. A cross-project focus lands in that window every time.
+    const frame = CANVAS_SRC.slice(
+      CANVAS_SRC.indexOf('const frameNode = useCallback'),
+      CANVAS_SRC.indexOf('const goToNode = useCallback')
+    )
+    expect(frame.length).toBeGreaterThan(0)
+    expect(frame).not.toContain('fitView(')
+    expect(frame).toContain('setViewport(viewport, { duration: 300 })')
+  })
+
   it('the resume card slot is spent only on a card that can render, and only when opted in', () => {
     // Gated on settings.showResumeCard (default off) FIRST — a disabled card must not spend the
     // one-shot slot — then once per app run, only with a live stop, and never under the opaque

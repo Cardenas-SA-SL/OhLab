@@ -5,7 +5,8 @@ import {
   absolutePosition,
   isMeasured,
   nodeFitRect,
-  viewportForRect
+  viewportForRect,
+  viewportForRectInFrame
 } from './nodeFocus'
 import type { FocusableNode } from './nodeFocus'
 
@@ -145,6 +146,37 @@ describe('viewportForRect', () => {
 
   it('refuses to compute against a container it cannot size', () => {
     expect(viewportForRect({ x: 0, y: 0, width: 600, height: 400 }, 0, 0)).toBeNull()
+  })
+})
+
+describe('viewportForRectInFrame', () => {
+  // 1280×900 pane with a 340px sessions sidebar on the left: the chrome-free frame the solver
+  // hands over, in pane-local coordinates.
+  const frame = { left: 352, top: 12, right: 1268, bottom: 888 }
+
+  it('puts the node in the middle of the free frame, not of the whole pane', () => {
+    const rect = { x: 5000, y: 4000, width: 600, height: 400 }
+    const vp = viewportForRectInFrame(rect, frame)!
+    expect(vp.x + 5300 * vp.zoom).toBeCloseTo((frame.left + frame.right) / 2, 0)
+    expect(vp.y + 4200 * vp.zoom).toBeCloseTo((frame.top + frame.bottom) / 2, 0)
+    // And emphatically not at the canvas origin, which is where an empty fitView set lands the
+    // camera — the failure this whole path exists to make impossible.
+    expect(vp.x).not.toBeCloseTo((frame.left + frame.right) / 2, 0)
+  })
+
+  it('applies the same zoom clamp as every other framing path', () => {
+    expect(viewportForRectInFrame({ x: 0, y: 0, width: 8, height: 8 }, frame)!.zoom).toBe(
+      FIT_NODE_OPTIONS.maxZoom
+    )
+    expect(viewportForRectInFrame({ x: 0, y: 0, width: 90000, height: 90000 }, frame)!.zoom).toBe(
+      FIT_NODE_OPTIONS.minZoom
+    )
+  })
+
+  it('refuses a frame or a node it cannot size, so the camera stands still', () => {
+    const rect = { x: 0, y: 0, width: 600, height: 400 }
+    expect(viewportForRectInFrame(rect, { left: 10, top: 10, right: 10, bottom: 900 })).toBeNull()
+    expect(viewportForRectInFrame({ x: 0, y: 0, width: 0, height: 400 }, frame)).toBeNull()
   })
 })
 
