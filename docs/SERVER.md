@@ -537,8 +537,8 @@ transcript readers, the usage rows and the account pickers are all `src/core` �
 *lifecycle* was welded to `ipcMain`, so a browser-only deployment could pick an account it had no
 way to create (issue #313).
 
-- **The lifecycle is core.** `src/core/claude-accounts-service.ts` owns the four
-  `claude-accounts:*` channels (add / wait-login / cancel-wait / remove) and registers them
+- **The lifecycle is core.** `src/core/claude-accounts-service.ts` owns the five
+  `claude-accounts:*` channels (add / wait-login / cancel-wait / remove / link) and registers them
   through the platform seam, so **both shells serve them**: `src/main/claude-accounts.ts` is now a
   thin desktop wrapper, and `registerCoreHandlers` calls the same `registerClaudeAccountsIpc()`.
   The browser reaches them through a real `buildClaudeAccountsApi` in the ws-bridge instead of the
@@ -557,6 +557,12 @@ way to create (issue #313).
 - **No remote (SSH) accounts.** The Server Edition has no SSH-project manager, so an account
   context carrying a `projectId` takes the **local** path — the same degrade the desktop takes
   before its manager exists.
+- **"Link existing config dir…" is a path on the SERVER.** The handler `stat`s the directory and
+  writes into it (the account's `settings.json`, the managed status hook) as the **server user**,
+  wherever that user can reach — and a `~` typed in the browser expands to the **server's** home,
+  not the browser user's. That is the same rule every other path field on this edition follows
+  (the folder picker browses the server's disk), but it is worth saying out loud here, because the
+  dir a person is linking is usually one they created by hand and think of as "mine".
 
 ### Managed Codex accounts (S6)
 

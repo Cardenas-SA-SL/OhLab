@@ -248,7 +248,11 @@ import { codexUsageAccounts } from '../core/codex-accounts-core'
 import { codexHomeFor } from '../core/codex-config-dir'
 import { loadOrCreateNodeAuthSecret } from '../core/agents/node-auth-secret'
 import { initNodeTokens, refreshNodeTokens } from '../core/agents/node-token-service'
-import { claudeConfigDirFor } from '../core/claude-config-dir'
+import {
+  claudeConfigDirFor,
+  linkedClaudeConfigDirs,
+  registerClaudeAccountsSource
+} from '../core/claude-config-dir'
 import {
   isSafeLocalTranscriptPath,
   isSafeRemoteTranscriptPath,
@@ -1223,6 +1227,15 @@ app.whenReady().then(async () => {
   })
 
   settingsStore.init()
+  // The linked-account resolver's one source of truth on this shell. Registered as
+  // soon as settings exist — not down beside `initTranscriptIndex`, where the other account wiring
+  // sits — because EVERY config-dir resolution has to be able to see it, including the earliest:
+  // the mirror settings provider is a lazy callback and an agent-status flush can fire from the
+  // `claudeCliCaps()` probe before boot reaches that point. An unregistered source means "no
+  // linked accounts", so such a flush would advertise a managed dir that does not exist for a
+  // linked row, and the phone would launch under it. The Server Edition registers the identical
+  // getter at the same point in its own boot.
+  registerClaudeAccountsSource(() => settingsStore.get().claudeAccounts ?? [])
   const gatewayCredentials = new ModelGatewayCredentialService(
     new ElectronSecretStore(app.getPath('userData'), safeStorage, MODEL_GATEWAY_SECRET_FILE)
   )
@@ -2665,7 +2678,17 @@ app.whenReady().then(async () => {
     // so a relocated grok home would silently never resolve a context link. BOTH shells pass it
     // (invariant 11) — a jail widened in one shell only is a feature the Server Edition lacks with
     // nothing to say so.
-    return isSafeLocalTranscriptPath(abs, homedir(), app.getPath('userData'), codexHome(), grokHomeDir())
+    // Linked accounts' dirs come from SETTINGS, never from the POST — `<dir>/projects/**` only,
+    // so `~/.claude-2/.ssh` is as refused as it ever was. Without them the meter and the subagent
+    // cards silently never fill for a pane running the user's own CLAUDE_CONFIG_DIR.
+    return isSafeLocalTranscriptPath(
+      abs,
+      homedir(),
+      app.getPath('userData'),
+      codexHome(),
+      grokHomeDir(),
+      linkedClaudeConfigDirs()
+    )
       ? abs
       : undefined
   }

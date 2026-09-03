@@ -2326,3 +2326,80 @@ describe('hibernated flag (Eco × phone — SLEEPING on external readers)', () =
     expect(_snapshot().n1.hibernated).toBe(true)
   })
 })
+
+// ---- The observed Claude account (which account a RUNNING session is on) ---------------------
+//
+// For a HAND-LAUNCHED claude (a plain terminal running `CLAUDE_CONFIG_DIR=~/.claude-2 claude`)
+// the node's `data.accountId` is undefined forever, so this label is the only record of which
+// identity the pane is on. It therefore has to behave like `agentId`: captured off any event,
+// never cleared by one that lacks it, written to the file, and back after a restart.
+describe('MirrorEntry.account (observed Claude account)', () => {
+  const account = { configDir: '/home/u/.claude-2', accountId: 'linked-1', known: true }
+
+  it('is captured off ANY event kind, like agentId/sessionId', () => {
+    for (const kind of ['state', 'session', 'subagent-start', 'recurring'] as const) {
+      const e = reduceEntry(undefined, ev({ kind, state: 'working', account }), 1000)
+      expect(e.account, kind).toEqual(account)
+    }
+  })
+
+  it('survives events that carry no account, and is replaced by one that carries another', () => {
+    // A codex/gemini event, or a claude payload with no transcript_path, is not evidence that this
+    // node stopped being on the account it was last seen on.
+    const a = reduceEntry(undefined, ev({ kind: 'state', state: 'working', account }), 1000)
+    const b = reduceEntry(a, ev({ kind: 'state', state: 'done' }), 2000)
+    expect(b.account).toEqual(account)
+    const other = { configDir: '/home/u/.claude', accountId: null, known: true }
+    const c = reduceEntry(b, ev({ kind: 'state', state: 'working', account: other }), 3000)
+    expect(c.account).toEqual(other)
+  })
+
+  it('is written to the mirror file, and absent for a node that never posted one', () => {
+    const doc = buildFile(
+      {
+        n1: { state: 'working', agentId: 'claude', sessionId: 's1', account, updatedAt: 10 },
+        n2: { state: 'working', agentId: 'codex', sessionId: 's2', updatedAt: 10 }
+      },
+      10
+    )
+    expect(doc.nodes.n1.account).toEqual(account)
+    // Old file shape preserved byte-for-byte where there is nothing to say.
+    expect('account' in JSON.parse(JSON.stringify(doc)).nodes.n2).toBe(false)
+  })
+
+  it('comes back after a restart, and a malformed one does not', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-status-account-'))
+    try {
+      _resetForTest()
+      const file = path.join(dir, 'agent-status.json')
+      const now = Date.now()
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          v: 1,
+          updatedAt: now,
+          nodes: {
+            n1: { state: 'done', agentId: 'claude', account, updatedAt: now },
+            // Hand-edited / written by another build: a chip rendered off `{}` would read as "no
+            // account observed" while occupying the slot of one that was.
+            n2: { state: 'done', agentId: 'claude', account: {}, updatedAt: now },
+            n3: { state: 'done', agentId: 'claude', account: 'nope', updatedAt: now }
+          }
+        })
+      )
+      initAgentStatusMirror(file)
+      expect(_snapshot().n1?.account).toEqual(account)
+      expect(_snapshot().n2?.account).toBeUndefined()
+      expect(_snapshot().n3?.account).toBeUndefined()
+    } finally {
+      _resetForTest()
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('expires with its entry, like every other field on it', () => {
+    const now = EXPIRE_MS + 100_000
+    const doc = buildFile({ stale: { state: 'working', account, updatedAt: now - EXPIRE_MS - 1 } }, now)
+    expect(Object.keys(doc.nodes)).toEqual([])
+  })
+})
