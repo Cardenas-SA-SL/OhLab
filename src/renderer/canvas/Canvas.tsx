@@ -36,7 +36,7 @@ import {
   isSessionReady,
   subscribeSessionReady
 } from '../nodes/TerminalNode'
-import { solveFitFrame, solveFitPadding } from './fit-view'
+import { solveFitPadding } from './fit-view'
 import { FloatingEdge } from './FloatingEdge'
 import { MacWheelGestureRouter, trackpadRoutingEnabled } from './wheel-gesture'
 import { isBrowserRuntime } from '@renderer/bridge/runtime'
@@ -269,7 +269,6 @@ import {
   isMeasured,
   nodeFitRect,
   viewportForRect,
-  viewportForRectClearOf,
   type FocusableNode
 } from '../lib/nodeFocus'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
@@ -6674,16 +6673,10 @@ export function Canvas() {
       // teleporting the user to the origin, which is the failure this whole path exists for.
       if (!rect || !wrap) return
       const box = wrap.getBoundingClientRect()
-      // `focusZoomToNode` off: keep the zoom the user settled on and only pan. The node is still
-      // centred and still kept clear of the chrome — only the rescale is dropped.
+      // `focusZoomToNode` off: keep the zoom the user settled on and only pan — the node still
+      // lands in the middle, only the rescale is dropped.
       const keepZoom = useSettings.getState().settings.focusZoomToNode ? undefined : getZoom()
-      const viewport = viewportForRectClearOf(
-        rect,
-        box.width,
-        box.height,
-        solveFitFrame(wrap, rect.width, rect.height),
-        keepZoom
-      )
+      const viewport = viewportForRect(rect, box.width, box.height, keepZoom)
       if (viewport) void setViewport(viewport, { duration: 300 })
     },
     [setViewport, getInternalNode, getZoom]

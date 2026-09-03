@@ -93,6 +93,14 @@ export function nodeFitRect(node: FocusableNode, all: readonly FocusableNode[]):
  * The viewport that frames `rect` in a `containerWidth × containerHeight` pane, with the same
  * padding/zoom clamp `fitView` would have applied. Null when the container has no size yet.
  *
+ * **Centred in the pane, and nothing else.** Framing a focused node against the chrome-free
+ * rectangle instead — centred in it, or centred in the pane and then nudged clear of it — was tried
+ * twice and is wrong both ways: the sessions sidebar is a 300px OVERLAY, so either rule pushes the
+ * node right by most of its width, and "go to node" stops putting the node where the eye is. The
+ * couple of dozen pixels of a node that end up behind the sidebar cost far less than that. The
+ * free-rect solve stays where it earns its keep, in `fitAll`, which fits EVERY node and would
+ * otherwise tuck them under the dock.
+ *
  * `zoom` keeps the camera at a scale the caller already has (`settings.focusZoomToNode` off): the
  * node is centred exactly as it would be, at that zoom, so "go to" stays a pan. It is passed
  * through UNCLAMPED — it is a zoom the canvas is already displaying, and re-clamping it to the
@@ -121,54 +129,6 @@ export function viewportForRect(
     FIT_NODE_OPTIONS.maxZoom,
     FIT_NODE_OPTIONS.padding
   )
-}
-
-/** A rectangle inside the flow pane, in the pane's OWN coordinates (0,0 = its top-left) — the
- *  chrome-free area a node should be framed into. Structurally the `FitRect` of `canvas/fit-view`,
- *  restated here so this module stays free of anything that touches the DOM. */
-export interface FitFrame {
-  left: number
-  top: number
-  right: number
-  bottom: number
-}
-
-/** The shift that brings a `size`-long span starting at `start` inside `[lo, hi]`, or 0 when it
- *  is already inside — or too long to fit, where any shift trades one clipped edge for the other. */
-function shiftInto(start: number, size: number, lo: number, hi: number): number {
-  if (size >= hi - lo) return 0
-  if (start < lo) return lo - start
-  if (start + size > hi) return hi - (start + size)
-  return 0
-}
-
-/**
- * `viewportForRect`, then the SMALLEST nudge that keeps the node clear of the floating chrome.
- *
- * "Go to node" means putting the node in front of the user, and the middle of the screen is where
- * that is: a node centred in the chrome-free rectangle instead reads as off to one side on a wide
- * display (the free rect is whatever the dock and the sidebar leave over, not the eye's centre) and
- * as half off-screen on a small one. So the centred answer stands, and the frame only pulls it back
- * when it would otherwise slide under a panel — usually the sessions sidebar the click came from.
- * A node too large to fit the frame is left centred: any shift there only swaps which edge is
- * covered. `frame` null (nothing sensible to solve) ⇒ the plain centred answer.
- */
-export function viewportForRectClearOf(
-  rect: Rect,
-  containerWidth: number,
-  containerHeight: number,
-  frame: FitFrame | null,
-  zoom?: number
-): Viewport | null {
-  const centred = viewportForRect(rect, containerWidth, containerHeight, zoom)
-  if (!centred || !frame) return centred
-  const width = rect.width * centred.zoom
-  const height = rect.height * centred.zoom
-  return {
-    zoom: centred.zoom,
-    x: centred.x + shiftInto(centred.x + rect.x * centred.zoom, width, frame.left, frame.right),
-    y: centred.y + shiftInto(centred.y + rect.y * centred.zoom, height, frame.top, frame.bottom)
-  }
 }
 
 /** Whether React Flow already knows this node's on-screen size — i.e. whether `fitView` will

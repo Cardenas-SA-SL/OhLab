@@ -5,8 +5,7 @@ import {
   absolutePosition,
   isMeasured,
   nodeFitRect,
-  viewportForRect,
-  viewportForRectClearOf
+  viewportForRect
 } from './nodeFocus'
 import type { FocusableNode } from './nodeFocus'
 
@@ -149,48 +148,26 @@ describe('viewportForRect', () => {
   })
 })
 
-describe('viewportForRectClearOf', () => {
+describe('viewportForRect — the framing "go to node" applies', () => {
   const rect = { x: 5000, y: 4000, width: 600, height: 400 }
-  // A sessions sidebar on the left, as the free-rect solver reports it: pane-local coordinates.
-  const sidebar = (left: number, paneW: number, paneH: number) => ({
-    left,
-    top: 12,
-    right: paneW - 12,
-    bottom: paneH - 12
-  })
 
-  it('centres the node in the SCREEN, not in the chrome-free rectangle', () => {
-    // The regression this pins: framing a node in the middle of the free rect reads as "too far
-    // right" on a wide display — the free rect is whatever the dock and the sidebar leave over,
-    // which is not where the eye looks. On an ultrawide the centred node clears the chrome by
-    // itself, so the answer must be the plain centred one.
-    const vp = viewportForRectClearOf(rect, 3440, 1400, sidebar(352, 3440, 1400))!
-    expect(vp).toEqual(viewportForRect(rect, 3440, 1400))
-    expect(vp.x + 5300 * vp.zoom).toBeCloseTo(1720, 0)
-    expect(vp.y + 4200 * vp.zoom).toBeCloseTo(700, 0)
-  })
-
-  it('nudges just enough to clear a panel the centred node would slide under', () => {
-    const frame = sidebar(500, 1440, 900)
-    const vp = viewportForRectClearOf(rect, 1440, 900, frame)!
-    const centred = viewportForRect(rect, 1440, 900)!
-    // Flush against the panel — moved, and no further than it had to be.
-    expect(vp.x + rect.x * vp.zoom).toBeCloseTo(frame.left, 0)
-    expect(vp.x).toBeGreaterThan(centred.x)
-    // The zoom and the other axis are untouched: this is a nudge, not a second framing.
-    expect(vp.zoom).toBe(centred.zoom)
-    expect(vp.y).toBe(centred.y)
-  })
-
-  it('leaves a node too large for the frame centred — a shift only swaps the covered edge', () => {
-    const vp = viewportForRectClearOf(rect, 1440, 900, { left: 600, top: 12, right: 900, bottom: 888 })
-    expect(vp).toEqual(viewportForRect(rect, 1440, 900))
+  it('centres the node in the pane, whatever chrome floats over it', () => {
+    // Twice-reported regression: framing against the chrome-free rectangle — centred in it, or
+    // centred in the pane and then nudged clear of it — pushes the node right by most of its width,
+    // because the sessions sidebar is a 300px OVERLAY and it is open exactly when this is used.
+    // "Go to node" puts the node where the eye is; the free-rect solve belongs to fitAll.
+    const wide = viewportForRect(rect, 3440, 1400)!
+    expect(wide.x + 5300 * wide.zoom).toBeCloseTo(1720, 0)
+    expect(wide.y + 4200 * wide.zoom).toBeCloseTo(700, 0)
+    const laptop = viewportForRect(rect, 1440, 900)!
+    expect(laptop.x + 5300 * laptop.zoom).toBeCloseTo(720, 0)
+    expect(laptop.y + 4200 * laptop.zoom).toBeCloseTo(450, 0)
   })
 
   it('keeps a given zoom and only pans (settings.focusZoomToNode off)', () => {
     // The point of the option: a user who settled on a zoom level loses their sense of place when
-    // a jump also rescales the canvas. The node is still centred, and still nudged clear of chrome.
-    const vp = viewportForRectClearOf(rect, 1440, 900, sidebar(352, 1440, 900), 0.5)!
+    // a jump also rescales the canvas. The node is still centred.
+    const vp = viewportForRect(rect, 1440, 900, 0.5)!
     expect(vp.zoom).toBe(0.5)
     expect(vp.x + 5300 * 0.5).toBeCloseTo(720, 0)
     expect(vp.y + 4200 * 0.5).toBeCloseTo(450, 0)
@@ -199,14 +176,9 @@ describe('viewportForRectClearOf', () => {
   it('passes an out-of-framing-range zoom through — it is one the canvas already shows', () => {
     // Re-clamping to FIT_NODE_OPTIONS would rescale the very view this option exists to leave
     // alone; the canvas's own limits already bound what getZoom() can return.
-    expect(viewportForRectClearOf(rect, 1440, 900, null, 1.9)!.zoom).toBe(1.9)
-    expect(viewportForRectClearOf(rect, 1440, 900, null, 0.1)!.zoom).toBe(0.1)
-    expect(viewportForRectClearOf(rect, 1440, 900, null, 0)).toBeNull()
-  })
-
-  it('is the plain centred answer when there is no frame to solve', () => {
-    expect(viewportForRectClearOf(rect, 1440, 900, null)).toEqual(viewportForRect(rect, 1440, 900))
-    expect(viewportForRectClearOf(rect, 0, 0, sidebar(352, 1440, 900))).toBeNull()
+    expect(viewportForRect(rect, 1440, 900, 1.9)!.zoom).toBe(1.9)
+    expect(viewportForRect(rect, 1440, 900, 0.1)!.zoom).toBe(0.1)
+    expect(viewportForRect(rect, 1440, 900, 0)).toBeNull()
   })
 })
 

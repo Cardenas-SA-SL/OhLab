@@ -170,14 +170,16 @@ describe('breadcrumb wiring the CLAUDE.md bullet calls load-bearing', () => {
     expect(frame).toContain('setViewport(viewport, { duration: 300 })')
   })
 
-  it('frames the node in the SCREEN, honouring the keep-my-zoom setting', () => {
-    // Centring in the chrome-free rect instead read as "too far right" on a wide display and as
-    // half off-screen on a laptop; `viewportForRectClearOf` centres in the pane and only nudges.
+  it('centres the node in the pane and never solves chrome around it', () => {
+    // Framing a single focused node against the chrome-free rectangle was reported wrong twice
+    // ("too far right", "not in the middle"): the sessions sidebar is a 300px overlay and it is
+    // open exactly when this is used. The free-rect solve stays in fitAll, which fits every node.
     const frame = CANVAS_SRC.slice(
       CANVAS_SRC.indexOf('const frameNode = useCallback'),
       CANVAS_SRC.indexOf('const goToNode = useCallback')
     )
-    expect(frame).toContain('viewportForRectClearOf(')
+    expect(frame).toContain('viewportForRect(rect, box.width, box.height, keepZoom)')
+    expect(frame).not.toContain('solveFitFrame')
     expect(frame).toContain('settings.focusZoomToNode ? undefined : getZoom()')
   })
 

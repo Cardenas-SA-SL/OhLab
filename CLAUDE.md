@@ -2704,13 +2704,15 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   when it has one (`getInternalNode` — `measured` reaches OUR node objects one render later via
   `onNodesChange`, and `internals.positionAbsolute` also accounts for `extent:'parent'` clamping),
   else `nodeFitRect` from the PERSISTED size, resolving the group-parent chain. Then
-  `viewportForRectClearOf`: **centred in the SCREEN**, and only nudged — by the smallest amount
-  that works — when the centred node would slide under the floating chrome (the chrome-free frame
-  comes from `solveFitFrame`, pane-local, the same solve `fitAll`'s padding is expressed through).
-  Centring in that FRAME instead was tried and is wrong: the free rect is whatever the dock and the
-  sidebar leave over, not where the eye looks, so a node landed too far right on an ultrawide and
-  half off-screen on a laptop. A node too large for the frame is left centred — a shift there only
-  swaps which edge is covered. Unknowable size or no pane ⇒ the camera **stands still**.
+  `viewportForRect`: **centred in the pane, and nothing else.** Framing a single focused node
+  against the chrome-free rectangle was tried twice and is wrong both ways — centred IN that rect
+  ("too far right on an ultrawide, half off-screen on a laptop") and centred in the pane then
+  nudged clear of it ("still not in the middle") — because `.sessions-sidebar` is a 300px absolute
+  OVERLAY and it is open exactly when this feature is used, so either rule pushes the node right by
+  most of its width. The couple of dozen pixels that end up behind the sidebar cost far less than
+  losing the centre. The free-rect solve (`solveFitFrame` / `solveFitPadding`) stays where it earns
+  its keep: `fitAll`, which fits EVERY node and would otherwise tuck them under the dock.
+  Unknowable size or no pane ⇒ the camera **stands still**.
   `settings.focusZoomToNode` (Behavior, default ON) is the escape hatch for the rescale: off, the
   camera keeps the zoom `getZoom()` reports and only pans, and that zoom is passed through
   **unclamped** — it is one the canvas is already displaying, and re-clamping it to the framing
