@@ -145,7 +145,10 @@ describe('the --project targeted-opens block (source pins)', () => {
   it('the store path persists (writeDisk) and states the cold-open contract in the reply', () => {
     const body = targetedOpensBody()
     expect(body).toContain('writeDisk()')
-    expect(body).toContain('starts when that project is next viewed')
+    // The sentence itself now lives in the ONE builder both cold-open sites share
+    // (lib/coldOpen `coldOpenMessage`, whose wording is pinned in coldOpen.test.ts) — this leg
+    // must reach it rather than re-typing a second phrasing for the same outcome.
+    expect(body).toMatch(/message: coldOpenMessage\(/)
   })
 
   it('the caller’s OWN project id falls through to the legacy path (B3a) — no return on that leg', () => {

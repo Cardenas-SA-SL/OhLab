@@ -129,6 +129,49 @@ export function needsLiveCanvas(verb: string): boolean {
 }
 
 /**
+ * Verbs that CREATE a session and can therefore be answered by writing into the owning project's
+ * SERIALIZED nodes instead of activating its tab.
+ *
+ * The relationship to `STORE_ANSWERED_VERBS` is the whole point, and the two sets are disjoint
+ * (pinned in `controlRouting.test.ts`):
+ *
+ *   - `STORE_ANSWERED_VERBS` — "no canvas is needed at either end". `list` reads names, `send`/
+ *     `reply` deliver into a tmux PANE, `sticky` rewrites a note, `open-project` acts on the
+ *     projects store. `needsLiveCanvas` is false for them and they never route at all.
+ *   - `COLD_OPENABLE_VERBS` — "a canvas IS needed, but the serialized one will do". The node these
+ *     verbs create is INERT until its project is next shown: the launch command moves into
+ *     `pendingLaunch` (`armForColdOpen`), the node is upserted through `applyNodeMutation`, and the
+ *     project's own mount path spawns the PTY and fires the armed launch. `needsLiveCanvas` stays
+ *     TRUE for them — they do need a canvas — which is exactly why this is a second, narrower set
+ *     rather than four more entries in the first one.
+ *
+ * WHY (the bug): routing is by SOURCE, so `open-claude` from an agent in a project the user is not
+ * looking at travelled the user's view to that project — the camera jumped, the tab switched and
+ * the target project's saved viewport was applied, all on a background agent's say-so. That is the
+ * same G5 hijack `send`/`reply`/`sticky` are declared here to avoid; the difference is only that an
+ * open needs somewhere to put the node, and a project's serialized nodes are somewhere.
+ *
+ * Deliberately NOT here: every verb that acts on nodes that already exist (`write`, `close`,
+ * `group`, `move`, `arrange`, `align`, `verify`, `spawn-team`, `open-worktree`, `open-browser`,
+ * `show-*`). They read live canvas state — measured node sizes, worktree staleness, the React Flow
+ * edge arrays — that the serialized copy does not carry, so they keep travelling.
+ */
+const COLD_OPENABLE_VERBS: ReadonlySet<string> = new Set([
+  'open-terminal',
+  'open-claude',
+  'open-agent'
+])
+
+export function canColdOpen(verb: string): boolean {
+  return COLD_OPENABLE_VERBS.has(verb)
+}
+
+/** Test-only view of the two sets, so their disjointness can be asserted rather than eyeballed. */
+export function controlVerbSetsForTests(): { storeAnswered: string[]; coldOpenable: string[] } {
+  return { storeAnswered: [...STORE_ANSWERED_VERBS], coldOpenable: [...COLD_OPENABLE_VERBS] }
+}
+
+/**
  * The capability half of the guard: may a session in this node drive the canvas?
  *
  * Plain terminals are not agent nodes. Treating missing identity as Claude made a bare shell look

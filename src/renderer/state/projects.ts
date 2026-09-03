@@ -19,6 +19,9 @@ import { recordCapabilityAck, type CapabilityAnswer } from '@shared/project-capa
 import { applyCanvasMutation, createProject, reorderGroupWithinParent } from './workspace'
 import { markWorkspaceDirty } from './workspaceDirty'
 import { folderName } from '../lib/projectOpen'
+// One order-independent key for an edge's endpoints — the SAME rule `hiddenLinkIds` uses, so a
+// rope and the bridge it covers are recognized as one relationship here too.
+import { pairKey as bridgePairKey } from '../lib/noteLink'
 
 interface ProjectsState {
   projects: Project[]
@@ -106,6 +109,15 @@ interface ProjectsState {
     bridges?: BridgeLink[],
     ropes?: BridgeLink[]
   ): void
+  /**
+   * Appends context bridges / control ropes to a project that is loaded but NOT active — the edge
+   * counterpart of `applyNodeMutation`, and for the same reason: React Flow holds only the active
+   * project's edges, so a cold open (canvas control's `open-*` answered out of the store) has
+   * nowhere else to put the opener's rope and the fan-in bridge it owes. Deduped by edge id AND by
+   * endpoint pair, since `planBridges` mints `bridge-<source>-<target>` while a rope is
+   * `ctrl-<source>-<target>` — two ids, one relationship each. No-op for an unknown project.
+   */
+  appendCanvasLinks(projectId: string, links: { bridges?: BridgeLink[]; ropes?: BridgeLink[] }): void
   /**
    * Applies ONE peer canvas mutation to a project's serialized nodes — the path for a project
    * that is loaded but NOT active (React Flow only holds the active project's nodes). Returns
@@ -453,6 +465,30 @@ export const useProjects = create<ProjectsState>((set, get) => ({
       projects: s.projects.map((p) =>
         p.id === id
           ? { ...p, nodes, viewport, ...(bridges ? { bridges } : {}), ...(ropes ? { ropes } : {}) }
+          : p
+      )
+    }))
+  },
+
+  appendCanvasLinks(projectId, links) {
+    const add = (existing: BridgeLink[] | undefined, incoming: BridgeLink[] | undefined) => {
+      if (!incoming?.length) return existing
+      const kept = existing ?? []
+      const seenId = new Set(kept.map((e) => e.id))
+      const seenPair = new Set(kept.map((e) => bridgePairKey(e.source, e.target)))
+      const fresh = incoming.filter((e) => {
+        const pair = bridgePairKey(e.source, e.target)
+        if (seenId.has(e.id) || seenPair.has(pair)) return false
+        seenId.add(e.id)
+        seenPair.add(pair)
+        return true
+      })
+      return fresh.length ? [...kept, ...fresh] : existing
+    }
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === projectId
+          ? { ...p, bridges: add(p.bridges, links.bridges), ropes: add(p.ropes, links.ropes) }
           : p
       )
     }))

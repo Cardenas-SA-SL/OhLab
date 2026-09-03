@@ -246,11 +246,24 @@ import { useWebviewKeepAlive } from '../state/webviewKeepAlive'
 import {
   routeControlSource,
   needsLiveCanvas,
+  canColdOpen,
   sourceIsControlCapable,
   storedNodeListing,
   answerBrowserResolve,
   type BrowserResolveProject
 } from '../lib/controlRouting'
+import {
+  coldGroupCwd,
+  coldGroupChildCount,
+  coldOpenMessage,
+  coldPlaceBelow,
+  coldResolveAfter,
+  coldResolveGroup,
+  groupSizeFor,
+  groupSlot,
+  storedAgentIdOf,
+  type ColdNode
+} from '../lib/coldOpen'
 import { applyStickyWrite, parseStickyArgs, resolveStickyRef } from '@shared/sticky-write'
 import {
   unavailableRecovery,
@@ -452,6 +465,7 @@ import { useEntitlement } from '../state/entitlement'
 import type { SshServer } from '@shared/ssh'
 import { sshHostKey } from '@shared/ssh'
 import type {
+  BridgeLink,
   CanvasNodeState,
   ClosedSessionEntry,
   NodeKind,
@@ -9151,9 +9165,10 @@ export function Canvas() {
           void writeDisk()
           reply({
             ok: true,
-            message:
-              `opened ${tgCount} ${tgWhat} session(s) in "${target.name}" (${tgIds.join(', ')}) — ` +
-              'queued; starts when that project is next viewed',
+            // ONE sentence for "queued into a project you are not looking at", shared with the
+            // own-project cold open below (lib/coldOpen) so an orchestrator never meets two
+            // phrasings for one outcome.
+            message: coldOpenMessage(tgCount, tgWhat, target.name, tgIds),
             // Every node on this branch is armed by `armForColdOpen`, so the whole batch is
             // QUEUED. Said in the reply as a field, not only in the sentence, so an orchestrator
             // does not have to report a session as started when it is not (#569 item 1).
@@ -9286,6 +9301,280 @@ export function Canvas() {
             })
             return
           }
+          // ── COLD OPEN ───────────────────────────────────────────────────────────────────
+          // An OPEN verb whose own project is not on screen is answered out of that project's
+          // SERIALIZED nodes instead of travelling to it. Travelling here was a screen hijack: the
+          // user is looking at project B, an agent in project A runs `open-claude`, and the tab
+          // switches while A's saved viewport is applied — the camera appears to jump and zoom, on
+          // a background agent's say-so (present since cecb4dfe, v0.2.43). It is the G5 rule
+          // `send`/`reply`/`sticky`/`open-project` already state, one set wider: see
+          // `canColdOpen` in lib/controlRouting for how the two sets differ.
+          //
+          // This is the `--project` path (issue #338 spec §2.2) applied to an open that did NOT
+          // pass `--project`, and it is deliberately the same mechanism: MOVE the composed launch
+          // into `pendingLaunch` (`armForColdOpen` — `initialCommand` is never serialized, so a
+          // command left there would be silently dropped), upsert through `applyNodeMutation`,
+          // persist with `writeDisk`, and say in the reply that the session starts when that
+          // project is next viewed.
+          //
+          // `reopen` (a CLOSED project) takes this branch too, and does NOT reopen the tab. Closing
+          // is the user's explicit "park this, keep it running"; restoring the tab AND activating
+          // it is the loudest version of exactly the hijack this fixes, and refusing would undo
+          // what cecb4dfe fixed (an agent in another project must be ANSWERED). The node is
+          // persisted with the project, and the reply names the closure so a caller does not report
+          // a session as started.
+          if (canColdOpen(verb)) {
+            const coldStore = useProjects.getState()
+            const owner = coldStore.getProject(route.projectId)
+            const coldSrc = owner?.nodes.find((n) => n.id === sourceNodeId)
+            // Same authorization boundary and same sentence as every other path — a stored node
+            // carries the agent id the live one would (`data.agentId` is serialized).
+            if (!owner || !coldSrc || !sourceIsControlCapable(coldSrc.agentId)) {
+              reply({ ok: false, error: 'source node is not a control-capable agent' })
+              return
+            }
+            const coldNodes = owner.nodes as unknown as ColdNode[]
+            const coldSrcNode = coldSrc as unknown as ColdNode
+            const coldTerminal = verb === 'open-terminal'
+            const coldAgentId = (verb === 'open-agent' ? args.agent : 'claude') as AgentId
+            const coldCount = Math.max(
+              1,
+              Math.min(coldTerminal ? 8 : 5, parseInt(args.count || '1', 10) || 1)
+            )
+            // `--group` / `--after` name ids INSIDE this project, which is the caller's own — the
+            // reason `--project` refuses both (spec §2.2) does not apply here, so both are resolved
+            // against the serialized nodes rather than declined.
+            const coldGroup = coldResolveGroup(coldNodes, args.group, verb)
+            if (!coldGroup.ok) {
+              reply({ ok: false, error: coldGroup.error })
+              return
+            }
+            const coldStatusAgent = (id: string): string | undefined =>
+              useAgentStatus.getState().byId[id]?.agentId
+            const coldAfter = coldResolveAfter(
+              coldNodes,
+              args.after,
+              verb,
+              (a) => hasHooks(a as AgentId),
+              coldStatusAgent
+            )
+            if (!coldAfter.ok) {
+              reply({ ok: false, error: coldAfter.error })
+              return
+            }
+            const coldAfterIds = coldAfter.after ?? []
+            const coldCwd =
+              args.cwd || coldGroupCwd(coldNodes, coldGroup.groupId, !!owner.ssh) || coldSrc.cwd
+            // Same SSH rule as the live path: a node an agent opens has to run on the same host the
+            // agent runs on, and the effective cwd rides `remoteCwd` or the factory replaces it.
+            const coldSsh = nodeSshFor(owner.ssh, coldCwd)
+            const coldPromptFile = (args['prompt-file'] ?? '').trim() || undefined
+            if (!coldTerminal && coldPromptFile && args.prompt) {
+              reply({ ok: false, error: `${verb}: pass either --prompt or --prompt-file, not both` })
+              return
+            }
+            if (!coldTerminal && coldPromptFile) {
+              const pfErr = promptFilePathError(coldPromptFile)
+              if (pfErr) {
+                reply({ ok: false, error: `${verb}: --prompt-file ${pfErr}` })
+                return
+              }
+              // Read from the filesystem the NODE will read it from (the host's on an SSH project).
+              // Fails OPEN like the live path: a check that itself errors must not refuse an open.
+              const pfFs = owner.ssh ? sshFs(owner.id) : api.fs
+              const pfExists = await pfFs.exists(coldPromptFile).catch(() => true)
+              if (!pfExists) {
+                reply({ ok: false, error: `${verb}: --prompt-file not found: ${coldPromptFile}` })
+                return
+              }
+            }
+            if (dryRun) {
+              if (!coldTerminal) {
+                const dryKnownAgent =
+                  !!agentConfig(coldAgentId) ||
+                  useSettings.getState().settings.customAgents.some((c) => c.id === coldAgentId)
+                if (!dryKnownAgent) {
+                  reply({
+                    ok: false,
+                    error: `${verb}: unknown agent "${coldAgentId}" — pass a builtin id or a custom agent id from Settings`
+                  })
+                  return
+                }
+              }
+              reply({
+                ok: true,
+                message: [
+                  DRY_RUN_PREFIX,
+                  `${verb} would open ${coldCount} ${coldTerminal ? 'terminal' : coldAgentId} session(s)` +
+                    ` in "${owner.name}"` +
+                    (coldGroup.groupId ? ` in group ${coldGroup.groupId}` : '') +
+                    (coldCwd ? `, cwd ${coldCwd}` : ''),
+                  ...(coldAfterIds.length ? [`armed to wait for: ${coldAfterIds.join(', ')}`] : []),
+                  'That project is not on screen, so the session(s) would be queued and start when it is next viewed.'
+                ].join('\n'),
+                result: {
+                  dryRun: true,
+                  count: coldCount,
+                  group: coldGroup.groupId ?? null,
+                  cwd: coldCwd ?? null,
+                  after: coldAfterIds,
+                  projectId: owner.id
+                }
+              })
+              return
+            }
+            // Defaults come from the OWNING project — its default account, its permission mode, its
+            // `.nodeterm/settings.json` launch override. `activePermissionMode` would read the
+            // project the user happens to be looking at, which is not the one this node runs in.
+            const coldAccount = coldTerminal
+              ? undefined
+              : resolveNewNodeAccount(
+                  coldSrc.accountId,
+                  owner,
+                  useSettings.getState().settings.claudeAccounts
+                )
+            const coldMode = coldTerminal ? undefined : projectPermissionMode(owner, coldAgentId)
+            const coldExistingInGroup = coldGroup.groupId
+              ? coldGroupChildCount(coldNodes, coldGroup.groupId)
+              : 0
+            const coldMade: CanvasNode[] = []
+            for (let i = 0; i < coldCount; i++) {
+              const built = coldTerminal
+                ? createTerminalNode(
+                    coldNodes.length + i,
+                    coldCwd,
+                    coldPlaceBelow(coldNodes, coldSrcNode, i),
+                    args.cmd,
+                    coldSsh
+                  )
+                : createAgentNode(
+                    coldAgentId,
+                    coldNodes.length + i,
+                    coldCwd,
+                    coldPlaceBelow(coldNodes, coldSrcNode, i),
+                    args.prompt,
+                    coldSsh,
+                    coldAccount,
+                    coldMode,
+                    owner.id,
+                    args.model,
+                    coldPromptFile
+                  )
+              // Arm it: the project is not mounted, so nothing would deliver an `initialCommand`
+              // and serialization drops it. `--after` rides the same held launch — an empty `after`
+              // is vacuously ready, so a node with no deps fires on that project's first view.
+              const armed = armForColdOpen(built)
+              const held = armed.data.pendingLaunch as PendingLaunch | undefined
+              const node =
+                held && coldAfterIds.length
+                  ? {
+                      ...armed,
+                      data: { ...armed.data, pendingLaunch: { ...held, after: coldAfterIds } }
+                    }
+                  : armed
+              if (coldGroup.groupId) {
+                const w = (node.width as number) ?? 600
+                const h = (node.height as number) ?? 400
+                node.position = groupSlot(coldExistingInGroup + i, w, h)
+                node.parentId = coldGroup.groupId
+                node.extent = 'parent'
+              }
+              coldMade.push(node)
+            }
+            // Grow the frame BEFORE the children land, exactly as `addGrouped` does — `extent:
+            // 'parent'` clamps a child that falls outside it.
+            if (coldGroup.groupId) {
+              const frame = owner.nodes.find((n) => n.id === coldGroup.groupId)
+              if (frame) {
+                const w = (coldMade[0]?.width as number) ?? 600
+                const h = (coldMade[0]?.height as number) ?? 400
+                const need = groupSizeFor(coldExistingInGroup + coldCount, w, h)
+                coldStore.applyNodeMutation(owner.id, {
+                  op: 'upsert',
+                  node: {
+                    ...frame,
+                    size: {
+                      width: Math.max(frame.size?.width ?? 0, need.width),
+                      height: Math.max(frame.size?.height ?? 0, need.height)
+                    }
+                  }
+                })
+              }
+            }
+            for (const node of coldMade) {
+              coldStore.applyNodeMutation(owner.id, {
+                op: 'upsert',
+                node: flowToNodeStates([node])[0]
+              })
+            }
+            const coldIds = coldMade.map((n) => n.id)
+            // The lineage rope and the fan-in bridge are what an orchestrator LOSES if a cold open
+            // only writes nodes — a spawned team it cannot read back is the write-only fan-out the
+            // `link` work existed to end. `appendCanvasLinks` is the edge counterpart of
+            // `applyNodeMutation`. The `--after` dep ropes are deliberately NOT written here:
+            // `missingDepRopes` mints them at that project's load, which is the first moment the
+            // armed node is on screen to need one.
+            const coldRopes = coldIds.map((id) => ({
+              id: `ctrl-${sourceNodeId}-${id}`,
+              source: sourceNodeId,
+              target: id
+            }))
+            const coldEndpoint = (id: string): LinkEndpoint | null => {
+              if (coldIds.includes(id)) {
+                return { kind: 'terminal', contextCapable: canContextLink(coldAgentId) }
+              }
+              const n = coldNodes.find((x) => x.id === id)
+              if (!n) return null
+              const a = storedAgentIdOf(n, coldStatusAgent)
+              return {
+                kind: n.kind ?? 'terminal',
+                contextCapable: !!a && canContextLink(a as AgentId)
+              }
+            }
+            const coldExistingBridges = [...(owner.bridges ?? [])]
+            const coldPlan = coldTerminal
+              ? { edges: [] as BridgeLink[], linked: [] as string[] }
+              : planBridges(sourceNodeId, coldIds, coldEndpoint, coldExistingBridges)
+            const coldDepPlans = coldTerminal
+              ? []
+              : coldIds.map((nid) =>
+                  planBridges(nid, coldAfterIds, coldEndpoint, [
+                    ...coldExistingBridges,
+                    ...coldPlan.edges
+                  ])
+                )
+            const coldBridges = [...coldPlan.edges, ...coldDepPlans.flatMap((p) => p.edges)]
+            coldStore.appendCanvasLinks(owner.id, { bridges: coldBridges, ropes: coldRopes })
+            void writeDisk()
+            const coldWhat = coldTerminal ? 'terminal' : coldAgentId
+            const coldDepLinked = coldDepPlans.flatMap((p) => p.linked)
+            reply({
+              ok: true,
+              message:
+                coldOpenMessage(coldCount, coldWhat, owner.name, coldIds, {
+                  closed: route.kind === 'reopen'
+                }) +
+                (coldPlan.linked.length
+                  ? `\ncontext-linked to you: ${coldPlan.linked.join(', ')}`
+                  : '') +
+                (coldAfterIds.length
+                  ? `\nwaiting for ${coldAfterIds.join(', ')} before running` +
+                    (coldDepLinked.length ? ' (and linked to read them)' : '')
+                  : ''),
+              // Every node on this branch has no process behind it until that project is viewed,
+              // whether or not it holds a command — the same rule the `--project` branch states.
+              result: {
+                ids: coldIds,
+                id: coldIds[0],
+                projectId: owner.id,
+                linked: coldPlan.linked,
+                after: coldAfterIds,
+                queued: true,
+                queuedIds: coldIds
+              }
+            })
+            return
+          }
           travelToProjectRef.current(route.projectId)
         }
         // Wait for the node to show up on the canvas: after a travel, because the active-project
@@ -9397,21 +9686,9 @@ export function Canvas() {
       }
       // Grid slots INSIDE a group frame (open-agent --group): 2 columns of terminal-sized
       // cells under the header. Pure geometry — the frame is grown to fit before children land.
-      const GROUP_PAD_X = 24
-      const GROUP_PAD_TOP = 56
-      const GROUP_GAP = 24
-      const groupSlot = (slot: number, w: number, h: number) => ({
-        x: GROUP_PAD_X + (slot % 2) * (w + GROUP_GAP),
-        y: GROUP_PAD_TOP + Math.floor(slot / 2) * (h + GROUP_GAP)
-      })
-      const groupSizeFor = (children: number, w: number, h: number) => {
-        const cols = Math.min(2, Math.max(1, children))
-        const rows = Math.max(1, Math.ceil(children / 2))
-        return {
-          width: GROUP_PAD_X * 2 + cols * w + (cols - 1) * GROUP_GAP,
-          height: GROUP_PAD_TOP + rows * h + (rows - 1) * GROUP_GAP + GROUP_PAD_X
-        }
-      }
+      // `groupSlot`/`groupSizeFor` live in lib/coldOpen so the COLD path (an open answered out of a
+      // non-active project's serialized nodes) lands children on the identical grid; two copies of
+      // this arithmetic would be two layouts.
       // Validate `--group` (open-terminal / open-claude / open-agent): must name an existing
       // group frame. Returns its id, or null with the error already replied.
       const resolveIntoGroup = (): string | null | undefined => {

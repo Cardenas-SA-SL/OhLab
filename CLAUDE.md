@@ -1733,6 +1733,37 @@ else, and its context links must keep classifying across restarts).
   **A new verb must not DEPEND on the fix**: the shim is rewritten locally every app boot but onto
   an SSH host only inside `RemoteHooks.setup()` (on connect), so an already-connected project keeps
   the old loop with no signal on the wire. Give every flag a value and both loops agree.
+  **WHICH CANVAS ANSWERS, and why an open never moves the camera** (`renderer/lib/controlRouting.ts`
+  + `renderer/lib/coldOpen.ts`). React Flow holds only the ACTIVE project's nodes, but every other
+  open project's tmux sessions keep running, so a control call routinely arrives from a node the
+  live canvas has never heard of. `routeControlSource` resolves the OWNING project
+  (`active | switch | reopen | blocked | unknown`) — before that, every agent outside the project
+  the app happened to come up on was rejected as *"source node is not a control-capable agent"*,
+  which is a capability sentence for a routing failure. **That fix must not regress.** What it
+  originally did with the answer was TRAVEL there (`travelToProjectRef`), and that was a screen
+  hijack: the user looks at project B, an agent in project A runs `open-claude`, the tab switches
+  and A's saved viewport is applied, so the camera appears to jump and zoom on a background agent's
+  say-so. Two membership lists now decide, and their difference is the whole design:
+  - `STORE_ANSWERED_VERBS` (`needsLiveCanvas` false) = **no canvas is needed at either end** —
+    `list` reads names, `send`/`reply` deliver into a tmux PANE, `sticky` rewrites a note,
+    `open-project` acts on the projects store.
+  - `COLD_OPENABLE_VERBS` (`canColdOpen` — `open-terminal`/`open-claude`/`open-agent`) = **a canvas
+    IS needed, but the serialized one will do.** `needsLiveCanvas` stays TRUE for them; they take
+    the `--project` cold-open path (issue #338 §2.2) applied to their own project: the composed
+    launch MOVES into `pendingLaunch` (`armForColdOpen` — `initialCommand` is never serialized), the
+    node is upserted through `applyNodeMutation`, edges go through `appendCanvasLinks` (the edge
+    counterpart, so the opener's rope and the fan-in bridge are not lost), `writeDisk` persists, and
+    the reply is the ONE shared `coldOpenMessage` sentence with `queued: true`.
+  Everything else keeps travelling **on purpose**: `write`/`close`/`group`/`move`/`arrange`/
+  `align`/`verify`/`spawn-team`/`open-worktree`/`open-browser`/`show-*` read live canvas state the
+  serialized copy does not carry (measured node sizes, worktree staleness, the React Flow edge
+  arrays). Route `active` is byte-identical to before. Route **`reopen` (a CLOSED project) cold-writes
+  too and does NOT reopen the tab** — closing is the user's explicit "park this, keep it running", so
+  restoring the tab *and* activating it is the loudest form of the hijack; the reply names the closure
+  so a caller does not report a session as started. On the cold path `--group`/`--after` ARE resolved
+  (unlike with `--project`, where the ids would live in another project) against the serialized
+  nodes, defaults come from the OWNING project (`projectPermissionMode(owner, …)`, its account,
+  its `ssh`), and `--after`'s dep ropes are left to `missingDepRopes` at that project's next load.
   **Grouping verbs** (`group` / `ungroup` / `move` / `arrange` / `align`): `group` wraps **sibling**
   objects — nodes or frames — into a new frame in their shared container (a mixed-container set, or
   an ancestor plus its descendant, is refused with that reason); `ungroup --group <id>` dissolves a
