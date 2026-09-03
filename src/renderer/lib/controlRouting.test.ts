@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   routeControlSource,
   needsLiveCanvas,
+  canColdOpen,
+  controlVerbSetsForTests,
   sourceIsControlCapable,
   storedNodeListing,
   answerBrowserResolve,
@@ -99,6 +101,74 @@ describe('needsLiveCanvas', () => {
     // end; this membership and Canvas.tsx's early-exit dispatch are the same decision stated once
     // each (spec §2.3, P6).
     expect(needsLiveCanvas('open-project')).toBe(false)
+  })
+})
+
+describe('canColdOpen — an OPEN is answered out of the store, not by moving the user', () => {
+  it('is true for exactly the three node-opening verbs', () => {
+    expect(canColdOpen('open-terminal')).toBe(true)
+    expect(canColdOpen('open-claude')).toBe(true)
+    expect(canColdOpen('open-agent')).toBe(true)
+  })
+
+  it('is false for every verb that acts on nodes which already exist', () => {
+    // These read live canvas state the serialized copy does not carry — measured sizes, worktree
+    // staleness, the React Flow edge arrays — so they keep travelling. Widening this set is a
+    // behaviour change per verb, never a tidy-up.
+    for (const verb of [
+      'write',
+      'close',
+      'group',
+      'ungroup',
+      'move',
+      'arrange',
+      'align',
+      'link',
+      'rename',
+      'color',
+      'verify',
+      'spawn-team',
+      'open-worktree',
+      'open-browser',
+      'browser',
+      'show-image',
+      'show-video',
+      'show-web',
+      'board',
+      'assign'
+    ]) {
+      expect(canColdOpen(verb), verb).toBe(false)
+    }
+  })
+
+  it('still NEEDS a canvas — cold-openable is a narrower claim than store-answered', () => {
+    // The whole reason this is a second set: `needsLiveCanvas` stays TRUE for an open (it does
+    // need somewhere to put the node), it just does not need the LIVE one. Collapsing the two
+    // sets would send `open-claude` down the `list` branch and answer it with a node listing.
+    for (const verb of ['open-terminal', 'open-claude', 'open-agent']) {
+      expect(needsLiveCanvas(verb), verb).toBe(true)
+      expect(canColdOpen(verb), verb).toBe(true)
+    }
+  })
+
+  it('the two sets are DISJOINT', () => {
+    const { storeAnswered, coldOpenable } = controlVerbSetsForTests()
+    expect(storeAnswered.filter((v) => coldOpenable.includes(v))).toEqual([])
+    // …and neither is empty, so the assertion above cannot pass vacuously.
+    expect(storeAnswered.length).toBeGreaterThan(0)
+    expect(coldOpenable.length).toBeGreaterThan(0)
+  })
+
+  it('does NOT change which project answers — routing is still by source (cecb4dfe stands)', () => {
+    // The regression this fix must not cause: cecb4dfe made an agent OUTSIDE the active project
+    // answerable at all (before it, the active canvas had never heard of the node and reported
+    // "not a control-capable agent"). Cold-opening changes only HOW the owning project is
+    // written to, never WHETHER it is found.
+    const projects = [P('p-active', [{ id: 'a1' }]), P('p-other', [{ id: 'b1' }])]
+    expect(routeControlSource(projects, 'p-active', 'b1')).toEqual({
+      kind: 'switch',
+      projectId: 'p-other'
+    })
   })
 })
 

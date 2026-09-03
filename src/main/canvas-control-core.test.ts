@@ -697,7 +697,7 @@ describe('the --project clause tells the truth about travel (review #363 I-1 + M
     ['instructions', buildCanvasControlInstructions('/x/shim.sh')]
   ]
 
-  it('no-travel is promised ONLY for a returned id; own id is documented as flag-omitted (travel included)', () => {
+  it('no open switches the view — the own-id "travel included" claim is GONE from both bodies', () => {
     for (const [name, body] of bodies) {
       // The clause slice: from the `--project` flag doc to the open-project entry that follows
       // it in both bodies — anchored, so a caveat cannot drift into another paragraph (the
@@ -707,22 +707,38 @@ describe('the --project clause tells the truth about travel (review #363 I-1 + M
       expect(start, `${name}: clause start`).toBeGreaterThan(-1)
       expect(end, `${name}: clause before the open-project entry`).toBeGreaterThan(start)
       const clause = body.slice(start, end)
-      // Own id ≡ the flag omitted, view switch included — the REAL behavior (Canvas.tsx's
-      // own-id leg falls through to the legacy path, travel included; pinned in
-      // control-open-project.source.test.ts). The doc must say the same, not more.
+      // Own id ≡ the flag omitted — still true, and still the whole of what that leg promises.
       expect(clause, name).toMatch(/behaves exactly as if the flag\s+were omitted/)
-      expect(clause, name).toMatch(/view switch\s+included/)
-      // The no-travel promise exists only attached to the RETURNED id…
-      expect(clause, name).toMatch(
-        /returned to YOU\s+in this session, which never switches the\s+user'?s view/
-      )
-      // …and the old universal phrasing ("without switching the user's view", said of the whole
-      // flag) is gone from the body entirely.
+      // THE STALE CLAIM. Passing your own id (or omitting the flag) used to switch the user's
+      // view to your project; it no longer does — an open whose own project is not on screen is
+      // written COLD into it (lib/coldOpen, `canColdOpen`). A body still promising a view switch
+      // describes a product that no longer exists, and an orchestrator reading it would expect
+      // the user to be looking at what it opened.
+      expect(body, name).not.toMatch(/view switch\s+included/)
+      expect(body, name).not.toMatch(/a normal open, view switch/)
+      // The old universal phrasing ("without switching the user's view", said of the whole flag)
+      // stays gone too — the promise now belongs to EVERY open, stated in its own sentence.
       expect(body, name).not.toMatch(/without switching/)
       // M-3: the do-not-poll caveat and the refusal rule live in the clause ITSELF — dropping
       // them here while the recipe's copy survives is red.
       expect(clause, name).toMatch(/do not poll/)
       expect(clause, name).toContain('any other id is refused')
+    }
+  })
+
+  it('both bodies document the OWN-project cold open: never switches the view, queued, closed case', () => {
+    // The behaviour change this test exists for. All four facts an orchestrator acts on:
+    // (1) an open never moves the user, (2) a node opened into a project they are not viewing
+    // starts when they next view it, (3) the reply says so via `queued`, (4) a CLOSED project is
+    // still written into and the tab is NOT reopened.
+    for (const [name, body] of bodies) {
+      expect(body, `${name}: never switches the view`).toMatch(
+        /open NEVER switches the user'?s view|OPEN NEVER SWITCHES THE USER'?S VIEW/i
+      )
+      expect(body, `${name}: cold`).toMatch(/cold/i)
+      expect(body, `${name}: queued`).toContain('queued')
+      expect(body, `${name}: closed project`).toMatch(/closed/i)
+      expect(body, `${name}: tab not reopened`).toMatch(/not reopened/i)
     }
   })
 })

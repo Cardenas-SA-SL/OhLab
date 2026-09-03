@@ -235,6 +235,19 @@ function rootPosition(n: PlacedNode, byId: Map<string, PlacedNode>): { x: number
 }
 
 /**
+ * A stored node's ROOT-space position — the public face of `rootPosition`, so the cold-open
+ * planner does not need a third copy of a parent walk this repo already carries two of.
+ */
+export function rootPositionIn(
+  nodes: readonly PlacedNode[],
+  node: PlacedNode
+): { x: number; y: number } {
+  const byId = new Map<string, PlacedNode>()
+  for (const n of nodes) if (n.id) byId.set(n.id, n)
+  return rootPosition(node, byId)
+}
+
+/**
  * Where a node opened INTO another project lands (spec §2.2): centered below the lowest existing
  * node, because `placeBelow(src)` is meaningless in a project that does not contain the source.
  * Returns a CENTER point (the factories' `center` parameter — `placeAt` converts to top-left).

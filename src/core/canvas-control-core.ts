@@ -331,15 +331,23 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  dependents even though it is idle (`list` marks it LAST TURN ERRORED); nudge or retry it, or',
     '  run the armed node yourself. Only',
     `  status-reporting agent nodes (${statusAgents}, or custom agents based on them) may be waited on; a plain terminal never`,
-    '  reports finishing, so waiting on one is refused. `--project <id>` opens the node(s) in another',
+    '  reports finishing, so waiting on one is refused.',
+    '  AN OPEN NEVER SWITCHES THE USER\'S VIEW. If your own project is not the one on screen, the',
+    '  node is opened COLD into it: it is created and saved, and its session starts when the user',
+    '  next views that project. The reply says so and reports `queued: true` — do not poll for it,',
+    '  and do not report the session as started. `--cwd`/`--count`/`--group`/`--after`/`--prompt`',
+    '  all still apply. If your project is CLOSED the node is still saved into it and the reply',
+    '  says the project is closed; the tab is not reopened for you.',
+    '  `--project <id>` opens the node(s) in another',
     '  project instead of yours. It accepts exactly two things — any other id is refused: your OWN',
-    '  project id, which behaves exactly as if the flag were omitted (a normal open, view switch',
-    '  included); or an id `open-project` returned to YOU in this session, which never switches the',
-    '  user\'s view. A session opened into a non-active project starts when the user next views that',
-    '  project — do not poll for it. `--group`/`--after` cannot be combined with `--project`.',
+    '  project id, which behaves exactly as if the flag were omitted; or an id `open-project`',
+    '  returned to YOU in this session. A session opened into a non-active project',
+    '  starts when the user next views that project — do not poll for it.',
+    '  `--group`/`--after` cannot be combined with `--project`.',
     '  The reply reports whether anything actually started: `queued` is true (and `queuedIds`',
     '  lists which) when a node was opened ARMED — waiting on `--after`, on a worktree\'s',
-    '  setup script, or on a `--project` target the user has not viewed yet. A queued node',
+    '  setup script, or on a project the user has not viewed yet (a `--project` target, or your',
+    '  own project while they are looking elsewhere). A queued node',
     '  exists on the canvas but has no process behind it: do not route work to it, do not',
     '  `send` to it and do not report it as started. It launches itself when its wait ends,',
     '  then reports through the ordinary status hooks — there is nothing to poll.',
@@ -765,15 +773,24 @@ Verbs:
   one successful turn releases everything armed behind it — or run the armed node yourself.
   \`--project <id>\` opens the node(s) in another project instead of yours. It accepts exactly
   two things — any other id is refused: your OWN project id, which behaves exactly as if the flag
-  were omitted (a normal open, view switch included); or an id \`open-project\` returned to YOU
-  in this session, which never switches the user's view. Defaults inside the target are the
+  were omitted; or an id \`open-project\` returned to YOU
+  in this session. Neither switches the user's view. Defaults inside the target are the
   TARGET project's (its cwd, its default account and permission mode). A session opened into a
   non-active project starts when the user next views that project — do not poll for it; the reply
   says so. \`--group\`/\`--after\` cannot be combined with \`--project\`.
+  **An open NEVER switches the user's view — not even into your own project.** If the project you
+  are running in is not the one on screen, the node is opened **cold**: created and saved there,
+  with its session starting when the user next views that project. Every flag still applies
+  (\`--cwd\`, \`--count\`, \`--group\`, \`--after\`, \`--prompt\`), the rope and the context link
+  back to you are still drawn, and the reply says the session is queued. If your project is
+  **closed**, the node is still saved into it and the reply says so; the tab is not reopened for
+  you. So: opening a station is safe to do at any time, but a station you opened while the user was
+  elsewhere is not running yet — read \`queued\` before you route work to it.
   **The reply tells you whether anything actually started.** \`queued\` is true — and
   \`queuedIds\` names which of the returned ids — whenever a node was opened **armed**: waiting on
-  \`--after\`, on a worktree's setup script, or on a \`--project\` target the user has not viewed
-  yet. A queued node exists on the canvas but has **no process behind it**, so do not route work
+  \`--after\`, on a worktree's setup script, or on a project the user has not viewed yet (a
+  \`--project\` target, or your own project while they are looking elsewhere).
+  A queued node exists on the canvas but has **no process behind it**, so do not route work
   to it, do not \`send\` to it and do not report it as started. It launches itself when its wait
   ends and then reports through the ordinary status hooks, so there is nothing to poll.
   \`queued: false\` means the session is running.

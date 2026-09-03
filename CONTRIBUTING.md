@@ -285,6 +285,20 @@ reply carries it (`queued` / `queuedIds`), because a user who cannot see the fai
 orchestrator that is told "opened" both act on a session that is not there. If you add a bounded
 retry anywhere, ask what the clock actually starts on and where its exhaustion becomes visible.
 
+**Never move the user's view on a background agent's say-so.** Canvas-control requests route by
+SOURCE, and React Flow holds only the ACTIVE project's nodes — so the dispatch used to travel to the
+caller's project before answering. For an OPEN that was a screen hijack: the user is looking at
+project B, an agent in project A runs `open-claude`, the tab switches and A's saved viewport is
+applied, so the camera appears to jump and zoom. The rule now has two tiers, both membership lists in
+`renderer/lib/controlRouting.ts`: `STORE_ANSWERED_VERBS` ("no canvas is needed at either end" —
+`list`, `send`, `reply`, `sticky`, `open-project`) and `canColdOpen` ("a canvas IS needed, but the
+serialized one will do" — `open-terminal`, `open-claude`, `open-agent`, which write into the owning
+project's stored nodes with their launch armed and report `queued: true`). Everything that acts on
+nodes which already exist still travels, because it reads live state the serialized copy does not
+carry. When you add a verb, decide which tier it is in — and if you change what a verb DOES, update
+`buildCanvasSkillBody` / `buildCanvasControlInstructions` in the same PR, with a test that goes red
+on the stale claim (`src/main/canvas-control-core.test.ts`).
+
 **Pointing a project at a folder is a WRITE — probe before you bind.** A project's canvas is
 written to `<cwd>/.nodeterm/project.json`, so the moment a project gains a `cwd` the next autosave
 owns that file. "Open folder…" always probed and adopted; "Set folder…" (tab ⌄) used to bind
