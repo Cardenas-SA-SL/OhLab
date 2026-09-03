@@ -103,9 +103,9 @@ describe('needsLiveCanvas', () => {
 })
 
 describe('sourceIsControlCapable', () => {
-  it('defaults a plain terminal node (no agentId) to claude, mirroring the spawn-time env', () => {
-    expect(sourceIsControlCapable(undefined)).toBe(true)
-    expect(sourceIsControlCapable('')).toBe(true)
+  it('does not relabel a plain terminal node as Claude', () => {
+    expect(sourceIsControlCapable(undefined)).toBe(false)
+    expect(sourceIsControlCapable('')).toBe(false)
   })
 
   it('accepts every canvas-control-capable agent', () => {

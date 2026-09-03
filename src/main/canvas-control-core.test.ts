@@ -7,13 +7,13 @@ import {
   buildCanvasSkillBody,
   CONTROL_SHIM_SCRIPT,
   CONTROL_UNREACHABLE_MSG
-} from './canvas-control-core'
+} from '../core/canvas-control-core'
 import {
   CODEX_SANDBOX_BLOCKED_LINE,
   CODEX_SANDBOX_RETRY_LINE
 } from '../core/agents/hook-sandbox-hint-sh'
 import { RETRYABLE } from '../core/agents/agent-message-decide'
-import { PROJECT_TARGETABLE_VERBS } from './project-grants'
+import { PROJECT_TARGETABLE_VERBS } from '../core/project-grants'
 import { DRY_RUN_VERBS } from '../shared/control-verbs'
 import { STRICT_CONTROL_VERBS } from '../core/agents/node-identity-policy'
 import { BROWSER_ACTION_KEYS } from '../core/browser-verb'
@@ -161,6 +161,20 @@ describe('parseControlRequest', () => {
     expect(isDestructiveVerb('rename')).toBe(false)
   })
 
+  it('color requires --node and --color, and is metadata-only', () => {
+    expect(parseControlRequest('color', {})).toEqual({
+      error: 'color requires --node <id,id>'
+    })
+    expect(parseControlRequest('color', { node: 'n1,n2' })).toEqual({
+      error: 'color requires --color'
+    })
+    expect(parseControlRequest('color', { node: 'n1,n2', color: '#32d74b' })).toEqual({
+      verb: 'color',
+      args: { node: 'n1,n2', color: '#32d74b' }
+    })
+    expect(isDestructiveVerb('color')).toBe(false)
+  })
+
   it('ungroup requires --group; move requires --nodes; neither is destructive', () => {
     expect(parseControlRequest('ungroup', {})).toEqual({ error: 'ungroup requires --group <id>' })
     expect(parseControlRequest('ungroup', { group: 'g1' })).toEqual({ verb: 'ungroup', args: { group: 'g1' } })
@@ -208,9 +222,14 @@ describe('parseControlRequest', () => {
 
   it('instructions cover the verb set and the confirm caveat', () => {
     const body = buildCanvasControlInstructions('/tmp/nodeterm.sh')
-    for (const verb of ['list', 'open-agent', 'spawn-team', 'group', 'ungroup', 'move', 'arrange', 'rename', 'write', 'close', 'board', 'assign']) {
+    for (const verb of ['list', 'open-agent', 'spawn-team', 'group', 'ungroup', 'move', 'arrange', 'rename', 'color', 'write', 'close', 'board', 'assign']) {
       expect(body).toContain(verb)
     }
+    expect(body).toContain('group --nodes <id,id> [--label L] [--color C]')
+    expect(body).toContain('color --node <id,id> --color C')
+    const skill = buildCanvasSkillBody('/tmp/nodeterm.sh')
+    expect(skill).toContain('group --nodes <id,id> [--label "Frontend Team"] [--color C]')
+    expect(skill).toContain('color --node <id,id> --color C')
     expect(body.toLowerCase()).toContain('confirm')
   })
 
@@ -263,10 +282,10 @@ describe('parseControlRequest', () => {
     expect(parseControlRequest('reply', { node: 'n1' })).toEqual({ error: 'reply requires --text' })
   })
 
-  it('the shim maps a bare positional onto arg.node for send/reply/sticky too', () => {
+  it('the shim maps a bare positional onto arg.node for color/send/reply/sticky too', () => {
     // The positional list is a case pattern inside CONTROL_SHIM_SCRIPT; send/reply/sticky take the
-    // same "first bare word is the node" convenience write/close/rename/branch already have.
-    expect(CONTROL_SHIM_SCRIPT).toContain('write|close|rename|branch|send|reply|sticky)')
+    // same "first bare word is the node" convenience write/close/rename/color/branch already have.
+    expect(CONTROL_SHIM_SCRIPT).toContain('write|close|rename|color|branch|send|reply|sticky)')
   })
 
   it('sticky requires --node plus exactly one of --text/--append, and is not destructive', () => {
@@ -437,6 +456,16 @@ describe('parseControlRequest', () => {
       expect(body.toLowerCase()).toContain('queued')
       expect(body).not.toMatch(/busy target answers `targetBusy` instead/i)
       expect(body).not.toMatch(/delivered only\s+when the target is verifiably\s+idle/i)
+    }
+  })
+
+  it('both agent-facing texts state the Server creator-ownership and inert-boot contract', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('ownership is fail-closed')
+      expect(body).toContain('verified node identity')
+      expect(body).toContain('current server run')
+      expect(body).toMatch(/never[\s\S]*auto-adopted[\s\S]*relaunched[\s\S]*controlled at boot/)
+      expect(body).toContain('before any partial mutation')
     }
   })
 
@@ -617,7 +646,7 @@ describe('open-project + --project docs land with the dispatch (issue #338, spec
   })
 
   it('every --project-targetable verb line documents the flag — walked off the REAL set', () => {
-    // The drift alarm walks PROJECT_TARGETABLE_VERBS (src/main/project-grants.ts) rather than a
+    // The drift alarm walks PROJECT_TARGETABLE_VERBS (src/core/project-grants.ts) rather than a
     // re-typed list: a fourth verb joining the set without its doc line goes red here, and a doc
     // line dropping the flag goes red too.
     for (const [name, body] of bodies) {

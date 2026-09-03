@@ -1,17 +1,18 @@
 // Pure core for agent canvas control: the verb model, request validation, and the standalone
 // CLI source. No electron imports, so this module + CONTROL_CLI_SCRIPT are unit-testable.
 // Electron/ipc/server wiring lives in canvas-control.ts + index.ts + hook-server.ts.
-import { HOOK_CURL_HEADERS_SH } from '../core/agents/hook-curl-config-sh'
-import { CODEX_SANDBOX_HINT_SH } from '../core/agents/hook-sandbox-hint-sh'
-import { HOOK_ENDPOINT_FALLBACK_SH, STALE_ENDPOINT_HINT } from '../core/agents/hook-endpoint-failover-sh'
-import { codexSandboxGuidanceLines } from '../core/context-link-core'
-import { NODE_TOKEN_READ_SH } from '../core/agents/node-token-sh'
+import { HOOK_CURL_HEADERS_SH } from './agents/hook-curl-config-sh'
+import { CODEX_SANDBOX_HINT_SH } from './agents/hook-sandbox-hint-sh'
+import { HOOK_ENDPOINT_FALLBACK_SH, STALE_ENDPOINT_HINT } from './agents/hook-endpoint-failover-sh'
+import { codexSandboxGuidanceLines } from './context-link-core'
+import { NODE_TOKEN_READ_SH } from './agents/node-token-sh'
 import { AGENT_CONFIG, AGENT_HOOK_TARGETS, BUILTIN_AGENT_IDS } from '@shared/agents/config'
-import { RETRYABLE } from '../core/agents/agent-message-decide'
-import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from '../core/agents/agent-message-flow'
-import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from '../core/browser-outcomes'
-import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from '../core/browser-verb'
-import { codexThreadIdentityResolverSh } from '../core/codex-thread-identity-sh'
+import { RETRYABLE } from './agents/agent-message-decide'
+import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from './agents/agent-message-flow'
+import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
+import { BROWSER_KEYS, BROWSER_TIMEOUT_DEFAULT_MS, BROWSER_TIMEOUT_MAX_MS } from './browser-verb'
+import { NODE_COLORS } from '@shared/node-colors'
+import { codexThreadIdentityResolverSh } from './codex-thread-identity-sh'
 
 /**
  * The messaging verbs' retry guidance, RENDERED from `RETRYABLE` — the table is the source, and
@@ -116,6 +117,7 @@ export type ControlVerb =
   | 'close-worktree'
   | 'branch'
   | 'rename'
+  | 'color'
   | 'write'
   | 'close'
   | 'board'
@@ -153,6 +155,7 @@ const VERBS: ControlVerb[] = [
   'close-worktree',
   'branch',
   'rename',
+  'color',
   'write',
   'close',
   'board',
@@ -236,6 +239,8 @@ export function parseControlRequest(
   if (v === 'branch' && !args.node) return { error: 'branch requires --node <id>' }
   if (v === 'rename' && !args.node) return { error: 'rename requires --node <id>' }
   if (v === 'rename' && !args.title) return { error: 'rename requires --title' }
+  if (v === 'color' && !args.node) return { error: 'color requires --node <id,id>' }
+  if (v === 'color' && args.color === undefined) return { error: 'color requires --color' }
   if ((v === 'send' || v === 'reply') && !args.node) return { error: `${v} requires --node <id>` }
   if ((v === 'send' || v === 'reply') && !args.text) return { error: `${v} requires --text` }
   if (v === 'notify' && !args.node) return { error: 'notify requires --node <id>' }
@@ -256,7 +261,7 @@ export function parseControlRequest(
   if (v === 'browser' && !args.node) return { error: 'browser: --node <id> is required' }
   // `open-project` requires a cwd; everything else about the argument (absolute, exists, is a
   // directory, resolved once) is validated in MAIN by `validateOpenProjectCwd`
-  // (src/main/project-grants.ts) — the caller's path is hostile input and this presence check is
+  // (src/core/project-grants.ts) — the caller's path is hostile input and this presence check is
   // only the polite half.
   if (v === 'open-project' && !args.cwd) return { error: 'open-project requires --cwd <abs-path>' }
   return { verb: v, args }
@@ -305,6 +310,11 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     'flag. A flag with no value is allowed anywhere on the line.',
     '',
     ...dryRunDocLines(),
+    '',
+    'Server Edition ownership is fail-closed: every request requires verified node identity, and',
+    'a caller may mutate or message only nodes it opened during the current server run.',
+    'Restarting the server clears that creator proof; persisted nodes and queued launches are never',
+    'auto-adopted, relaunched, or controlled at boot. An unowned target receives a named refusal.',
     '',
     'Verbs:',
     '- `list` — current nodes (id, kind, title). Start here when you need a node id.',
@@ -356,10 +366,12 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  confirm (your first open of an already-registered project asks once too) and may be denied —',
     '  a denial is final, do not retry it. Local only (refused from an SSH project), and it never',
     '  focuses the new project\'s tab. The returned id is what `--project` accepts.',
+    '  Server Edition is narrower: it can only re-open an exact local project already saved in its',
+    '  workspace (pass `--cwd` only); it never creates, adds, renames, recolors, or focuses one.',
     '- `show-image <path>` / `show-video <path>` — open a media file as a node.',
     '- `show-web (--url U | --file P.html | --html "<...>")` — open a web viewer.',
     '- `open-browser --url U` — open a navigable browser node.',
-    '- `group --nodes <id,id> [--label L]` — wrap sibling nodes or sibling groups in a new labeled frame.',
+    '- `group --nodes <id,id> [--label L] [--color C]` — wrap sibling nodes or sibling groups in a new labeled frame.',
     '  Every id must share one container. `ungroup --group <id>` dissolves a frame and promotes its direct',
     '  children into the frame\'s parent. `move --nodes <id,id> [--group <id>]` reparents nodes or groups INTO an',
     '  existing frame (omit `--group`, or pass `top`/`none`, to pull them out to the top level) — this is',
@@ -372,6 +384,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  on demand (nodeterm linked-context CLI). `--from` defaults to you; nothing is pushed into the',
     '  linked sessions. Agent sessions you open, and the stations you name in `--after`, are already',
     '  linked — nothing to `link`. Use `link` only for nodes you did not open, or to link two OTHER nodes.',
+    '  On Server Edition the ownership rule is stricter: every endpoint must be a node you opened',
+    '  during this server run.',
     '- `verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--synthesis off]` — open a',
     '  review panel over that node\'s work: one reviewer per lens, each armed behind the target and linked',
     '  to it, plus a judge armed behind the panel that merges the findings into one verdict. Reviewers are',
@@ -394,12 +408,15 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `rename --node <id> --title "New Name"` — rename any node (terminals, groups, stickies…).',
     '  Renaming to the title the node ALREADY has is a no-op: nothing is typed into its agent',
     '  session, and the reply says `already named`. Re-assert your own name as often as you like.',
+    `- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.`,
     '- `write --node <id> --text "..."` / `close --node <id>` — type into / close a node.',
-    '  Both ask the user to confirm a dialog and may be denied. Read WHICH answer came back:',
-    '  `denied by user` is a decision and is FINAL — never re-ask — while `no answer within 120s`',
-    '  means nobody reached the dialog, which is worth one retry when the user is back.',
+    '  Desktop asks the user to confirm both. `denied by user` is FINAL; `no answer within 120s`',
+    '  means nobody reached the dialog and is worth one retry when the user is back. Server Edition',
+    '  is narrower: close requires a node this caller opened during the current server run, and all',
+    '  node-mutating verbs accept only current-run creations. Every other target receives a named',
+    '  ownership refusal before any partial mutation.',
     '- `send --node <id> --text "..."` / `reply --node <id> --text "..."` — deliver a message into',
-    '  another AGENT node in this project (no confirm dialog: verified-only, gated by the project\'s',
+    '  an AGENT node the caller opened this run (no confirm dialog: verified-only, gated by the project\'s',
     '  agent-messaging switch — off by default — and rate-limited). A busy target is not interrupted',
     '  and does not lose the message: it is queued (bounded, TTL\'d) and delivered when the target',
     '  next goes idle. An incoming message is framed `--- NODETERM MESSAGE <nonce> ---` with a `reply-to:`',
@@ -532,7 +549,7 @@ if [ "$nt_verb" = "help" ] || [ "$nt_verb" = "--help" ] || [ "$nt_verb" = "-h" ]
 fi
 
 # Translate \`--flag value\` pairs — plus the one bare positional the show-image/show-video and
-# write/close/rename/branch/send/reply/sticky forms accept — into curl --data-urlencode arguments. The positional
+# write/close/rename/color/branch/send/reply/sticky forms accept — into curl --data-urlencode arguments. The positional
 # list doubles as the accumulator: originals are consumed from the front, translated pairs
 # appended at the back, so "$@" holds exactly the curl args once the loop drains.
 nt_seen_pos=0
@@ -576,7 +593,7 @@ while [ "$nt_i" -lt "$nt_count" ]; do
         nt_seen_pos=1
         case "$nt_verb" in
           show-image|show-video) set -- "$@" --data-urlencode "arg.path=$nt_a" ;;
-          write|close|rename|branch|send|reply|sticky) set -- "$@" --data-urlencode "arg.node=$nt_a" ;;
+          write|close|rename|color|branch|send|reply|sticky) set -- "$@" --data-urlencode "arg.node=$nt_a" ;;
         esac
       fi
       ;;
@@ -715,6 +732,11 @@ value is allowed anywhere on the line, not only at the end.
 
 ${dryRunDocLines().join('\n')}
 
+Server Edition ownership is fail-closed: every request requires verified node identity, and a
+caller may mutate or message only nodes it opened during the current server run. Restarting
+the server clears that creator proof; persisted nodes and queued launches are never auto-adopted,
+relaunched, or controlled at boot. An unowned target receives a named refusal.
+
 Verbs:
 - \`list\` — list current nodes (id, kind, title). Start here when you need a node id.
   A row ending **LAST TURN ERRORED** is a station whose last turn died on an API/model error:
@@ -788,6 +810,9 @@ Verbs:
   already-registered project asks once too) and may be denied — a denial is final, do not retry
   it. Local only (refused from an SSH project), and it never focuses the new project's tab: use
   the returned id with \`--project\` to open sessions there.
+  On Server Edition this is a restart-recovery operation only: pass \`--cwd\` for an exact local
+  project already saved in that Server workspace. It never creates, adds, renames, recolors, or
+  focuses a project; register a missing project in the UI first.
 - \`show-image <path>\` — open an image file as a node.
 - \`show-video <path>\` — open a video file as a player node.
 - \`show-web (--url U | --file P.html | --html "<...>")\` — open a web viewer (live URL or local HTML you wrote).
@@ -796,7 +821,7 @@ Verbs:
   render on the DESKTOP: \`show-image\` and \`show-video\` still work with a host path (the
   file is read/fetched back over the connection), but \`show-web --file/--html\` is refused —
   use \`--url\`, or copy the file to the desktop first.
-- \`group --nodes <id,id> [--label "Frontend Team"]\` — wrap sibling nodes or sibling groups in a
+- \`group --nodes <id,id> [--label "Frontend Team"] [--color C]\` — wrap sibling nodes or sibling groups in a
   new labeled frame. Every id must share one container; an ancestor cannot be grouped with its descendant.
 - \`ungroup --group <id>\` — dissolve a group frame, promoting its direct children into the frame's
   parent (the nodes stay put; only the frame is removed).
@@ -817,6 +842,8 @@ Verbs:
   Agent sessions you open (\`open-claude\`/\`open-agent\`/\`spawn-team\`) and the stations you name in
   \`--after\` are already linked — nothing to \`link\`. Use \`link\` only for nodes you did not open,
   or to link two OTHER nodes together.
+  On Server Edition the ownership rule is stricter: every endpoint must be a node you opened
+  during this server run.
 - \`verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--agent <id>] [--synthesis off] [--label L]\` —
   open a review PANEL over that node's work: one reviewer per lens, each armed behind the target
   (they start when it goes idle) and linked to it so they can read what it actually did, plus a
@@ -854,10 +881,14 @@ Verbs:
 - \`rename --node <id> --title "New Name"\` — rename any node (terminals, groups, stickies…).
   Renaming to the title the node ALREADY has is a no-op: nothing is typed into its agent
   session, and the reply says \`already named\`. Re-assert your own name as often as you like.
+- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
-- \`close --node <id>\` — close a node. (Asks the user to confirm.)
-- \`send --node <id> --text "..."\` — deliver a message INTO another agent node's session, in this
-  project only. No confirm dialog; instead it is verified-only, gated by the project's
+- \`close --node <id>\` — close a node. Desktop asks the user to confirm. Server Edition closes
+  only nodes this caller opened during the current server run, without a dialog. Its other
+  node-mutating verbs (link/group/rename/color/sticky update) likewise accept only current-run
+  creations, and refuse the whole request before any partial mutation.
+- \`send --node <id> --text "..."\` — deliver a message INTO an agent node the caller opened during
+  this server run, in this project only. No confirm dialog; instead it is verified-only, gated by the project's
   agent-messaging switch (Settings → Agents, OFF by default), and rate-limited. Delivery lands when
   the target is idle at its prompt; a BUSY target is never interrupted and does not lose the
   message — it is held in a bounded, TTL'd per-target queue and delivered when the target next goes
@@ -898,10 +929,9 @@ ${messagingGuidanceLines().join('\n')}
 ${browserGuidanceLines().join('\n')}
 
 Notes:
-- \`write\` and \`close\` require the user to approve a confirmation dialog; they may be denied.
-  Two different replies, two different follow-ups: \`denied by user\` is a decision and is FINAL —
-  never re-ask — whereas \`no answer within 120s\` means the dialog was simply not reached in
-  time, which is worth one retry when the user is back at the machine.
+- Desktop \`write\` and \`close\` require the user to approve a confirmation dialog. A
+  \`denied by user\` reply is FINAL; \`no answer within 120s\` is worth one retry when the user
+  is back. Server Edition uses the process-local ownership rule for \`close\` instead.
 - \`board\` and \`assign\` act on the CURRENTLY OPEN project's board — the same one you see when you
   toggle the kanban view. They need no confirmation.
 - If the CLI says canvas control is unavailable, you are not in a controllable nodeterm session — do not retry.
@@ -922,6 +952,7 @@ Typical requests this skill covers:
 - "Move this node into that group" → \`move --nodes <id> --group <targetGroupId>\` (not \`group\`, which only
   wraps loose nodes). "Break up this group" → \`ungroup --group <id>\`.
 - "Rename this node/group" → \`rename\`.
+- "Color these nodes/groups by subject" → \`color --node <id,id> --color <palette value>\`.
 
 ## Nodeterm orchestration ("Build with Nodeterm orchestration")
 

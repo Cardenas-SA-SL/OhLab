@@ -78,7 +78,7 @@ else
 fi
 
 # Markers the installers wrote — the uninstall keys off the SAME strings (see
-# src/core/agents/hooks/install-helper.ts and src/main/canvas-control-core.ts).
+# src/core/agents/hooks/install-helper.ts and src/core/canvas-control-core.ts).
 HOOK_MARKERS='agent-hooks|claude-signals'
 CC_START='<!-- nodeterm:manage-canvas:start -->'
 CC_END='<!-- nodeterm:manage-canvas:end -->'

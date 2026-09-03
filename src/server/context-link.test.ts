@@ -152,7 +152,8 @@ describe('initServerContextLink', () => {
           nodes: [node('term-a', { title: 'Alpha' }), node('term-b', { title: 'Beta' })],
           bridges: [bridge('term-a', 'term-b')]
         }
-      ]
+      ],
+      installAgentIntegrations: false
     })
     // Without this registration the hook server answers every read with
     // "Context link is unavailable in this session." — the whole desktop-only symptom.
@@ -168,7 +169,11 @@ describe('initServerContextLink', () => {
   })
 
   it('answers a node with no links, rather than pretending the feature is missing', async () => {
-    const { link, handler } = start({ ptyManager: fakePty(), canvases: () => [] })
+    const { link, handler } = start({
+      ptyManager: fakePty(),
+      canvases: () => [],
+      installAgentIntegrations: false
+    })
     await link.refresh()
     const out = await handler({ verb: 'list', nodeId: 'term-a', args: {} })
     expect(out).toContain('No linked nodes')
@@ -187,11 +192,30 @@ describe('initServerContextLink', () => {
     await link.stop()
   })
 
+  // The other half of the pair. With the flag REQUIRED, every other case in this file says
+  // `false`, so without this the install branch would have no coverage at all and "we stopped
+  // writing into $HOME" would be indistinguishable from "we can no longer write into $HOME".
+  // Safe to assert for real: `home` is a per-test scratch dir this suite points HOME at.
+  it('installs the discovery surface into the agent config dirs when asked to', async () => {
+    const { link, registered } = start({
+      ptyManager: fakePty(),
+      canvases: () => [],
+      installAgentIntegrations: true
+    })
+    expect(registered).toBe(true)
+    expect(existsSync(join(home, '.claude', 'skills', 'get-linked-context', 'SKILL.md'))).toBe(true)
+    expect(readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8')).toContain(
+      'nodeterm:get-linked-context'
+    )
+    await link.stop()
+  })
+
   it('picks up a bridge drawn after boot', async () => {
     let bridges = [] as ReturnType<typeof bridge>[]
     const { link, handler } = start({
       ptyManager: fakePty(),
-      canvases: () => [{ id: 'p1', nodes: [node('term-a'), node('term-b', { title: 'Beta' })], bridges }]
+      canvases: () => [{ id: 'p1', nodes: [node('term-a'), node('term-b', { title: 'Beta' })], bridges }],
+      installAgentIntegrations: false
     })
     await link.refresh()
     expect(await handler({ verb: 'list', nodeId: 'term-a', args: {} })).toContain('No linked nodes')
@@ -212,7 +236,11 @@ describe('initServerContextLink', () => {
         bridges: [bridge('term-a', 'term-b')]
       }
     ]
-    const { link, handler } = start({ ptyManager: fakePty(), canvases })
+    const { link, handler } = start({
+      ptyManager: fakePty(),
+      canvases,
+      installAgentIntegrations: false
+    })
     await link.refresh()
     expect(await handler({ verb: 'summary', nodeId: 'term-a', args: {} })).toContain(
       'no conversation transcript yet'
@@ -230,7 +258,8 @@ describe('initServerContextLink', () => {
       ptyManager: fakePty(),
       canvases: () => [
         { id: 'p1', nodes: [node('term-a'), node('term-b')], bridges: [bridge('term-a', 'term-b')] }
-      ]
+      ],
+      installAgentIntegrations: false
     })
     // Neither the sweep nor onPersist awaits a refresh, so at close there is normally one in
     // flight. A stop that does not drain it lets link files land in a dataDir the caller is
@@ -249,7 +278,8 @@ describe('initServerContextLink', () => {
       ptyManager: fakePty(),
       canvases: () => [
         { id: 'p1', nodes: [node('term-a'), node('term-b')], bridges: [bridge('term-a', 'term-b')] }
-      ]
+      ],
+      installAgentIntegrations: false
     })
     await link.refresh()
     // The sweep runs every 15s for the life of the server: an unconditional rewrite would be a

@@ -15,7 +15,7 @@ import {
   buildCanvasControlInstructions,
   buildCanvasSkillBody,
   mergeCanvasControlBlock
-} from './canvas-control-core'
+} from '../core/canvas-control-core'
 import { codexThreadIdentityRoot } from '../core/codex-identity-proxy'
 import { opencodeConfigDir } from '../core/agents/hooks/opencode'
 import { copilotHomeDir } from '../core/agents/hooks/copilot'

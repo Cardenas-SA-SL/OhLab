@@ -47,6 +47,9 @@ export interface WireAgentStatusOptions {
   hooks?: HookLike
   subagentTail?: SubagentTail
   contextTail?: ContextTail
+  /** One tap on the normalized, mirror-enriched stream for in-process consumers such as the
+   * Server Edition delivery queue and `--after` scheduler. */
+  onEvent?: (event: NormalizedAgentEvent) => void
 }
 
 /**
@@ -159,6 +162,7 @@ export function wireAgentStatus(
     // keys off the same single source of truth as the mirror/phone. Then broadcast the enriched one.
     const enriched = recordAgentEvent(e) ?? e
     platform.broadcast(IPC.agentStatus, enriched)
+    opts.onEvent?.(enriched)
   })
 
   // Security: hook POSTs can be forged, so a forged POST could set transcript_path to an

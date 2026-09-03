@@ -355,6 +355,15 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
   it('never exposes gateway credentials to a plain terminal', async () => {
     const inherited = process.env.ANTHROPIC_AUTH_TOKEN
     process.env.ANTHROPIC_AUTH_TOKEN = 'preexisting-shell-token'
+    // A pty inherits this process's environment, so the two assertions below are about what
+    // `buildPtyEnv` ADDS — and they can only say that if the ambient value is absent. nodeterm is
+    // developed inside nodeterm: a suite run from an agent pane inherits that pane's own
+    // NODETERM_AGENT_ID=claude / NODETERM_CANVAS_CONTROL=1, and the test then failed for the
+    // developer while passing in CI, which is the worst way round.
+    const inheritedAgent = process.env.NODETERM_AGENT_ID
+    const inheritedControl = process.env.NODETERM_CANVAS_CONTROL
+    delete process.env.NODETERM_AGENT_ID
+    delete process.env.NODETERM_CANVAS_CONTROL
     try {
       const { PtyManager } = await import('./pty-manager')
       const m = new PtyManager()
@@ -369,11 +378,17 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
       // Plain shells still inherit the user's ordinary process environment; the gateway neither
       // overwrites it nor emits an explicit tmux session value.
       expect(spawnArgs[0].env.ANTHROPIC_AUTH_TOKEN).toBe('preexisting-shell-token')
+      expect(spawnArgs[0].env.NODETERM_AGENT_ID).toBeUndefined()
+      expect(spawnArgs[0].env.NODETERM_CANVAS_CONTROL).toBeUndefined()
       expect(spawnArgs[0].args.join(' ')).not.toContain('vk-secret')
       expect(spawnArgs[0].args.join(' ')).not.toContain('bifrost.example.test')
     } finally {
       if (inherited === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN
       else process.env.ANTHROPIC_AUTH_TOKEN = inherited
+      if (inheritedAgent === undefined) delete process.env.NODETERM_AGENT_ID
+      else process.env.NODETERM_AGENT_ID = inheritedAgent
+      if (inheritedControl === undefined) delete process.env.NODETERM_CANVAS_CONTROL
+      else process.env.NODETERM_CANVAS_CONTROL = inheritedControl
     }
   })
 

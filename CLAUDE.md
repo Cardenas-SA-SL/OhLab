@@ -143,9 +143,11 @@ The codebase is split by Electron process boundary — keep code on the correct 
   bridge, so agent-status badges, subagent cards, and the context meter now work in the
   browser (transcript-path jailed against forged POSTs). It also serves the two transcript READ
   channels (`registerTranscriptIpc` — the ⌘M chat view + the find-bar's transcript index; see the
-  ⌘M bullet under Agent support). Still deferred:
-  **canvas-control** (`agent:control`) is not wired. (The SDK **chat node** — once listed here
-  as deferred — was removed entirely, 2026-07; see the chat-node note in the node-kinds list.)
+  ⌘M bullet under Agent support). **Canvas control is opt-in**
+  (`NODETERM_SERVER_CANVAS_CONTROL=1` / `--canvas-control`): the Server shell installs its own shim
+  and runs a serialized `HeadlessNodeFactory`; disabled remains the default. (The SDK **chat node**
+  — once listed here as deferred — was removed entirely, 2026-07; see the chat-node note in the
+  node-kinds list.)
 - **`src/preload/`** — the only bridge. `index.ts` uses `contextBridge` to expose a
   narrow API on `window.nodeTerminal` (typed in `index.d.ts`). `contextIsolation` is on,
   `nodeIntegration` off.
@@ -1691,6 +1693,17 @@ else, and its context links must keep classifying across restarts).
   (which sets `NODETERM_CANVAS_CONTROL`) is the whole wiring. That premise rests on grok's shipped
   docs and is **unverified** (`grok inspect --json` never run); if it does not hold, grok takes the
   marker-block route instead — see docs/grok-agent.md.
+  **Server creator ownership (2026-08 incident hardening):** enabled Server control accepts only
+  verified node identity. `HeadlessNodeFactory` records which source node opened each new node in a
+  process-local ledger; link/group/rename/color/sticky-update, message delivery, and close validate
+  the whole target set as current-run creations before writing or killing anything. Queued messages
+  revalidate creator ownership before flush. The ledger is intentionally empty after restart —
+  project JSON, titles, hook history and tmux names are not creator proof — so
+  boot neither attaches/creates backends nor sends persisted queued commands. A live backend with a
+  durable arm remains untouched until an explicit owner action or browser view. `open-terminal` and
+  `open-agent` are verified-only at the Server handler boundary. A plain terminal keeps generic
+  node hook wiring but receives neither `NODETERM_AGENT_ID` nor `NODETERM_CANVAS_CONTROL`; missing
+  identity never defaults to Claude.
   **SSH projects** (docs/ssh-agent-skills.md): the SAME shim + skill + blocks are installed on
   the remote host at connect (`RemoteHooks.installCanvasControl` + per-account
   `installCanvasSkillIntoAccountDir`), gated on the VERIFIED reverse hook tunnel — the shim
@@ -2009,9 +2022,9 @@ else, and its context links must keep classifying across restarts).
     `core/claude-accounts-service.ts` owns the five `claude-accounts:*` channels (add / wait-login
     / cancel-wait / remove / link) behind `platform().handle`; `main/claude-accounts.ts` is a thin desktop
     wrapper and `registerCoreHandlers` calls the same `registerClaudeAccountsIpc()`. Two optional
-    deps carry everything core cannot reach: `installSkill` (desktop passes `installCanvasSkillInto`
-    — the server passes none, because **canvas control is not wired on that shell at all**, so a
-    per-account SKILL.md would point at nothing) and `remote`, a **thunk** resolving the SSH legs
+    deps carry everything core cannot reach: `installSkill` (desktop passes `installCanvasSkillInto`;
+    an enabled Server canvas-control runtime installs its Server-specific skill separately) and
+    `remote`, a **thunk** resolving the SSH legs
     (desktop's manager is created after the registration, and the server has none — in both cases
     an `AccountCtx` carrying a `projectId` degrades to the LOCAL path, which is the pre-existing
     behavior this preserves). **Three surfaces:** Desktop unchanged (same channels, same shapes,

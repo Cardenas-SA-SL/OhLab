@@ -21,7 +21,7 @@ import {
   deliverFromControl,
   messagingEnabledVia,
   type AgentMessagingDeps
-} from './agent-messaging'
+} from '../core/agents/agent-messaging'
 import type { CapabilityAckMap } from '../core/project-capability-consent'
 import { resetMessageFlow } from '../core/agents/agent-message-flow'
 import {

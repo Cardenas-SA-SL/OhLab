@@ -298,13 +298,11 @@ export function buildRealApi(
     onMigrated: (cb) => client.subscribe(IPC.workspaceMigrated, cb as Listener),
     // REAL: core broadcasts IPC.workspaceCorruptRecovered from the load path (workspace-store.ts).
     onCorruptRecovered: (cb) => client.subscribe(IPC.workspaceCorruptRecovered, cb as Listener),
-    // Deliberate degrade: the external-change WATCHER (core/workspace-watcher.ts) is only started
-    // by the desktop shell (src/main/index.ts), so the server never broadcasts
-    // IPC.workspaceExternalChange and there is nothing to subscribe to. Effect in the browser:
-    // an outside edit (git pull / a teammate's push) is not picked up until reload — no silent
-    // data loss (the store's own rev reconciliation still guards writes). Booting the watcher in
-    // src/server is the follow-up.
-    onExternalChange: () => () => {}
+    // Server Edition runs the shared WorkspaceWatcher and broadcasts outside file edits here.
+    // Core-originated mutations use the same channel: remote-node adoption already did, and Server
+    // Edition canvas control uses it for persisted bridge/rope changes that are wider than the
+    // node-only canvas:mut vocabulary.
+    onExternalChange: (cb) => client.subscribe(IPC.workspaceExternalChange, cb as Listener)
   }
 
   // REAL: WorkspaceStore (core) registers the project-settings:* channels too — same

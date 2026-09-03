@@ -600,6 +600,10 @@ suite('REAL bash through REAL tmux: the payload cannot become key input', () => 
     const m = path.join(work, 'pwn-ctl')
     const buffer = pasteBufferName()
     tmux(localTmuxPasteArgs(SOCKET, 'nt-sec-ctl', buffer, false), `hello${END}\rtouch ${m}\r`)
+    // tmux returning means the bytes reached the PTY, not that readline has consumed them. The
+    // drain starts with Ctrl-C, so firing it immediately can cancel the very attack this control
+    // is meant to witness and make the two sanitizer tests vacuous on a fast host.
+    waitFor(() => fs.existsSync(m), 'the unsanitized control attack to run')
     bashDrain('nt-sec-ctl', 'nt-sec-ctl')
     expect(fs.existsSync(m), 'the attack no longer works — these tests are vacuous').toBe(true)
   })

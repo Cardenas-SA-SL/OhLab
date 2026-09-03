@@ -28,7 +28,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-import { CONTROL_SHIM_SCRIPT, buildControlShimScript } from '../canvas-control-core'
+import { CONTROL_SHIM_SCRIPT, buildControlShimScript } from '../../core/canvas-control-core'
 import { CONTEXT_SHIM_SCRIPT, buildContextShimScript } from '../../core/context-link-core'
 
 /** A root no real machine would produce, so a hit is unambiguously the one we baked in. */

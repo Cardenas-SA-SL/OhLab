@@ -2,7 +2,7 @@
 // set. Read the second half of that sentence literally — see WHAT THIS SET DOES NOT DO below.
 //
 // IN `src/shared` BECAUSE IT HAS TWO SIDES, and that is the whole point of this file existing.
-// The set was defined in `src/main/canvas-control-core.ts` and the gate it describes lives in the
+// The set was defined in `src/core/canvas-control-core.ts` and the gate it describes lives in the
 // renderer (`Canvas.tsx`'s `switch (verb)`), which cannot import from `src/main` — `tsconfig.web`
 // includes only `src/renderer`, `src/shared` and the preload types. So the set stayed a
 // security-shaped constant imported by nothing but its own unit test, while

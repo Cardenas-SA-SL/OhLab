@@ -8,8 +8,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import { buildContextShimScript } from '../core/context-link-core'
-import { buildControlShimScript } from '../core/canvas-control-core'
+import { buildControlShimScript } from './canvas-control-core'
+import { buildContextShimScript } from './context-link-core'
 
 const run = promisify(execFile)
 const cleanup: string[] = []
