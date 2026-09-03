@@ -12,6 +12,7 @@ import {
   createDiffNode,
   createStickyNode,
   createDinoNode,
+  createFilesNode,
   isAccountLoginNode
 } from '@renderer/state/workspace'
 import { absolutePosition, type FocusableNode } from './nodeFocus'
@@ -29,6 +30,16 @@ export interface ReopenNodeSnapshot {
   extent?: 'parent'
   size?: { width: number; height: number }
   data: NodeData
+  /**
+   * The id of the matching entry this same delete also recorded in the persisted
+   * `Project.closedSessions` history, when one was recorded — set only by `deleteNodes` (Canvas),
+   * never by `stateToReopenSnapshot`'s reverse direction. Lets the two ledgers consume each
+   * other: reopening this ⇧⌘T snapshot drops the persisted twin (`reopenLastClosedCommand`), and
+   * reopening the persisted twin from the sidebar drops this snapshot out of the ⇧⌘T stack
+   * (`reopenClosedSessionCommand` → `useReopenHistory.dropByClosedSessionId`) — so a single delete
+   * can never be reopened twice into two duplicate nodes.
+   */
+  closedSessionId?: string
 }
 
 type SnapshotSource = {
@@ -44,7 +55,10 @@ type SnapshotSource = {
   data: NodeData
 }
 
-const UNRESTORABLE: ReadonlySet<string> = new Set(['group', 'subagent', 'loop'])
+// 'trigger' has no matching case in recreateNodeFromSnapshot's buildBase below (it always
+// recreates to null) — excluded here so a deleted trigger node never becomes a dead, clickable
+// closed-session/reopen-history entry.
+const UNRESTORABLE: ReadonlySet<string> = new Set(['group', 'subagent', 'loop', 'trigger'])
 
 /** Captures a node right before deletion. `all` must be the FULL live tree (before any
  *  mutation), so the parent chain is still walkable. Returns null for kinds this feature
@@ -154,6 +168,13 @@ function buildBase(snapshot: ReopenNodeSnapshot, ctx: RecreateContext): CanvasNo
       return d.filePath ? createEditorNode(0, d.filePath, undefined, d.sshFs) : null
     case 'video':
       return d.filePath ? createVideoNode(0, d.filePath, undefined, d.sshFs) : null
+    // A files node IS restorable — its whole state is the directory it shows — so it gets a case
+    // here rather than a seat in UNRESTORABLE beside 'trigger'. Registering it in neither list is
+    // the trap the 'trigger' comment above warns about: the snapshot is taken, the reopen entry is
+    // written, and `default: return null` then makes it a dead click. Compiles and typechecks
+    // either way, which is why the rule is written down rather than left to be noticed.
+    case 'files':
+      return d.cwd ? createFilesNode(0, d.cwd, undefined, d.sshFs) : null
     case 'diff':
       return d.cwd && d.filePath ? createDiffNode(0, d.cwd, d.filePath, !!d.diffStaged, undefined, d.commitOid) : null
     case 'web':

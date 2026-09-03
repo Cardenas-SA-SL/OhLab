@@ -57,6 +57,8 @@ export interface ModalSpawn {
   ssh?: SshConnection
   /** SSH-project node: tmux runs on the REMOTE host (over the project's ControlMaster). */
   sshRemoteTmux?: boolean
+  /** One-shot launch command for a fresh session (agent CLIs). */
+  initialCommand?: string
 }
 
 /**
@@ -247,8 +249,9 @@ export function ModalTerminal({ nodeId, spawn, searchOpen, onCloseSearch }: Moda
       const action = terminalKeyAction(e, term.hasSelection(), ownsProjectJump, registryOwns)
       if (action === 'pass') return true
       // 'bubble': hand the chord to the window dispatcher — no preventDefault (it bails on
-      // defaultPrevented), no xterm processing. See TerminalNode's twin comment.
-      if (action === 'bubble') return false
+      // defaultPrevented), no xterm processing. 'native' leaves the event uncancelled for the
+      // PLATFORM's own paste (Windows Ctrl+V). See TerminalNode's twin comment.
+      if (action === 'bubble' || action === 'native') return false
       e.preventDefault()
       if (action === 'copy') window.nodeTerminal.clipboard.writeText(term.getSelection())
       else if (action === 'shift-enter' && sessionId) transport.write(sessionId, SHIFT_ENTER_SEQ)

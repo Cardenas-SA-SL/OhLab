@@ -6,6 +6,7 @@ import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { sessionName, TMUX_SOCKET } from '../../src/core/tmux-naming'
+import { SANDBOX_ENV, tmuxSocketPath } from '../../src/core/tmux-test-socket'
 import { startServer } from '../../src/server/index'
 import type { Workspace } from '../../src/shared/types'
 
@@ -39,6 +40,22 @@ describe.skipIf(!hasTmux)('disposable Server boot rescue', () => {
   // Everything startServer printed while booting with canvasControl on. Captured rather than
   // asserted through a spy call count because the boot logs several unrelated lines.
   const bootLogs: string[] = []
+
+  // This suite reads and (on cleanup only) kills on the LIVE socket name, because the server it
+  // boots binds `TMUX_SOCKET` itself — the whole assertion is that boot spawns nothing, and only
+  // that socket can answer it. `TMUX_TMPDIR` is what keeps the name off the developer's live tmux
+  // SERVER (this repo is developed from inside nodeterm), so refuse to run at all when the run-wide
+  // sandbox is not in effect rather than fall back to it silently. See issue #629 and
+  // `src/core/tmux-socket-isolation.guard.test.ts`, where this file is allowlisted.
+  beforeAll(() => {
+    const sandbox = process.env[SANDBOX_ENV]
+    expect(sandbox, 'tmux sandbox not in effect — see test/setup/tmux-sandbox.ts').toBeTruthy()
+    expect(process.env.TMUX_TMPDIR).toBe(sandbox)
+    const uid = process.getuid?.() ?? 0
+    expect(tmuxSocketPath(sandbox!, uid, TMUX_SOCKET)).not.toBe(
+      tmuxSocketPath('/tmp', uid, TMUX_SOCKET)
+    )
+  })
 
   beforeAll(async () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nt-server-boot-rescue-'))

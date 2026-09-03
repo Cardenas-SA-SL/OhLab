@@ -12,6 +12,8 @@ import {
   isRemoteSessionNode,
   isValidGitRef,
   resolveBaseRef,
+  resolveWorktreeBase,
+  type WorktreeBaseNode,
   worktreeFromCreate,
   worktreeFromEntry,
   worktreeRemoveMessage,
@@ -340,12 +342,18 @@ describe('displacedByWorktree', () => {
     // Shares the prefix but is a sibling directory, not really inside the worktree.
     { id: 'editor-prefix', type: 'editor', data: { filePath: '/wt/feature/index.ts' } },
     { id: 'diff-in', type: 'diff', data: { cwd: wt, filePath: 'src/index.ts' } },
-    { id: 'diff-out', type: 'diff', data: { cwd: '/repo', filePath: 'src/index.ts' } }
+    { id: 'diff-out', type: 'diff', data: { cwd: '/repo', filePath: 'src/index.ts' } },
+    // File-manager nodes: displaced by PATH wherever they sit (they have no session to disturb),
+    // so one outside the group counts where a terminal outside it does not.
+    { id: 'files-in', type: 'files', parentId: 'g', data: { cwd: `${wt}/src` } },
+    { id: 'files-outside-group', type: 'files', data: { cwd: wt } },
+    { id: 'files-out', type: 'files', data: { cwd: '/repo' } },
+    { id: 'files-prefix', type: 'files', data: { cwd: '/wt/feature' } }
   ]
 
   it('collects every descendant terminal living in the worktree, nested ones included', () => {
     expect([...displacedByWorktree(nodes, 'g', wt)].sort()).toEqual(
-      ['diff-in', 'editor-in', 'nested', 'term'].sort()
+      ['diff-in', 'editor-in', 'files-in', 'files-outside-group', 'nested', 'term'].sort()
     )
   })
 
@@ -361,10 +369,23 @@ describe('displacedByWorktree', () => {
       'inner',
       'editor-out',
       'editor-prefix',
-      'diff-out'
+      'diff-out',
+      'files-out',
+      'files-prefix'
     ]) {
       expect(got.has(id)).toBe(false)
     }
+  })
+
+  // A file manager left pointing into a removed worktree shows "Could not read this folder"
+  // forever AND keeps the dead path in project.json — the same persisted-dead-path failure the
+  // terminal branch exists to prevent. It has no session, so unlike a terminal it is displaced
+  // wherever it sits, and it gets its cwd re-pointed rather than an editor's `fileMissing`.
+  it('collects a file-manager node by path, in the group or not', () => {
+    const got = displacedByWorktree(nodes, 'g', wt)
+    expect(got.has('files-in')).toBe(true)
+    expect(got.has('files-outside-group')).toBe(true)
+    expect(nodes.find((n) => n.id === 'files-outside-group')?.parentId).toBeUndefined()
   })
 
   it('collects an editor/diff node by path even though it has no parentId at all', () => {
@@ -510,5 +531,88 @@ describe('effectiveWorktreeTemplate', () => {
     const template = effectiveWorktreeTemplate({ basePath: '/' }, undefined)
     expect(template).toBe('/${branch}')
     expect(computeWorktreePath('/src/repo', 'topic/a', template)).toBe('')
+  })
+})
+
+describe('resolveWorktreeBase (issue #530 — --base <ref|stationId>)', () => {
+  // A wave-one worktree frame (g1, branch wave1) holding an agent node (a1), a nested inner
+  // frame (g1a) holding a2; a loose node (n0); an unbound frame (g2) with a member (b1).
+  const NODES: WorktreeBaseNode[] = [
+    { id: 'g1', worktree: { branch: 'wave1' } },
+    { id: 'a1', parentId: 'g1' },
+    { id: 'g1a', parentId: 'g1' },
+    { id: 'a2', parentId: 'g1a' },
+    { id: 'n0' },
+    { id: 'g2' },
+    { id: 'b1', parentId: 'g2' }
+  ]
+
+  it('no --base means the default', () => {
+    expect(resolveWorktreeBase(undefined, 'wave2', NODES)).toEqual({ kind: 'default' })
+    expect(resolveWorktreeBase('  ', 'wave2', NODES)).toEqual({ kind: 'default' })
+  })
+  it('a member node resolves through its bound group to the branch', () => {
+    expect(resolveWorktreeBase('a1', 'wave2', NODES)).toEqual({
+      kind: 'station',
+      ref: 'wave1',
+      stationId: 'a1',
+      groupId: 'g1'
+    })
+  })
+  it('a node in a NESTED frame climbs to the nearest bound ancestor', () => {
+    expect(resolveWorktreeBase('a2', 'wave2', NODES)).toEqual({
+      kind: 'station',
+      ref: 'wave1',
+      stationId: 'a2',
+      groupId: 'g1'
+    })
+  })
+  it('the bound group id itself is a station', () => {
+    expect(resolveWorktreeBase('g1', 'wave2', NODES)).toEqual({
+      kind: 'station',
+      ref: 'wave1',
+      stationId: 'g1',
+      groupId: 'g1'
+    })
+  })
+  it('a node outside any worktree frame is an explicit refusal — never reinterpreted as a ref', () => {
+    for (const id of ['n0', 'b1', 'g2']) {
+      const r = resolveWorktreeBase(id, 'wave2', NODES)
+      expect(r.kind).toBe('error')
+      if (r.kind === 'error') expect(r.error).toContain('not inside a worktree-bound frame')
+    }
+  })
+  it('a station whose branch IS the new branch is refused (self-base)', () => {
+    const r = resolveWorktreeBase('a1', 'wave1', NODES)
+    expect(r.kind).toBe('error')
+    if (r.kind === 'error') expect(r.error).toContain('based on itself')
+  })
+  it('a plain ref self-base is refused too', () => {
+    const r = resolveWorktreeBase('wave2', 'wave2', NODES)
+    expect(r.kind).toBe('error')
+    if (r.kind === 'error') expect(r.error).toContain('based on itself')
+  })
+  it('a value naming no node passes through as a validated git ref', () => {
+    expect(resolveWorktreeBase('main', 'wave2', NODES)).toEqual({ kind: 'ref', ref: 'main' })
+    expect(resolveWorktreeBase('origin/main', 'wave2', NODES)).toEqual({
+      kind: 'ref',
+      ref: 'origin/main'
+    })
+  })
+  it('a value that is neither a node nor a valid ref is refused', () => {
+    for (const bad of ['-rf', 'a..b', 'has space']) {
+      const r = resolveWorktreeBase(bad, 'wave2', NODES)
+      expect(r.kind).toBe('error')
+      if (r.kind === 'error') expect(r.error).toContain('neither')
+    }
+  })
+  it('a forged parentId cycle terminates as a refusal instead of hanging', () => {
+    // project.json is hand-editable and git-shared; the walk is visited-set guarded.
+    const cyc: WorktreeBaseNode[] = [
+      { id: 'x', parentId: 'y' },
+      { id: 'y', parentId: 'x' }
+    ]
+    const r = resolveWorktreeBase('x', 'wave2', cyc)
+    expect(r.kind).toBe('error')
   })
 })

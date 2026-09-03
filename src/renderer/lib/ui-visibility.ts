@@ -22,6 +22,7 @@ export const HIDEABLE_MENU_ITEMS: readonly HideableRow[] = [
   { id: 'group', label: 'Group node / Group selection' },
   { id: 'remove-from-group', label: 'Remove from group' },
   { id: 'colors', label: 'Colors' },
+  { id: 'icon', label: 'Set icon' },
   { id: 'duplicate', label: 'Duplicate' },
   { id: 'snap-zone', label: 'Snap to zone' },
   { id: 'collapse', label: 'Collapse / Expand' },
@@ -36,7 +37,7 @@ export const HIDEABLE_HEADER_BUTTONS: readonly HideableRow[] = [
   { id: 'mic', label: 'Dictate' },
   { id: 'ai-name', label: 'Name with AI' },
   { id: 'comments', label: 'Comments' },
-  { id: 'hide-fanout', label: 'Hide subagent/loop cards' },
+  { id: 'hide-fanout', label: 'Hide cards & connections' },
   { id: 'tidy-fanout', label: 'Tidy subagent cards' }
 ]
 

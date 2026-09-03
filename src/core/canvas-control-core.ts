@@ -189,6 +189,23 @@ const VERBS: ControlVerb[] = [
  * dispatch stop agreeing.
  */
 export { isDestructiveVerb, DESTRUCTIVE_VERBS } from '../shared/control-verbs'
+// Imported (not only re-exported) because the agent-facing bodies RENDER the dry-run verb list
+// from the set — the same derive-don't-retype rule as `messagingGuidanceLines`, so the docs can
+// never name a verb the gate does not honour.
+import { DRY_RUN_VERBS } from '../shared/control-verbs'
+
+/** The `--dry-run` paragraph both agent-facing bodies share, rendered from `DRY_RUN_VERBS`. */
+function dryRunDocLines(): string[] {
+  return [
+    `Add \`--dry-run\` to a spawn verb (${[...DRY_RUN_VERBS].join(', ')}) to validate the call`,
+    'WITHOUT opening anything: it runs the same validation as a real call — ids resolved against',
+    'the live canvas, the team JSON parsed role by role, the worktree path computed — and replies',
+    'with what WOULD happen, or the exact refusal. Use it to vet a `spawn-team` payload, a',
+    '`--group`/`--after` id or a `--prompt-file` path before fanning out: these verbs are cheap to',
+    'call and expensive to undo, and the dry run moves the mistake to the cheap side. Every other',
+    'verb refuses `--dry-run` (nothing is done), and it cannot be combined with `--project`.'
+  ]
+}
 
 /** Validate a raw (verb, args) pair into a ControlCommand, or return an { error }. */
 export function parseControlRequest(
@@ -292,6 +309,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     'starts with `--` (`--cmd=--version`); written as two tokens, a leading `--` is read as the next',
     'flag. A flag with no value is allowed anywhere on the line.',
     '',
+    ...dryRunDocLines(),
+    '',
     'Server Edition ownership is fail-closed: every request requires verified node identity, and',
     'a caller may mutate or message only nodes it opened during the current server run.',
     'Restarting the server clears that creator proof; persisted nodes and queued launches are never',
@@ -301,12 +320,16 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `list` — current nodes (id, kind, title). Start here when you need a node id.',
     '- `help` — print the verb list. Answered by the shim itself, so it works even if the app is down.',
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]` — open N plain terminals.',
-    '- `open-claude [--count N] [--cwd P] [--prompt T] [--model M] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
-    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
+    '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]` — open N Claude sessions.',
+    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open`,
     '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
     '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
-    '  start until every listed station has gone idle, and is context-linked to them so it can read',
-    '  their work when it wakes — use it for "B needs what A produced" instead of polling. Only',
+    '  start until every listed station has finished a turn SUCCESSFULLY. It is',
+    '  roped to each listed station (one edge, dashed while it waits, solid once it runs) and can read',
+    '  their work with get-linked-context when it wakes — nothing to `link`. Use it for "B needs what',
+    '  A produced" instead of polling. A station whose turn ended on an API error does NOT release its',
+    '  dependents even though it is idle (`list` marks it LAST TURN ERRORED); nudge or retry it, or',
+    '  run the armed node yourself. Only',
     `  status-reporting agent nodes (${statusAgents}, or custom agents based on them) may be waited on; a plain terminal never`,
     '  reports finishing, so waiting on one is refused. `--project <id>` opens the node(s) in another',
     '  project instead of yours. It accepts exactly two things — any other id is refused: your OWN',
@@ -314,13 +337,23 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  included); or an id `open-project` returned to YOU in this session, which never switches the',
     '  user\'s view. A session opened into a non-active project starts when the user next views that',
     '  project — do not poll for it. `--group`/`--after` cannot be combined with `--project`.',
+    '  The reply reports whether anything actually started: `queued` is true (and `queuedIds`',
+    '  lists which) when a node was opened ARMED — waiting on `--after`, on a worktree\'s',
+    '  setup script, or on a `--project` target the user has not viewed yet. A queued node',
+    '  exists on the canvas but has no process behind it: do not route work to it, do not',
+    '  `send` to it and do not report it as started. It launches itself when its wait ends,',
+    '  then reports through the ordinary status hooks — there is nothing to poll.',
+    '  `queued: false` means the session is running.',
     '  `--prompt` arrives on ONE LINE: every run of whitespace in it, newlines included, is',
-    '  collapsed to a single space before the session starts. Write the task as continuous prose',
-    '  and use sentences where you would have used bullets — a numbered list arrives as one',
-    '  paragraph. Never begin a prompt with `/`: once flattened, the agent reads the whole prompt',
-    '  as arguments to that slash command, your task is never seen, and the node then sits idle',
-    '  looking healthy. To pick a model use `--model`, not a leading `/model`. To send a long or',
-    '  structured brief, open the node and follow up with `send --node <id> --text "..."`.',
+    '  collapsed to a single space before the session starts (the prompt rides the launch command',
+    '  line typed into the pane). For a structured or multi-line brief use `--prompt-file <abs',
+    '  path>` instead: write the brief to a file, pass the absolute path, and the session starts',
+    '  with the file\'s exact contents — newlines, numbered lists and headings preserved. The file',
+    '  is read when the session LAUNCHES (later than the call for an `--after`-armed node), so',
+    '  leave it in place until the station has started. Never begin a prompt with `/`: once',
+    '  flattened, the agent reads the whole prompt as arguments to that slash command, your task',
+    '  is never seen, and the node then sits idle looking healthy. To pick a model use `--model`,',
+    '  not a leading `/model`.',
     '  `--model <id>` picks the model the session launches with, instead of inheriting the',
     '  default. Use it to keep a cheap station cheap: a node whose whole job is editing a README',
     '  does not need the model you give the node rewriting a test suite. Honoured by claude, codex',
@@ -349,9 +382,10 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  arrange across frames in one call); arranging a frame\'s children also shrinks the frame to fit.',
     '- `link --to <id,id> [--from <id>]` — context-link nodes so each can READ the other\'s transcript',
     '  on demand (nodeterm linked-context CLI). `--from` defaults to you; nothing is pushed into the',
-    '  linked sessions. Agent sessions you open are linked to you automatically — use `link` for nodes',
-    '  you did not open, or to link two OTHER nodes together. On Server Edition the ownership rule',
-    '  is stricter: every endpoint must be a node you opened during this server run.',
+    '  linked sessions. Agent sessions you open, and the stations you name in `--after`, are already',
+    '  linked — nothing to `link`. Use `link` only for nodes you did not open, or to link two OTHER nodes.',
+    '  On Server Edition the ownership rule is stricter: every endpoint must be a node you opened',
+    '  during this server run.',
     '- `verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--synthesis off]` — open a',
     '  review panel over that node\'s work: one reviewer per lens, each armed behind the target and linked',
     '  to it, plus a judge armed behind the panel that merges the findings into one verdict. Reviewers are',
@@ -359,13 +393,21 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `spawn-team --label L --team \'[{"title":"UI","prompt":"...","agent":"claude","model":"..."}]\'` — one agent per',
     '  role (max 8), arranged in a grid, wrapped in a labeled group, each connected + context-linked to you.',
     '  `model` is per role, so one team can mix tiers — give an expensive model to the role that needs it',
-    '  and a cheap one to the rest. Same rule as `--model` below.',
-    '- `open-worktree --branch <name> [--base <ref>] [--path P] [--group <id>]` — create a git worktree',
-    '  wrapped in a bound group frame (terminals inside it run in the worktree). Local projects only.',
+    '  and a cheap one to the rest. Same rule as `--model` below. A role may carry `promptFile`',
+    '  (absolute path) instead of `prompt` — same multi-line-brief semantics as `--prompt-file`.',
+    '- `open-worktree --branch <name> [--base <ref|stationId>] [--path P] [--group <id>]` — create a git',
+    '  worktree wrapped in a bound group frame (terminals inside it run in the worktree). `--base`',
+    '  takes a git ref, or the id of a STATION — a node or group inside a worktree-bound frame — and',
+    '  then resolves to that station\'s branch, so wave two branches off wave one by identity instead',
+    '  of restating the branch name. The base is captured when the worktree is CREATED: to build on',
+    '  a station\'s finished work, create the downstream worktree after that station has committed',
+    '  (or have the downstream agent merge the branch first). Local projects only.',
     '- `close-worktree --group <id> [--mode unbind|remove]` — unbind keeps the directory; remove asks',
     '  the user to confirm deletion.',
     '- `branch --node <id>` — branch a Claude node\'s conversation (Claude nodes only).',
     '- `rename --node <id> --title "New Name"` — rename any node (terminals, groups, stickies…).',
+    '  Renaming to the title the node ALREADY has is a no-op: nothing is typed into its agent',
+    '  session, and the reply says `already named`. Re-assert your own name as often as you like.',
     `- \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.`,
     '- `write --node <id> --text "..."` / `close --node <id>` — type into / close a node.',
     '  Desktop asks the user to confirm both. `denied by user` is FINAL; `no answer within 120s`',
@@ -688,6 +730,8 @@ starts with \`--\` (\`--cmd=--version\`); written as two tokens, a leading \`--\
 next flag, so \`--text --oops\` sends an empty \`--text\` plus a stray \`--oops\`. A flag with no
 value is allowed anywhere on the line, not only at the end.
 
+${dryRunDocLines().join('\n')}
+
 Server Edition ownership is fail-closed: every request requires verified node identity, and a
 caller may mutate or message only nodes it opened during the current server run. Restarting
 the server clears that creator proof; persisted nodes and queued launches are never auto-adopted,
@@ -695,21 +739,30 @@ relaunched, or controlled at boot. An unowned target receives a named refusal.
 
 Verbs:
 - \`list\` — list current nodes (id, kind, title). Start here when you need a node id.
+  A row ending **LAST TURN ERRORED** is a station whose last turn died on an API/model error:
+  it is idle, but it produced nothing, so do not read its output or build on it. The marker
+  is on the row on purpose — a fan-out of seven stations should cost one call to learn this,
+  not seven. It clears itself the moment that station completes another turn.
 - \`help\` — print the verb list. The shim answers this itself, without reaching the app, so it
   is also what to run when you are unsure whether the control endpoint is alive.
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--project <id>]\` — open N plain terminals (default 1).
-- \`open-claude [--count N] [--cwd P] [--prompt T] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N Claude sessions (default 1).
-- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N sessions of any agent CLI.
+- \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N Claude sessions (default 1).
+- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--project <id>]\` — open N sessions of any agent CLI.
   \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
   hands its worktree path down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
-  every listed station has gone idle — that is how you express "B needs what A produces" without
-  sitting in a poll loop. The armed node is also context-linked to each station it waits on, so
-  it can read their work the moment it wakes. Only agent nodes that report status
+  every listed station has finished a turn successfully — that is how you express "B needs what A produces" without
+  sitting in a poll loop. The armed node is roped to each listed station (one edge,
+  dashed while it waits, solid once it runs) and can read their work with get-linked-context
+  the moment it wakes — nothing to \`link\`. Only agent nodes that report status
   (${statusAgents}, or custom agents based on them) can be waited on — waiting on a plain terminal is refused, because a
   plain terminal never reports finishing and the node would hang forever. Note the semantics:
   "idle" is the end of a station's TURN, not proof its whole job is done — right for a station
   given one self-contained prompt, wrong if you expect a long conversation first.
+  A station whose turn ended on an API/model ERROR does NOT release its dependents, even
+  though it is idle: it reached idle immediately and produced nothing, so firing would start
+  the chain on bad ground. \`list\` marks it LAST TURN ERRORED. Nudge or retry that station —
+  one successful turn releases everything armed behind it — or run the armed node yourself.
   \`--project <id>\` opens the node(s) in another project instead of yours. It accepts exactly
   two things — any other id is refused: your OWN project id, which behaves exactly as if the flag
   were omitted (a normal open, view switch included); or an id \`open-project\` returned to YOU
@@ -717,19 +770,30 @@ Verbs:
   TARGET project's (its cwd, its default account and permission mode). A session opened into a
   non-active project starts when the user next views that project — do not poll for it; the reply
   says so. \`--group\`/\`--after\` cannot be combined with \`--project\`.
+  **The reply tells you whether anything actually started.** \`queued\` is true — and
+  \`queuedIds\` names which of the returned ids — whenever a node was opened **armed**: waiting on
+  \`--after\`, on a worktree's setup script, or on a \`--project\` target the user has not viewed
+  yet. A queued node exists on the canvas but has **no process behind it**, so do not route work
+  to it, do not \`send\` to it and do not report it as started. It launches itself when its wait
+  ends and then reports through the ordinary status hooks, so there is nothing to poll.
+  \`queued: false\` means the session is running.
   \`--prompt\` arrives on ONE LINE. Every run of whitespace in it — newlines included — is
   collapsed to a single space before the session starts, because the prompt is passed as an
-  argument on the agent CLI's launch command line and that line is typed into the pane. So write
-  the task as continuous prose: a numbered list or a markdown heading arrives as one paragraph,
-  and indentation is lost. Two consequences worth planning around:
+  argument on the agent CLI's launch command line and that line is typed into the pane. Two
+  consequences worth planning around:
+  - **A structured brief goes through \`--prompt-file <abs path>\`.** Write the brief (numbered
+    acceptance criteria, file lists, guard clauses — anything multi-line) to a file, pass the
+    absolute path, and the session starts with the file's exact contents: the launch line stays
+    one line and the pane's shell reads the file at execution. The file is read when the session
+    LAUNCHES — for an \`--after\`-armed node that is later than your call — so leave it in place
+    until the station has started. On an SSH project the path is on the host (where you run).
+    Pass either \`--prompt\` or \`--prompt-file\`, not both.
   - **Never start a prompt with \`/\`.** Flattened, \`/model sonnet\` followed by your task reads
     to the agent as one slash command whose argument is the entire rest of the prompt. The
     command fails, your task is never seen, and the node then sits at an idle prompt looking
     perfectly healthy — including to \`--after\`, which will arm everything behind it. Use
     \`--model\` for the model; there is no supported way to run a slash command at launch.
-  - **For a long or structured brief, split it.** Open the node with a short \`--prompt\` (or
-    none), then deliver the body with \`send --node <id> --text "..."\`, which preserves the text
-    as written.
+
   \`--model <id>\` decides which model the session LAUNCHES with, instead of inheriting the
   project default. This is the lever for cost: a station whose job is editing a README does not
   need the model you give the station rewriting a 1000-line test suite, and without this flag
@@ -775,8 +839,9 @@ Verbs:
 - \`link --to <id,id> [--from <id>]\` — context-link nodes, so each can READ the other's
   transcript on demand with the get-linked-context skill. \`--from\` defaults to you. Nothing is
   pushed into the linked sessions — reading is on demand, so linking never interrupts anyone.
-  Agent sessions you open (\`open-claude\`/\`open-agent\`/\`spawn-team\`) are linked to you
-  automatically; use \`link\` for nodes you did not open, or to link two OTHER nodes together.
+  Agent sessions you open (\`open-claude\`/\`open-agent\`/\`spawn-team\`) and the stations you name in
+  \`--after\` are already linked — nothing to \`link\`. Use \`link\` only for nodes you did not open,
+  or to link two OTHER nodes together.
   On Server Edition the ownership rule is stricter: every endpoint must be a node you opened
   during this server run.
 - \`verify --node <id> [--lenses correctness,security,tests] [--focus "..."] [--agent <id>] [--synthesis off] [--label L]\` —
@@ -792,16 +857,30 @@ Verbs:
   open one agent per role (each prompt starts that member working), arrange them in a grid,
   wrap them in a labeled group, and connect + context-link each to you. Max 8 roles per call.
   \`model\` is optional and per role — the same selector \`--model\` applies, so a single team can
-  run its heavy role on a large model and the rest on a cheap one.
-- \`open-worktree --branch <name> [--base <ref>] [--path P] [--group <id>]\` — create a git
+  run its heavy role on a large model and the rest on a cheap one. A role may carry
+  \`promptFile\` (absolute path) instead of \`prompt\` — the \`--prompt-file\` semantics per role,
+  for members whose brief is structured or multi-line.
+- \`open-worktree --branch <name> [--base <ref|stationId>] [--path P] [--group <id>]\` — create a git
   worktree (new branch off base, default: the repo's default branch) and wrap it in a bound
   group frame (or bind it to an existing empty group). Terminals created inside the group
   run in the worktree. Local projects only.
+  \`--base\` also takes the id of a STATION — a node or group inside a worktree-bound frame —
+  and resolves to that station's branch, so "branch off what that station is working on" is
+  said by identity: \`open-worktree --branch wave2 --base <wave1 node or group id>\`. The reply
+  names the branch the id resolved to. Refused explicitly: an id outside any worktree frame, a
+  base that resolves to the branch being created, and a value that is neither a node id nor a
+  valid git ref. NOTE the timing: the base is captured when the worktree is CREATED, so a
+  downstream worktree made at fan-out time starts from the upstream branch AS IT IS THEN
+  (usually empty) — create it after the upstream station has committed (arm the downstream
+  agent with \`--after\` and open its worktree when it fires), or have the downstream agent
+  \`git merge\` the upstream branch as its first step.
 - \`close-worktree --group <id> [--mode unbind|remove]\` — unbind (default) drops the binding
   and keeps the directory; remove asks the user to confirm deleting the worktree.
 - \`branch --node <id>\` — branch a Claude node's conversation: the node stays on the new
   branch and a new node opens resuming the original. Target must be a Claude agent node.
 - \`rename --node <id> --title "New Name"\` — rename any node (terminals, groups, stickies…).
+  Renaming to the title the node ALREADY has is a no-op: nothing is typed into its agent
+  session, and the reply says \`already named\`. Re-assert your own name as often as you like.
 - \`color --node <id,id> --color C\` — recolor nodes, frames, or stickies. C is one of: ${NODE_COLORS.join(', ')}.
 - \`write --node <id> --text "..."\` — type text into a terminal node. (Asks the user to confirm.)
 - \`close --node <id>\` — close a node. Desktop asks the user to confirm. Server Edition closes
@@ -903,7 +982,8 @@ across Nodeterm sessions), be the orchestration chef — plan the kitchen, then 
    user to relay it. Then do the work only you can do: reconcile the streams against each
    other, name the conflicts and the leftovers, and report ONE synthesis. A station you never
    read is a station whose work you cannot vouch for — say so rather than assuming it went
-   fine. Stations you did not open are not linked; \`link --to <id>\` them first.
+   fine. Stations you neither opened nor named in \`--after\` are not linked; \`link --to <id>\`
+   them first.
 6. Verify before you report. When a station's work matters — anything touching money, auth, data
    migration or a public API — run \`verify --node <stationId>\` instead of re-reading it yourself.
    You cannot independently check work you were part of planning; a panel of reviewers who each

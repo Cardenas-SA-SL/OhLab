@@ -5,7 +5,11 @@ import type { BridgeLink } from './types'
 export interface LinkEndpoint {
   /** Canvas node kind: 'terminal' | 'sticky' | 'editor' | … */
   kind: string
-  /** Terminal node whose agent is CONTEXT_LINK_CAPABLE (claude/codex/gemini). */
+  /**
+   * Terminal node whose agent is `CONTEXT_LINK_CAPABLE`. Deliberately not spelled out here: the
+   * list has gained two members since this comment was written (opencode, then grok) and named
+   * them wrong in between. Ask `canContextLink`; the list lives in `shared/agents/config.ts`.
+   */
   contextCapable: boolean
 }
 

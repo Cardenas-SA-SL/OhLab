@@ -24,6 +24,8 @@ import {
 import { codexIdentityCaps } from '../core/codex-identity-caps'
 import { codexThreadIdentityRoot } from '../core/codex-identity-proxy'
 import { claudeCliCaps, type ClaudeCliCaps } from '../core/claude-cli'
+import { grokCliCaps } from '../core/grok-cli'
+import type { GrokCliCaps } from '../shared/types'
 import { installHooksIntoLocalAccounts } from '../core/claude-accounts-service'
 import { platform } from '../core/platform'
 import type { PtyManager } from '../core/pty-manager'
@@ -44,6 +46,8 @@ export interface ServerCanvasControlDeps {
   settings(): Settings
   boardLog: BoardLogHandlers
   cliCaps?: () => Promise<ClaudeCliCaps>
+  /** grok's own `--session-id` probe; defaults to the real one. See HeadlessNodeFactoryDeps. */
+  grokCaps?: () => Promise<GrokCliCaps>
   /** Test seam for the boot-populated shared Codex capability answer. */
   codexSharedIdentity?: () => Promise<boolean>
   /**
@@ -165,6 +169,8 @@ export async function initServerCanvasControl(
     ptyManager: deps.ptyManager,
     settings: deps.settings,
     cliCaps: deps.cliCaps ?? claudeCliCaps,
+    // grok answers with its own probe — see HeadlessNodeFactoryDeps.grokCaps.
+    grokCaps: deps.grokCaps ?? grokCliCaps,
     codexSharedIdentity:
       deps.codexSharedIdentity ?? (() => codexIdentityCaps().then((caps) => caps.shared)),
     stateOf: nodeState,

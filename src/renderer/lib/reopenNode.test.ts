@@ -43,8 +43,8 @@ describe('snapshotNode', () => {
     })
   })
 
-  it('returns null for group/subagent/loop nodes', () => {
-    for (const type of ['group', 'subagent', 'loop'] as const) {
+  it('returns null for group/subagent/loop/trigger nodes', () => {
+    for (const type of ['group', 'subagent', 'loop', 'trigger'] as const) {
       const node = { type, position: { x: 0, y: 0 }, data: { title: 'x', color: '#fff', group: null } }
       expect(snapshotNode(node, [])).toBeNull()
     }
@@ -123,5 +123,57 @@ describe('recreateNodeFromSnapshot', () => {
       baseCtx()
     )
     expect(node!.data.highScore).toBe(42)
+  })
+
+  // A kind in neither UNRESTORABLE nor buildBase's switch is the trap the 'trigger' comment in
+  // reopenNode.ts warns about: snapshotNode happily records it, the ⇧⌘T entry and its persisted
+  // closedSessions twin are both written, and buildBase's `default` then returns null — a dead,
+  // clickable history entry that typechecks. So the pairing is asserted from BOTH ends.
+  it('recreates a files node from its cwd (a deleted file manager is not a dead reopen entry)', () => {
+    const node = recreateNodeFromSnapshot(
+      snap({
+        type: 'files',
+        data: { title: 'nodes', color: '#ffd60a', group: null, cwd: '/repo/src/renderer/nodes' }
+      }),
+      baseCtx()
+    )
+    expect(node).not.toBeNull()
+    expect(node!.type).toBe('files')
+    expect(node!.data.cwd).toBe('/repo/src/renderer/nodes')
+    expect(node!.data.title).toBe('nodes')
+  })
+
+  it('carries a files node’s sshFs flag, so a remote listing does not come back local', () => {
+    const node = recreateNodeFromSnapshot(
+      snap({
+        type: 'files',
+        data: { title: 'src', color: '#ffd60a', group: null, cwd: '/srv/app/src', sshFs: true }
+      }),
+      baseCtx()
+    )
+    expect(node!.data.sshFs).toBe(true)
+  })
+
+  it('returns null for a files snapshot missing cwd (never a silently blank listing)', () => {
+    const node = recreateNodeFromSnapshot(
+      snap({ type: 'files', data: { title: 'x', color: '#fff', group: null } }),
+      baseCtx()
+    )
+    expect(node).toBeNull()
+  })
+
+  it('snapshots a files node rather than treating it as unrestorable', () => {
+    const snapshot = snapshotNode(
+      {
+        type: 'files',
+        position: { x: 0, y: 0 },
+        width: 340,
+        height: 460,
+        data: { title: 'docs', color: '#ffd60a', group: null, cwd: '/repo/docs' }
+      },
+      []
+    )
+    expect(snapshot).not.toBeNull()
+    expect(snapshot!.type).toBe('files')
   })
 })

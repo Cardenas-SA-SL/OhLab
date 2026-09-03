@@ -30,6 +30,7 @@ import type {
   BridgeLink,
   CanvasNodeState,
   ClaudeCliCaps,
+  GrokCliCaps,
   Project,
   PtyCreateOptions,
   PtyCreateResult,
@@ -65,6 +66,15 @@ export interface HeadlessNodeFactoryDeps {
   ptyManager: HeadlessPty
   settings(): Settings
   cliCaps(): Promise<ClaudeCliCaps>
+  /**
+   * grok's OWN `--session-id` probe. Separate from `cliCaps` because the two CLIs are installed and
+   * upgraded independently, so claude's answer is not evidence about grok (CLAUDE.md rule 9: a gate
+   * fed by a version probe belongs to the agent it probes). Wired even though `SERVER_AGENTS` does
+   * not yet include grok: `supportsSessionIdFlag`'s third argument is required precisely so a caller
+   * cannot forget the probe and silently get "grok never mints", and a hard-coded `false` here would
+   * be that forgotten probe, waiting for the day grok joins the set.
+   */
+  grokCaps(): Promise<GrokCliCaps>
   /** Whether this host's Codex launcher + shared app-server identity spine are ready. */
   codexSharedIdentity(): Promise<boolean>
   /** Hook-mirror lookups. A stored agentId wins; these cover a plain terminal running an agent. */
@@ -1072,6 +1082,7 @@ export class HeadlessNodeFactory {
       const settings = this.deps.settings()
       const nodeSize = terminalSize(settings)
       const caps = verb === 'open-agent' ? await this.deps.cliCaps() : null
+      const grokCaps = verb === 'open-agent' ? await this.deps.grokCaps() : null
       const agentId = args.agent as BuiltinAgentId | undefined
       if (verb === 'open-agent' && (!agentId || !SERVER_AGENTS.has(agentId))) {
         return {
@@ -1124,7 +1135,8 @@ export class HeadlessNodeFactory {
             : resolvedMode
           const sessionIdFlagSupported = supportsSessionIdFlag(
             agentId as AgentId,
-            caps?.sessionIdFlag === true
+            caps?.sessionIdFlag === true,
+            grokCaps?.sessionIdFlag === true
           )
           mintedSessionId = sessionIdFlagSupported ? randomUUID() : undefined
           command = assembleLaunchCommand(

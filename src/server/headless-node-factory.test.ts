@@ -155,6 +155,8 @@ describe('HeadlessNodeFactory', () => {
         fullscreenTui: false,
         sessionIdFlag: false
       }),
+      // Stated, not defaulted — the required field is what stops a probe being forgotten.
+      grokCaps: async () => ({ sessionIdFlag: false }),
       codexSharedIdentity: async () => codexSharedIdentity,
       ownership,
       stateOf: (id) => states[id],
