@@ -353,7 +353,9 @@ describe('wireAgentStatus — the grok raw-listener branch', () => {
     const fh = fakeHooks()
     const ctx = recTail()
     wireAgentStatus(platform, { hooks: fh.hooks as never, contextTail: ctx.tail as never })
-    // grok's own dialect: camelCase keys, snake_case event VALUE, and no transcript_path at all.
+    // grok's own dialect: camelCase keys, snake_case event VALUE. It DOES send `transcriptPath`,
+    // omitted here because nothing on this path reads it: the transcript is derived from
+    // (cwd, sessionId), and the advertised path names `updates.jsonl`, the wrong file.
     fh.fireRaw('grok', 'g1', {
       hookEventName: 'user_prompt_submit',
       sessionId: 'gs-1',
@@ -400,6 +402,37 @@ describe('wireAgentStatus — the grok raw-listener branch', () => {
     expect(grokSessionDirFor('gs-4')).toBe(sessionDir('/w/project', 'gs-4'))
     fh.fireRaw('grok', 'g4', { hookEventName: 'session_end', sessionId: 'gs-4', cwd: '/w/project' })
     expect(grokSessionDirFor('gs-4')).toBeUndefined()
+  })
+
+  it('KEEPS the old session association across compaction — grok does not mint a new id', () => {
+    const fh = fakeHooks()
+    const ctx = recTail()
+    wireAgentStatus(platform, { hooks: fh.hooks as never, contextTail: ctx.tail as never })
+    fh.fireRaw('grok', 'g-compact', {
+      hookEventName: 'pre_compact',
+      sessionId: 'gs-before',
+      cwd: '/w/project'
+    })
+    expect(grokSessionDirFor('gs-before')).toBe(sessionDir('/w/project', 'gs-before'))
+
+    fh.fireRaw('grok', 'g-compact', {
+      hookEventName: 'post_compact',
+      sessionId: 'gs-after',
+      cwd: '/w/project'
+    })
+    // This used to assert the OPPOSITE, on the belief that grok mints a new session id when it
+    // compacts. Measured on 1.0.13: it does not — `pre_compact` and `post_compact` carry the same
+    // `sessionId`. So the retirement branch could not fire and was removed, and this asserts the
+    // case it existed for: even with a DIFFERENT id, the earlier association survives. Nothing else
+    // retires an id but SessionEnd.
+    expect(grokSessionDirFor('gs-before')).toBe(sessionDir('/w/project', 'gs-before'))
+    expect(grokSessionDirFor('gs-after')).toBe(sessionDir('/w/project', 'gs-after'))
+
+    platform.cast(platform.attach({ sendText: () => {}, sendBinary: () => {} }), IPC.ptyDestroy, [
+      'g-compact'
+    ])
+    expect(ctx.calls.some((c) => c.m === 'untrack' && c.args[0] === 'gs-after')).toBe(true)
+    forgetGrokSession('gs-after')
   })
 
   it('learns nothing rather than half a path when the cwd is not reconstructible', () => {
