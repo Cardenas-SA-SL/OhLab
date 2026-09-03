@@ -404,7 +404,7 @@ describe('wireAgentStatus — the grok raw-listener branch', () => {
     expect(grokSessionDirFor('gs-4')).toBeUndefined()
   })
 
-  it('replaces the old session association when PostCompact mints a new id', () => {
+  it('KEEPS the old session association across compaction — grok does not mint a new id', () => {
     const fh = fakeHooks()
     const ctx = recTail()
     wireAgentStatus(platform, { hooks: fh.hooks as never, contextTail: ctx.tail as never })
@@ -420,7 +420,12 @@ describe('wireAgentStatus — the grok raw-listener branch', () => {
       sessionId: 'gs-after',
       cwd: '/w/project'
     })
-    expect(grokSessionDirFor('gs-before')).toBeUndefined()
+    // This used to assert the OPPOSITE, on the belief that grok mints a new session id when it
+    // compacts. Measured on 1.0.13: it does not — `pre_compact` and `post_compact` carry the same
+    // `sessionId`. So the retirement branch could not fire and was removed, and this asserts the
+    // case it existed for: even with a DIFFERENT id, the earlier association survives. Nothing else
+    // retires an id but SessionEnd.
+    expect(grokSessionDirFor('gs-before')).toBe(sessionDir('/w/project', 'gs-before'))
     expect(grokSessionDirFor('gs-after')).toBe(sessionDir('/w/project', 'gs-after'))
 
     platform.cast(platform.attach({ sendText: () => {}, sendBinary: () => {} }), IPC.ptyDestroy, [

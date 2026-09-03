@@ -716,7 +716,13 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
   // a set nothing reads is the same dead weight the PostCompact branch was. The day one of them
   // earns a distinct badge, that is where the set comes back — and it must still fall through to
   // `done`, never to null.
-  if (ev === 'stopfailure') return { ...base, kind: 'state', state: 'done', lastMessage }
+  // `errored: true` is NOT decoration: `erroredTurn.ts` is the one definition of "this turn died",
+  // shared by every agent and by both shells, and dropping it here made grok the only agent whose
+  // failed turn looked like a clean one. It went missing when this branch's version of the return
+  // was taken over upstream's without diffing what upstream had — the same "believe the side you
+  // are holding" that the rest of this comment is about.
+  if (ev === 'stopfailure')
+    return { ...base, kind: 'state', state: 'done', errored: true, lastMessage }
   if (ev === 'permissiondenied') return { ...base, kind: 'state', state: 'working' }
   if (ev === 'stopcancelled') {
     const cancelReason = GROK_CANCEL_REASONS[grokCanonical(p.reason)]
