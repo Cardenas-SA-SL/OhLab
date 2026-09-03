@@ -627,15 +627,6 @@ interface GrokPayload {
  */
 const grokCanonical = (v: string | undefined): string => (v ?? '').toLowerCase().replace(/[^a-z]/g, '')
 
-const GROK_STOP_FAILURE_TYPES = new Set([
-  'ratelimit',
-  'authenticationfailed',
-  'invalidrequest',
-  'servererror',
-  'maxoutputtokens',
-  'unknown'
-])
-
 const GROK_CANCEL_REASONS: Record<string, NonNullable<NormalizedAgentEvent['cancelReason']>> = {
   userinterrupt: 'user_interrupt',
   permissionrejected: 'permission_rejected',
@@ -708,13 +699,24 @@ export function normalizeGrok(env: RawHookEnvelope): NormalizedAgentEvent | null
       ? { ...base, kind: 'state', state: 'done', lastMessage }
       : { ...base, kind: 'state', state: 'done', interrupted: true }
   }
-  // The turn died on an API error — grok skips Stop entirely here, exactly as Claude does. The
-  // matcher vocabulary is closed in grok 1.0.13; a future value is a no-op rather than a guessed
-  // terminal state.
-  if (ev === 'stopfailure') {
-    if (!GROK_STOP_FAILURE_TYPES.has(grokCanonical(p.error))) return null
-    return { ...base, kind: 'state', state: 'done', lastMessage }
-  }
+  // The turn died on an API error — grok skips Stop entirely here, exactly as Claude does.
+  //
+  // THE EVENT IS THE TURN END, whatever its error class. This used to return null for a class
+  // outside the documented six, on the "closed vocabulary" reasoning applied everywhere else in this
+  // file. That reasoning is right for a value that DECIDES something and wrong here, because the
+  // class decides nothing: every branch of it ends the turn. Gating on it meant an absent or
+  // future-dialect `error` left the node stuck on RUNNING until the idle_prompt backstop, or forever
+  // if none came — the silent half of the failure, the one nobody reports because nothing looks
+  // broken. Grok's own docs make `unknown` the catch-all, so a value outside the set can only be a
+  // dialect we have not seen, and the turn has ended either way.
+  //
+  // The documented classes (1.0.13, `10-hooks.md:162`) are `rate_limit`, `authentication_failed`,
+  // `invalid_request`, `server_error`, `max_output_tokens` and `unknown` — recorded here because
+  // they are measured and worth keeping, and NOT kept as a Set, because nothing branches on them and
+  // a set nothing reads is the same dead weight the PostCompact branch was. The day one of them
+  // earns a distinct badge, that is where the set comes back — and it must still fall through to
+  // `done`, never to null.
+  if (ev === 'stopfailure') return { ...base, kind: 'state', state: 'done', lastMessage }
   if (ev === 'permissiondenied') return { ...base, kind: 'state', state: 'working' }
   if (ev === 'stopcancelled') {
     const cancelReason = GROK_CANCEL_REASONS[grokCanonical(p.reason)]

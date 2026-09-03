@@ -3,10 +3,10 @@
 // file outright and rewrites it. We still route through the shared install helper, because that is
 // where the missing-script guard, the idempotent re-install and the "sweep events we no longer
 // subscribe to" repair live.
-import path from "path"
-import type { ManagedHookEvent } from "../../../shared/agents/hook-events"
-import { GROK_HOOK_FILE, grokHomeDir } from "../grok-paths"
-import { installHooksInto, removeHooksFrom } from "./install-helper"
+import path from 'path'
+import type { ManagedHookEvent } from '../../../shared/agents/hook-events'
+import { GROK_HOOK_FILE, grokHomeDir } from '../grok-paths'
+import { installHooksInto, removeHooksFrom } from './install-helper'
 
 const SCRIPT_FILE_NAME = "grok.sh"
 
@@ -14,8 +14,12 @@ const SCRIPT_FILE_NAME = "grok.sh"
  * Complete Grok 1.0.13 hook set, measured against
  * `~/.grok/docs/user-guide/10-hooks.md:84-106`. Keep all fifteen here: omitting an event makes its
  * normalizer unreachable, which is how StopCancelled existed but Esc left RUNNING stuck.
- * PreCompact/PostCompact are identity-bearing even when they do not move the badge: Grok mints a
- * new session id during compaction, and both shells must observe it for continuity.
+ * PreCompact/PostCompact are subscribed for their own sake, not for session identity. An earlier
+ * version of this comment claimed grok mints a new session id during compaction and that both shells
+ * must observe it. It does not: in the captured pair (1.0.13, 2026-09-01) `pre_compact` and
+ * `post_compact` carry the SAME `sessionId`, and `docs/grok-agent.md`'s own dialect table already
+ * said there is no id to re-key an association with. The claim was never measured; it read like a
+ * measurement, and a branch was written against it.
  */
 export const GROK_EVENTS: readonly ManagedHookEvent[] = [
   'SessionStart',

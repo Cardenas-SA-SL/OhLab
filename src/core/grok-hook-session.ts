@@ -25,12 +25,15 @@ export function planGrokHookSession(
   previousSessionId: string | undefined
 ): GrokHookSessionPlan {
   const { event, sessionId, cwd } = grokRawFields(payload)
-  const forgetSessionId =
-    event === 'postcompact' && sessionId && previousSessionId && previousSessionId !== sessionId
-      ? previousSessionId
-      : event === 'sessionend'
-        ? sessionId
-        : undefined
+  // SessionEnd is the only event that retires an id.
+  //
+  // There used to be a PostCompact branch here, retiring the PREVIOUS id on the belief that grok
+  // mints a new one when it compacts. Measured: it does not. The captured pair carries the same
+  // `sessionId` in `pre_compact` and `post_compact`, so the branch could not fire — and the belief
+  // came from a comment, not from data. Removed rather than kept as a defensive guard: a branch
+  // that cannot be exercised is one nobody can prove or disprove, and in six months it reads as a
+  // measurement again. This one already did — it was cited as evidence in a rebase decision.
+  const forgetSessionId = event === 'sessionend' ? sessionId : undefined
 
   return { event, sessionId, cwd, forgetSessionId }
 }

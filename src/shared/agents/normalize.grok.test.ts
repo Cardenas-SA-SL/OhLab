@@ -90,8 +90,22 @@ describe('normalizeGrok — Stop', () => {
     ).toMatchObject({ state: 'done', lastMessage: error })
   })
 
-  it('an unrecognized stop_failure error type is a no-op', () => {
-    expect(normalizeGrok(env({ hookEventName: 'stop_failure', error: 'future_error' }))).toBeNull()
+  it.each([
+    ['a future dialect', 'future_error'],
+    ['an absent class', undefined],
+    ['an empty class', '']
+  ])('stop_failure with %s STILL ends the turn — the node must not stay RUNNING', (_name, error) => {
+    // This used to return null, on the closed-vocabulary discipline the rest of this file follows.
+    // That discipline is for values that DECIDE something; this one decides nothing — every class
+    // ends the turn. Gating on it left the node on RUNNING until the idle_prompt backstop, or
+    // forever if none arrived: the silent half of the failure, the one nobody reports because
+    // nothing looks broken.
+    //
+    // Asserted as `done` and NOT as "not null", because "not null" would also pass if some future
+    // edit returned `working` here — which is the very state this exists to prevent.
+    const out = normalizeGrok(env({ hookEventName: 'stop_failure', sessionId: 's1', error }))
+    expect(out).toMatchObject({ kind: 'state', state: 'done' })
+    expect(out?.state).not.toBe('working')
   })
 })
 

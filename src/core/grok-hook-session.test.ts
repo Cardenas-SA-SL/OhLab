@@ -8,7 +8,7 @@ describe('planGrokHookSession', () => {
     ['SubagentStart', 'subagent_start', 'subagentstart', 'gs-before', undefined],
     ['SubagentStop', 'subagent_stop', 'subagentstop', 'gs-before', undefined],
     ['PreCompact', 'pre_compact', 'precompact', 'gs-before', undefined],
-    ['PostCompact', 'post_compact', 'postcompact', 'gs-after', 'gs-before']
+    ['PostCompact', 'post_compact', 'postcompact', 'gs-after', undefined]
   ])(
     '%s produces the shell-independent session transition',
     (_name, hookEventName, event, sessionId, forgetSessionId) => {
@@ -23,18 +23,36 @@ describe('planGrokHookSession', () => {
     }
   )
 
-  it('does not retire a session when PostCompact repeats its current id', () => {
+  it('NEVER retires a session on PostCompact, not even when the id differs', () => {
+    // There used to be a branch here retiring the previous id, written on the belief that grok mints
+    // a new one when it compacts. Measured on 1.0.13: it does not — the captured `pre_compact` and
+    // `post_compact` carry the same `sessionId`. So the branch could not fire, and the belief came
+    // from a comment rather than from data.
+    //
+    // This asserts the case that branch existed for — a DIFFERENT id — precisely because that is the
+    // input under which the old code did something. Restoring it turns this red.
+    expect(
+      planGrokHookSession(
+        { hook_event_name: 'post_compact', session_id: 'gs-after', cwd: '/w/project' },
+        'gs-before'
+      ).forgetSessionId
+    ).toBeUndefined()
+    // And the ordinary case, where the id repeats, is unchanged.
     expect(
       planGrokHookSession(
         { hook_event_name: 'post_compact', session_id: 'gs-current', cwd: '/w/project' },
         'gs-current'
-      )
-    ).toEqual({
-      event: 'postcompact',
-      sessionId: 'gs-current',
-      cwd: '/w/project',
-      forgetSessionId: undefined
-    })
+      ).forgetSessionId
+    ).toBeUndefined()
+  })
+
+  it('SessionEnd is the only event that retires an id', () => {
+    expect(
+      planGrokHookSession(
+        { hook_event_name: 'session_end', session_id: 'gs-1', cwd: '/w/project' },
+        'gs-1'
+      ).forgetSessionId
+    ).toBe('gs-1')
   })
 
   it.each(['desktop', 'server'])('%s applies all six new events through the same behavioral seam', (_shell) => {
@@ -44,7 +62,7 @@ describe('planGrokHookSession', () => {
       ['subagent_start', 'gs-before', undefined],
       ['subagent_stop', 'gs-before', undefined],
       ['pre_compact', 'gs-before', undefined],
-      ['post_compact', 'gs-after', 'gs-before']
+      ['post_compact', 'gs-after', undefined]
     ] as const
 
     for (const [hookEventName, sessionId, forgotten] of cases) {
