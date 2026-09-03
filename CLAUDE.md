@@ -1432,6 +1432,53 @@ else, and its context links must keep classifying across restarts).
     layout by construction on all three surfaces) and then the well-known data dirs; it is monotone
     — advertised dir first, keyed by node-id filename in every candidate, and a foreign instance's
     dir yields a foreign `kid` = `legacy` = exactly what presenting nothing already gave.
+  - **Every LOCAL generated sh client recovers shared-Codex identity before its env gate.** A tool
+    shell forked by the account-scoped app-server carries `CODEX_THREAD_ID`, not the pane's
+    `NODETERM_*`. Managed hooks, local `nodeterm.sh`, and local `context.sh` therefore prepend
+    `codexThreadIdentityResolverSh(codexThreadIdentityRoot())` before testing
+    `NODETERM_NODE_ID`/`NODETERM_CANVAS_CONTROL`. Before this was shared, status hooks recovered the
+    node while both user-facing shims declared that same first-class Codex session outside
+    nodeterm. The SSH constants remain machine-neutral: the local record root is not valid on a
+    remote host and must never be baked into its copy — enforced by
+    `main/remote-ssh/remote-shim-neutrality.guard.test.ts`, two legs (the exported neutral bodies
+    carry no record root or prelude, and `remote-hooks.ts` cannot even NAME a parameterised
+    builder), because the failure is silent and one-sided: a remote shim carrying the prelude keeps
+    working, and the only symptom is this machine's userData layout sitting in a file on someone
+    else's server. **The prelude is shared; the RECORD it reads is desktop-only.** Those writers are
+    the two hook-server handlers `src/main/index.ts` registers, and
+    `src/server/handlers/index.ts` deliberately registers neither — so on the Server Edition the
+    file is byte-identical, the signing secret is armed, and the resolver still finds nothing and
+    takes its fallback. Coherent rather than missing: that shell answers `shared: false`
+    (`UNKNOWN_CODEX_IDENTITY_CAPS`), so its Codex nodes run their own app-server and no tool shell
+    needs recovering. It turns into a real gap only when that edition grows the shared app-server,
+    and the fix is the two registrations.
+  - **That prelude EXPORTS WHAT THE RECORD SAYS — it never decides.** `NODETERM_AGENT_ID` and
+    `NODETERM_CANVAS_CONTROL` were once constants there (`codex`, granted); both are
+    `buildPtyEnv`'s answers about the PANE, which labels a node with its OWN agent id
+    (`custom:<uuid>` for a custom agent whose `baseAgent` is codex, not `codex`) and gates the grant
+    on `canControlCanvas`. The constants therefore mislabelled every custom codex-based node and
+    asserted a grant that agrees with the pane only because
+    `SHARED_IDENTITY_CAPABLE ⊆ CANVAS_CONTROL_CAPABLE` — a coincidence that list's own comment
+    invites the next shared-identity agent to break, and breaking it hands a tool shell a capability
+    its pane was denied. So the record carries `agentId` + `canvasControl` INSIDE the 6-tuple HMAC,
+    and the prelude reads them; the grant is exported only when the record grants it and is left
+    UNSET otherwise (absent, never `0` — the shape both shims' `[ -z … ]` gates expect). The **pane
+    echoes its own label** on `/codex-thread/{start,bind}` (a tmux session outlives the app, so
+    after a restart nothing server-side still knows what agent a node runs), but the **grant is
+    never echoed**: the route derives it with `canControlCanvas`, so there is ONE decider and a
+    forged id cannot manufacture a grant the table refuses. The three preimage generations are
+    **selected by the record's shape, never tried in turn** — a record naming an agent must not
+    verify under a preimage that ignores one — and a pre-agent record's implied `codex` + grant is
+    keyed on the LINE being absent, never on the value being empty, so nothing that names an agent
+    falls back to the guess. The env vars were never a security boundary in any case (anyone who can
+    run the shim can `export` them by hand); the per-node token is, and
+    `docs/shared-codex-node-identity.md` states that argument in full.
+  - **A shell that forwards this identity cannot be type-checked into correctness.** A handler that
+    destructures the request without `agent`, and a record write that omits its optional trailing
+    argument, are BOTH well-typed — so the whole dimension can be plumbed through core, the route,
+    the launcher and the prelude, pass `npm run typecheck` and every unit test, and ship INERT.
+    `main/codex-identity-record-wiring.test.ts` pins it at source level, the same remedy
+    `hook-verified-parity.test.ts` uses for the same class of hole.
   - **Every generated sh client walks the SAME endpoint failover** (`nt_candidates`/`nt_adopt`,
     `core/agents/hook-endpoint-failover-sh.ts`) — issue #445, the endpoint-level twin of #384: a
     session is pinned for life to the endpoint PATH it got at tmux creation, so an app
@@ -1843,8 +1890,9 @@ else, and its context links must keep classifying across restarts).
   injects `isRemoteNode`/`readRemoteFile`/`runRemoteCommand`, bounded tail reads), its hook-fed
   path is jailed at ingest (`isSafeRemoteTranscriptPath`), and `resolveLinkTranscript` REFUSES
   the local locators for remote nodes (they'd resolve a stranger's local transcript). Server
-  Edition passes no deps → local-only (context link is NOT wired there at all — `initContextLink`
-  is never called from `src/server`). Discovery is per-agent: claude installs a
+  Edition IS wired (`src/server/context-link.ts` calls `initContextLink(ptyManager, {})`) but
+  passes no remote deps → **local-only**, which is the complete answer there: that shell runs ON the
+  host whose transcripts and tmux it reads, and SSH projects are a desktop-only concept. Discovery is per-agent: claude installs a
   `get-linked-context` skill; codex/gemini get an idempotent marker block
   (`<!-- nodeterm:get-linked-context:start/end -->`) merged into `~/.codex/AGENTS.md` /
   `~/.gemini/GEMINI.md`. On connect an idle-gated one-line note is injected into each endpoint

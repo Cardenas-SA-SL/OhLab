@@ -36,8 +36,8 @@ let dir = ''
 let launcher = ''
 let binDir = ''
 let argvLog = ''
-let started: Array<{ nodeId: string; cwd: string; accountId?: string }> = []
-let bound: Array<{ nodeId: string; threadId: string; accountId?: string }> = []
+let started: Array<{ nodeId: string; cwd: string; accountId?: string; agentId?: string }> = []
+let bound: Array<{ nodeId: string; threadId: string; accountId?: string; agentId?: string }> = []
 let fallbacks: Array<{ nodeId: string; reason?: string }> = []
 let startAnswer: (() => string) | null = null
 let startDelayMs = 0
@@ -65,14 +65,14 @@ beforeAll(async () => {
   fs.writeFileSync(launcher, buildCodexLauncherScript('true'), { mode: 0o755 })
   await hookServer.start()
   hookServer.setNodeAuthSecret(SECRET)
-  hookServer.setCodexThreadStartHandler(async ({ nodeId, cwd, accountId }) => {
-    started.push({ nodeId, cwd, accountId })
+  hookServer.setCodexThreadStartHandler(async ({ nodeId, cwd, accountId, agent }) => {
+    started.push({ nodeId, cwd, accountId, agentId: agent?.agentId })
     if (startDelayMs) await new Promise((r) => setTimeout(r, startDelayMs))
     if (!startAnswer) throw new Error('start refused')
     return startAnswer()
   })
-  hookServer.setCodexThreadBindHandler(async ({ nodeId, threadId, accountId }) => {
-    bound.push({ nodeId, threadId, accountId })
+  hookServer.setCodexThreadBindHandler(async ({ nodeId, threadId, accountId, agent }) => {
+    bound.push({ nodeId, threadId, accountId, agentId: agent?.agentId })
     if (!bindAnswer) throw new Error('bind refused')
     bindAnswer()
   })
@@ -555,5 +555,38 @@ describe('per-node capability (the authorization the shared bearer cannot give)'
     expect(bound).toEqual([])
     expect(codexArgv()).toEqual(['resume thread-xyz'])
     expect(fallbacks).toEqual([{ nodeId: 'node-1', reason: 'thread-bind-refused' }])
+  })
+})
+
+// THIS PANE'S AGENT LABEL travels in the POST body on both calls.
+//
+// The pane is the only durable holder of it: a tmux session outlives the app, so a bind arriving
+// after a restart is the common case and nothing server-side still remembers what agent a node
+// runs. The server re-derives the canvas-control grant from the id rather than trusting a claim
+// (see codex-thread-id-route.test.ts), so what travels here is a label, not a capability — and
+// like the account id it must stay in the BODY, never on argv, where a shared host's `ps` reads it.
+describe('the pane agent id reaches the record', () => {
+  it('threads NODETERM_AGENT_ID through start', async () => {
+    await callLauncher([], { NODETERM_AGENT_ID: 'custom:abc' })
+    expect(started).toEqual([
+      { nodeId: 'node-1', cwd: fs.realpathSync(dir), agentId: 'custom:abc' }
+    ])
+    expect(codexArgv().join(' ')).not.toContain('custom:abc')
+  })
+
+  it('threads it through a resume bind too', async () => {
+    await callLauncher(['resume', 'thread-xyz'], { NODETERM_AGENT_ID: 'custom:abc' })
+    expect(bound).toEqual([
+      { nodeId: 'node-1', threadId: 'thread-xyz', agentId: 'custom:abc' }
+    ])
+    expect(codexArgv().join(' ')).not.toContain('custom:abc')
+  })
+
+  it('starts a thread with no label when the pane carries none, rather than failing', async () => {
+    // `${NODETERM_AGENT_ID-}` under `set -u` and an unset var: the launch must still work. A node
+    // whose label is missing gets a pre-agent record, which is the pre-feature behaviour.
+    await callLauncher([], { NODETERM_AGENT_ID: '' })
+    expect(started).toEqual([{ nodeId: 'node-1', cwd: fs.realpathSync(dir) }])
+    expect(fallbacks).toEqual([])
   })
 })
