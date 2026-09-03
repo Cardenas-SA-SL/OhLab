@@ -173,12 +173,12 @@ separate store mirroring node state — earlier dual-source designs caused sync 
 `src/renderer/state/workspace.ts` holds only pure helpers: the color palette, the node
 factories (`createTerminalNode`, `createSshTerminalNode`, `createAgentNode(agentId, …)`,
 `createAccountLoginNode`, `createStickyNode`, `createGroupNode`, `createEditorNode`,
-`createDiffNode`, `createVideoNode`, `createWebNode`, `createBrowserNode`, `createDinoNode`,
-`createTriggerNode`), the
+`createDiffNode`, `createVideoNode`, `createWebNode`, `createBrowserNode`, `createFilesNode`,
+`createDinoNode`, `createTriggerNode`), the
 group transforms (`groupSelectedNodes`, `ungroupNodes`, `duplicateNode`), and the
 `nodeStatesToFlow` / `flowToNodeStates` serializers. Node kinds (`NodeKind` in
 `src/shared/types.ts`): `terminal | sticky | group | editor | diff | video | web | browser |
-subagent | loop | dino | trigger` — `subagent` and `loop` are render-only (ephemeral hook-driven
+files | subagent | loop | dino | trigger` — `subagent` and `loop` are render-only (ephemeral hook-driven
 viz) and never persisted. `trigger` (issue #493, all four
 phases landed) is a first-class PERSISTED kind. The whole host-side
 machine is composed ONCE in `core/trigger-service.ts` (`startTriggerService`) and booted
@@ -923,6 +923,117 @@ session.
 - **browser** (`BrowserNode.tsx`) — a navigable Chromium browser wrapping the shared
   `BrowserSurface` (webview + toolbar); the last top-level URL persists to `data.url`, and the same
   surface backs the kanban card modal's browser popup.
+- **files** (`FilesNode.tsx`) — a file-manager node: ONE directory listing (`data.cwd`, persisted),
+  pinned to the canvas beside the terminals working in it. Deliberately not a second Explorer: the
+  drawer is a single tree rooted at the project cwd that covers the canvas, so it gives you one
+  cursor and a lot of scrolling; several of these give you `src/renderer/nodes` next to the agent
+  editing it and another on `docs/`. Navigate in place (breadcrumbs collapse deep paths but every
+  crumb stays clickable), filter, create a file/folder, copy a path, reveal, and open a terminal in
+  the folder shown (a `nodeterm:open-terminal` event, the sibling of `nodeterm:open-file`).
+  - **It adds NO new IPC.** Everything runs on the existing `FsApi` (`list`/`mkdir`/`exists`/
+    `write`) — which is why it works on Desktop, the Server Edition, an SSH project and a relay tab
+    on day one; `mkdir`/`exists` are genuinely LIVE on a relay tab (see the Explorer bullet above —
+    that line used to claim otherwise), so "New folder…" works there too. **Rename/move/delete are
+    the deliberate v1 gap**: each needs a new leaf in `core/fs-ops`, an IPC channel, preload, the
+    ws-bridge, `main/ssh-fs` (remote quoting) and the relay host-service, plus confirm dialogs and
+    dangerous-path guards. That is a separate change with separate risk, not a corner to cut inside
+    this one.
+  - **Which filesystem** is `EditorNode`'s decision, read the same way: `data.sshFs` → the SSH
+    project's host over the ControlMaster; otherwise the node's own SESSION api, which is the local
+    core for a local project and the PEER's for a relay tab. Reading it off `useSession()` rather
+    than `window.nodeTerminal` is the entire reason a relay tab browses the right machine.
+  - **Opening is delegated, never reimplemented**: a file dispatches `nodeterm:open-file`, so
+    editor-vs-video-vs-image routing stays in Canvas's one `openFile` and this node never grows a
+    second opinion about what a `.png` is. `fileOpenTarget` decides only canvas-vs-OS, and a REMOTE
+    listing never reaches the OS branch — `shell.openPath` opens a path on THIS machine. **The OS
+    branch is now also gated on being ABLE to open locally**, not just on remoteness: `shell.openPath`
+    is a documented `noop` in the Server Edition (`bridge/stubs.ts:180-186`), and a browser tab's own
+    session `source` is `'local'` — `SessionSource` declares `'server'` but nothing ever constructs
+    it (`session/session.ts:8`), so `source` alone can never tell you you're in a browser, only
+    `isBrowserRuntime()` can. Opening a `.zip`/`.dmg` was therefore a silent dead click; closed by
+    `canUseLocalShell` (`lib/download.ts`) — ONE predicate for every `shell.*` path action, with
+    `canRevealLocally` kept as its older reveal-specific name so existing callers are untouched.
+    Reveal was gated and openPath was not, and writing that rule twice is how they drifted.
+  - **Two state bugs, both fixed.** (a) A directory a removed worktree took with it used to render
+    as "This folder is empty." — not "Could not read this folder" — because `FsApi.list` is
+    fail-open by contract (`core/fs-ops.listDir`/`SshFs.listDir` both end `catch { return [] }`, and
+    the SSH IPC resolves `[]` even for a dead ControlMaster). `fs.exists` cannot disambiguate either:
+    it's `stat`-based (true for a dir you can stat but not `readdir`), and on SSH its `false` can't
+    separate "gone" from "the ControlMaster died" — the same conflation `SshFs.readTextChecked`
+    (`main/ssh-fs.ts:164-176`) refuses, on the rule "a failed read is never evidence of absence". Now
+    disambiguated by probing the PARENT's listing instead (`classifyEmptyListing`, pure,
+    `lib/filesNode.ts` — the idiom `SshProjectDialog.tsx:112-125` and `file-links.ts`'s
+    `makeDirListingLookup` already use), which answers `missing` / `empty` / `unknown`: an unreadable
+    parent answers `unknown`, and we keep saying "empty" rather than claim a deletion we can't
+    prove. **`unknown` also covers every path whose parent CANNOT answer** — a non-`/`-absolute cwd
+    (an SSH project's `remoteCwd` defaults to **`~`**, where `parentDir` is `/` and `/` has no entry
+    named `~`, so an empty remote HOME reported a deletion), a `.git` cwd (both listing legs strip
+    it on purpose), and `.`/`..` segments; a case-folded match counts as present, for the
+    case-insensitive filesystems where `readdir` answers with the on-disk spelling. `missing` must
+    be the conclusion we are SURE of. Nothing is published until the verdict is in, so a deleted
+    folder never flashes "empty" on its way to the error.
+    (b) Nothing reset the list on navigation, so "Loading…" was reachable only on the very first
+    mount — every later directory change showed the PREVIOUS directory's rows. Fixed by storing the
+    listing WITH the cwd it belongs to, so a cwd change IS the loading state by construction; a
+    re-list after a create deliberately keeps its rows (same directory, re-read).
+  - The title tracks the folder only while `titleAuto` is unset — the same contract an agent node's
+    session name uses, so navigating never overwrites a name the user typed.
+  - A files node inside a REMOVED worktree is displaced like an editor, not like a terminal
+    (`displacedByWorktree`): it has no session to disturb, so it is caught by path wherever it sits.
+    The patch is the pure `displacedFilesPatch` (`lib/filesNode.ts`), where `null` means LEAVE IT
+    ALONE on the dead path — the parent probe above then tells the truth — because
+    `resetDisplacedCwd`'s fallback can be `undefined`, and writing that through would
+    have cost the node the only thing it knows about itself. **The READ side is guarded too**: a
+    files node with no `cwd` says so instead of falling back to `'/'` — `project.json` is
+    git-shared, hand-editable input that nothing validates for this kind, so guarding only the
+    writer left the silent root-browse reachable anyway. And `createFilesNode` places through
+    `placeNode`, not `placeAt`, so snap-to-grid applies to its size as well as its position (React
+    Flow resizes by adding a grid multiple to the START size, so an unsnapped box never lands on
+    the grid later). The title
+    rewrites alongside when `titleAuto` holds — the ONE cwd write that does not go through `navigate`.
+  - **"New terminal here" was broken on BOTH remote kinds, and not by this node's own doing.**
+    `addTerminal` resolves the project from `activeProjectId` and `createTerminalNode` does
+    `cwd: ssh ? ssh.remoteCwd : cwd` (`state/workspace.ts`) — on an SSH project the folder on screen
+    was silently DISCARDED and the terminal opened at the project root, a pre-existing hole in
+    `addTerminal`'s `cwdOverride` contract affecting every caller, not just this one. Fixed by routing the call
+    through the EXISTING `nodeSshFor`, which already carries this exact reasoning ("passing the
+    project's ssh unchanged silently REPLACES the caller's cwd") and which `addTerminal` simply
+    never used; it is handed `cwdOverride` and never the resolved `cwd`, because an SSH project can
+    still carry a local `project.cwd` that `scmCwd` falls back to, and promoting that would root
+    remote terminals at a path from the wrong machine. On a RELAY tab there is no `ssh` to
+    rebind, so the row used to spawn a plain LOCAL terminal at the peer's remote path; it is now
+    withheld there instead — spawning onto a peer's core is a real feature, not a one-liner.
+  - Creation needs a project directory (`hasCwd`), and **the row degrades EXPLICITLY rather than
+    vanishing** — disabled, carrying `FILES_NO_CWD_HINT` (an alias of `NEW_FILE_NO_CWD_HINT`), on
+    the pane menu, the Dock and the sidebar "+". That is the rule #621 established for "New file…"
+    and the SSH worktree row: a cwd-less project is a supported, persisted canvas, so a row that
+    simply disappears takes its own reason with it while the fix ("Set folder…") sits one menu
+    away. **⌘K is the deliberate exception** and hides the entry, exactly as main's "New file…"
+    does — a disabled palette entry surfaces as a search result that does nothing, the same reason
+    `sshAccountsHint` is omitted there. Inside a group frame it inherits a bound **worktree's** cwd
+    via `cwdForNewNodeIn`, so a frame per branch also means a file tree per branch.
+  - **A node kind not registered in `lib/reopenNode.ts` is a trap, and this one fell in it.** Every
+    kind must sit in exactly one of `UNRESTORABLE` or a `buildBase` `case` — `files` was in neither,
+    so ⇧⌘T recorded a snapshot (and a persisted `closedSessions` twin) that `buildBase`'s
+    `default: return null` could never restore: a dead, clickable entry that compiles, typechecks and
+    passes every test. `files` now has a `case` (it IS restorable — its whole state is the directory
+    it shows), unlike `trigger`, excluded for the same missing-case reason
+    (`reopenNode.ts:58-60`, the comment that made this findable). Two kinds have fallen in this trap
+    now; treat registration as a checklist item for the next one.
+  - **Kanban: deliberately not a card.** `canvas/toKanbanSession.ts` maps `browser`, `sticky` and
+    `terminal` and returns `null` for everything else — cards do not "derive from terminal nodes",
+    they derive from that explicit list. A files node has no session to co-attach and no text to
+    edit; its value is spatial adjacency to the terminals working in the directory, which a column
+    layout would discard.
+  - `folderTitle` lives in `lib/explorerCreate.ts` (a zero-import leaf), not `lib/filesNode.ts`:
+    `filesNode.ts` imports `isVideoFile` FROM `state/workspace`, so importing back would close a
+    cycle. `filesNode.ts` re-exports it, so call sites are unchanged.
+  - **The `/`-separator assumption is a KNOWN gap, shared with `explorerCreate`** (the Explorer
+    drawer and canvas "New file…" already run on the same helpers) — `C:\x\y` reads as one segment.
+    To be closed in ONE place for both, using the core-owns-the-dialect rule `terminal/file-links.ts`
+    already implements.
+  - **Mobile**: N/A — *nodeterm mobile* attaches to tmux sessions over the transport protocol and
+    has no canvas or file-browsing concept; adding one means extending that protocol.
 - **dino** (`DinoNode.tsx`) — a small self-contained T-Rex-style runner on a canvas (no PTY);
   high score persists via `data.highScore`.
 - **trigger** (`TriggerNode.tsx`) — a canvas-owned schedule (cron / interval / once) that
@@ -2525,7 +2636,15 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   **New File… / New Folder…** (empty-area right-click targets the root; SSH projects create on the
   host). Canvas pane right-click and ⌘K also expose **New file…** (creates under the project cwd,
   opens an editor node). These use `mkdir` + `exists` added to `FsApi`/`SshFsApi` across
-  desktop/server/SSH (`core/fs-ops.ts`, `main/ssh-fs.ts`; relay remote-fs degrades to `false`).
+  desktop/server/SSH (`core/fs-ops.ts`, `main/ssh-fs.ts`). **Relay tabs are NOT degraded**: a
+  relay tab's `fs` routes through `bridge/relay-api.ts:86` (`fs: files.fs`) → `buildFilesApi`'s
+  `IPC.fsMkdir`/`IPC.fsExists` (`bridge/ws-bridge.ts:474-475`) → `core/fs-handlers.ts:43-44` →
+  the real `fsOps.makeDir`/`fsOps.pathExists` on the peer's core, so both verbs are live there.
+  What genuinely still lacks them is the legacy PHONE vocabulary
+  (`main/remote/host-service.ts`), whose `handleFs` switches on `fs.list`/`read`/`readBinary`/
+  `write` and nothing else, so `fs.mkdir`/`fs.exists` fall through to the dispatcher's
+  `Unknown method` **rejection** (line 695) rather than degrading to `false` — a different
+  dispatch path (`relay-host.ts:22-24`) from the relay tab above.
   Expanded dirs **persist per project** across drawer close + app restart (`state/explorer.ts`
   zustand store, localStorage `nodeterm.explorerExpanded`). The header pin docks it like the
   sessions sidebar (`lib/explorerPin.ts`, `nodeterm.explorerPinned`, default off): overlay

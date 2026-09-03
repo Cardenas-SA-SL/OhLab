@@ -12266,3 +12266,171 @@ body.focus-mode .dock:hover {
   font-size: 12px;
   color: var(--danger);
 }
+
+/* ── File manager node ─────────────────────────────────────────────────────────────────────
+   A directory listing pinned to the canvas. Shaped like the sticky note (card + grab header)
+   rather than the terminal, because it is content you arrange, not a session you attach to. */
+.files-node {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: rgba(var(--card-rgb), 0.96);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, calc(0.35 * var(--shadow-k)));
+}
+
+.files-node.selected {
+  box-shadow: 0 0 0 1px var(--accent), 0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
+}
+
+.files-node__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.files-node__chip {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(var(--tint-rgb), 0.12);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.files-node__btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.files-node__btn:hover:not(:disabled) {
+  background: rgba(var(--tint-rgb), 0.1);
+  color: var(--text);
+}
+.files-node__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* The breadcrumb is one line and never wraps: a two-line path would push the listing down on
+   every navigation, and the listing is the thing the node exists to show. Deep paths are
+   collapsed upstream (see `breadcrumbs`), so this only has to refuse to grow. */
+.files-node__crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding: 0 8px 4px;
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.files-node__crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.files-node__sep {
+  opacity: 0.4;
+  margin: 0 2px;
+}
+
+.files-node__crumb {
+  background: none;
+  border: none;
+  padding: 1px 2px;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-node__crumb:hover {
+  color: var(--text);
+  background: rgba(var(--tint-rgb), 0.1);
+}
+
+.files-node__filter {
+  margin: 0 8px 6px;
+  padding: 3px 7px;
+  background: rgba(var(--tint-rgb), 0.06);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  flex-shrink: 0;
+}
+.files-node__filter:focus {
+  border-color: var(--accent);
+}
+
+.files-node__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 4px 6px;
+  min-height: 0;
+}
+
+.files-node__row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.files-node__row:hover {
+  background: rgba(var(--tint-rgb), 0.08);
+}
+/* Dimmed exactly like the Explorer drawer dims them — same fact (`DirEntry.ignored`), so it must
+   read the same way in both places. */
+.files-node__row.is-ignored {
+  opacity: 0.45;
+}
+
+.files-node__glyph {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.files-node__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-node__empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.files-node__empty--error {
+  color: var(--danger);
+}
+
+.files-node.collapsed .files-node__header {
+  border-bottom: none;
+}

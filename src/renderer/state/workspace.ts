@@ -23,6 +23,7 @@ import { mintFreeGrokSessionId } from '@shared/agents/grok-session-mint'
 import { projectLaunchInfoNow } from './projectLaunchInfo'
 import { isAgentEnabled, launchableDefaultAgent } from './agentAvailability'
 import { codexSharedIdentity } from './codexIdentity'
+import { folderTitle } from '../lib/explorerCreate'
 import { sshHostKey } from '@shared/ssh'
 import { normalizeNodeIcon } from '@shared/node-icon'
 import { useSettings } from './settings'
@@ -59,6 +60,9 @@ const TRIGGER_SIZE = { width: 300, height: 170 }
 const VIDEO_SIZE = { width: 640, height: 420 }
 const WEB_SIZE = { width: 720, height: 520 }
 const BROWSER_SIZE = { width: 800, height: 560 }
+// Tall and narrow: a file manager is a LIST, and the thing that runs out first is vertical room
+// for entries, not horizontal room for names (which ellipsize).
+const FILES_SIZE = { width: 340, height: 460 }
 
 /** Height of a node when collapsed (header only). */
 export const COLLAPSED_HEIGHT = 40
@@ -1017,6 +1021,39 @@ export function createBrowserNode(
   }
 }
 
+/**
+ * Creates a file-manager node browsing `cwd`.
+ *
+ * `sshFs` is stamped for an SSH project so the node lists the PROJECT'S HOST over the
+ * ControlMaster instead of this machine — the same flag, read the same way, that `createEditorNode`
+ * and `createVideoNode` already use. Without it an SSH project's file manager would quietly browse
+ * the local filesystem at a path that means something else there.
+ */
+export function createFilesNode(
+  index: number,
+  cwd: string,
+  center?: { x: number; y: number },
+  sshFs?: boolean
+): CanvasNode {
+  return {
+    id: nextId('files'),
+    type: 'files',
+    // `placeNode`, not `placeAt`: it snaps POSITION AND SIZE to `settings.gridSize` when
+    // snap-to-grid is on, which is what every other factory does. `placeAt` alone left a new file
+    // manager sitting off-grid beside snapped neighbours, and off-grid in SIZE too — React Flow
+    // resizes by adding a grid multiple to the start size, so an unsnapped box can never be
+    // dragged onto the grid afterwards.
+    ...placeNode('files', center, index, FILES_SIZE.width, FILES_SIZE.height),
+    data: {
+      title: folderTitle(cwd),
+      color: '#ffd60a',
+      group: null,
+      cwd,
+      ...(sshFs ? { sshFs: true } : {})
+    }
+  }
+}
+
 /** Creates a diff editor node for a changed file (relative path + repo cwd). */
 export function createDiffNode(
   index: number,
@@ -1938,7 +1975,9 @@ export function flowToNodeStates(nodes: CanvasNode[]): CanvasNodeState[] {
                     ? DINO_SIZE
                     : kind === 'trigger'
                       ? TRIGGER_SIZE
-                      : TERMINAL_SIZE
+                      : kind === 'files'
+                        ? FILES_SIZE
+                        : TERMINAL_SIZE
   return nodes
     .map((n) => {
       const kind: NodeKind = (n.type as NodeKind) ?? 'terminal'

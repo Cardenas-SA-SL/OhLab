@@ -26,6 +26,7 @@ interface DockProps {
   onSpawnTeam: () => void
   onAddDino: () => void
   onAddTrigger: () => void
+  onAddFiles: () => void
   onAddAgent: (agentId: AgentId, accountId?: string) => void
   onOpenFile: () => void
   onAddRemote: () => void
@@ -66,6 +67,7 @@ export function Dock({
   onSpawnTeam,
   onAddDino,
   onAddTrigger,
+  onAddFiles,
   onAddAgent,
   onOpenFile,
   onAddRemote,
@@ -158,6 +160,7 @@ export function Dock({
     spawnTeam: onSpawnTeam,
     dino: onAddDino,
     trigger: onAddTrigger,
+    files: onAddFiles,
     openFile: onOpenFile,
     newFile: onNewFile,
     worktree: onAddWorktree

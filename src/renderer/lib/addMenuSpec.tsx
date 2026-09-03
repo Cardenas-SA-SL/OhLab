@@ -24,6 +24,7 @@ import {
   IconBranch,
   IconDino,
   IconEditor,
+  IconExplorer,
   IconGroup,
   IconNote,
   IconRemote,
@@ -46,6 +47,7 @@ export type AddItem =
   | { kind: 'browser' }
   | { kind: 'web' }
   | { kind: 'sticky' }
+  | { kind: 'files' } // requiresCwd
   | { kind: 'dino' }
   | { kind: 'trigger' }
   | { kind: 'open-file' }
@@ -66,6 +68,7 @@ export const CONTENT_ADD_ITEMS: readonly AddItem[] = [
   { kind: 'browser' },
   { kind: 'web' },
   { kind: 'sticky' },
+  { kind: 'files' },
   { kind: 'dino' },
   { kind: 'trigger' },
   { kind: 'open-file' },
@@ -96,6 +99,7 @@ export interface AddHandlers {
   browser: (at?: AddPos) => void
   web: (at?: AddPos) => void
   sticky: (at?: AddPos) => void
+  files: (at?: AddPos) => void
   dino: (at?: AddPos) => void
   /** Adds a trigger node (issue #493) — a canvas-owned schedule that fires into another node. */
   trigger: (at?: AddPos) => void
@@ -121,6 +125,8 @@ export const WORKTREE_SSH_HINT = 'Not supported in SSH projects yet'
  */
 export const NEW_FILE_NO_CWD_HINT = 'This project has no folder — set one first (tab ⌄ → “Set folder…”)'
 export const WORKTREE_NO_CWD_HINT = NEW_FILE_NO_CWD_HINT
+/** Same reason, same fix — a file manager has nothing to list without a project folder. */
+export const FILES_NO_CWD_HINT = NEW_FILE_NO_CWD_HINT
 
 /**
  * Map the canonical content list to {@link MenuItem}s for the `ContextMenu` component.
@@ -158,6 +164,20 @@ export function contentAddItemsToMenuItems(
         break
       case 'sticky':
         out.push({ label: 'New sticky note', icon: <IconNote />, onClick: () => handlers.sticky(at) })
+        break
+      case 'files':
+        // A file manager needs a directory to root itself in. This row used to be HIDDEN on a
+        // cwd-less canvas, reasoning that it was "the same as New file…" — and main has since
+        // reversed exactly that rule (`NEW_FILE_NO_CWD_HINT`): a cwd-less project is a supported,
+        // persisted canvas, so a folder-shaped row degrades EXPLICITLY rather than vanishing,
+        // because a row that is gone takes its reason with it and the fix is one menu away.
+        out.push({
+          label: 'New file manager',
+          icon: <IconExplorer />,
+          disabled: !ctx.hasCwd,
+          hint: ctx.hasCwd ? undefined : FILES_NO_CWD_HINT,
+          onClick: () => handlers.files(at)
+        })
         break
       case 'dino':
         out.push({ label: 'New dino game', icon: <IconDino />, onClick: () => handlers.dino(at) })
@@ -245,6 +265,16 @@ export function contentAddItemsToDockRows(
         break
       case 'sticky':
         out.push({ kind: 'sticky', label: 'Sticky Note', icon: <IconNote />, onClick: () => handlers.sticky() })
+        break
+      case 'files':
+        out.push({
+          kind: 'files',
+          label: 'File Manager',
+          icon: <IconExplorer />,
+          disabled: !ctx.hasCwd,
+          hint: ctx.hasCwd ? undefined : FILES_NO_CWD_HINT,
+          onClick: () => handlers.files()
+        })
         break
       case 'dino':
         out.push({ kind: 'dino', label: 'Dino Game', icon: <IconDino />, onClick: () => handlers.dino() })
