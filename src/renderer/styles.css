@@ -7798,6 +7798,94 @@ button.group-node__setup:disabled {
   color: var(--muted);
   font-size: 12px;
 }
+/* A main-frame load failure, OVER the guest rather than beside it: Chromium paints its own error
+   page inside the <webview>, which is another product's chrome in the middle of a node and offers
+   no way back. Shared by the web node and the browser surface (WebviewErrorPlate). */
+.browser-node__failed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  background: var(--bg);
+}
+.browser-node__failed-msg {
+  color: var(--text);
+  font-size: 13px;
+}
+.browser-node__failed-url,
+.browser-node__failed-hint {
+  color: var(--muted);
+  font-size: 11px;
+  max-width: 100%;
+}
+.browser-node__failed-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-node__failed-code {
+  color: var(--muted);
+  opacity: 0.6;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+.browser-node__failed-retry {
+  margin-top: 4px;
+  background: rgba(var(--tint-rgb), 0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 12px;
+}
+.browser-node__failed-retry:hover {
+  background: rgba(var(--tint-rgb), 0.14);
+}
+
+/* Navigation in flight. Indeterminate on purpose: a guest reports only start and stop, so any
+   percentage here would be invented. */
+.webview-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(var(--tint-rgb), 0.1);
+  pointer-events: none;
+}
+.webview-progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  background: var(--accent);
+  animation: webview-progress-slide 1.1s ease-in-out infinite;
+}
+@keyframes webview-progress-slide {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .webview-progress::after {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
 .browser-node__error {
   position: absolute;
   left: 0;
