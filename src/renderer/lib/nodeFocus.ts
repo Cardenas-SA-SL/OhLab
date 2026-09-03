@@ -89,14 +89,30 @@ export function nodeFitRect(node: FocusableNode, all: readonly FocusableNode[]):
   return { ...absolutePosition(node, all), ...size }
 }
 
-/** The viewport that frames `rect` in a `containerWidth × containerHeight` pane, with the same
- *  padding/zoom clamp `fitView` would have applied. Null when the container has no size yet. */
+/**
+ * The viewport that frames `rect` in a `containerWidth × containerHeight` pane, with the same
+ * padding/zoom clamp `fitView` would have applied. Null when the container has no size yet.
+ *
+ * `zoom` keeps the camera at a scale the caller already has (`settings.focusZoomToNode` off): the
+ * node is centred exactly as it would be, at that zoom, so "go to" stays a pan. It is passed
+ * through UNCLAMPED — it is a zoom the canvas is already displaying, and re-clamping it to the
+ * framing range would rescale the view this option exists to leave alone.
+ */
 export function viewportForRect(
   rect: Rect,
   containerWidth: number,
-  containerHeight: number
+  containerHeight: number,
+  zoom?: number
 ): Viewport | null {
   if (!(containerWidth > 0) || !(containerHeight > 0)) return null
+  if (zoom !== undefined) {
+    if (!(zoom > 0)) return null
+    return {
+      x: containerWidth / 2 - (rect.x + rect.width / 2) * zoom,
+      y: containerHeight / 2 - (rect.y + rect.height / 2) * zoom,
+      zoom
+    }
+  }
   return getViewportForBounds(
     rect,
     containerWidth,
@@ -117,23 +133,41 @@ export interface FitFrame {
   bottom: number
 }
 
+/** The shift that brings a `size`-long span starting at `start` inside `[lo, hi]`, or 0 when it
+ *  is already inside — or too long to fit, where any shift trades one clipped edge for the other. */
+function shiftInto(start: number, size: number, lo: number, hi: number): number {
+  if (size >= hi - lo) return 0
+  if (start < lo) return lo - start
+  if (start + size > hi) return hi - (start + size)
+  return 0
+}
+
 /**
- * The viewport that puts `rect` in the middle of `frame`, at the zoom that fits it there.
+ * `viewportForRect`, then the SMALLEST nudge that keeps the node clear of the floating chrome.
  *
- * The counterpart to `viewportForRect` for callers that solved a chrome-free frame first: the node
- * is centred in the space it can actually be seen in, rather than in the whole pane and then
- * nudged out from under a panel. Null when either box has no usable size.
+ * "Go to node" means putting the node in front of the user, and the middle of the screen is where
+ * that is: a node centred in the chrome-free rectangle instead reads as off to one side on a wide
+ * display (the free rect is whatever the dock and the sidebar leave over, not the eye's centre) and
+ * as half off-screen on a small one. So the centred answer stands, and the frame only pulls it back
+ * when it would otherwise slide under a panel — usually the sessions sidebar the click came from.
+ * A node too large to fit the frame is left centred: any shift there only swaps which edge is
+ * covered. `frame` null (nothing sensible to solve) ⇒ the plain centred answer.
  */
-export function viewportForRectInFrame(rect: Rect, frame: FitFrame): Viewport | null {
-  const frameW = frame.right - frame.left
-  const frameH = frame.bottom - frame.top
-  if (!(frameW > 0) || !(frameH > 0) || !(rect.width > 0) || !(rect.height > 0)) return null
-  const fit = Math.min(frameW / rect.width, frameH / rect.height)
-  const zoom = Math.min(Math.max(fit, FIT_NODE_OPTIONS.minZoom), FIT_NODE_OPTIONS.maxZoom)
+export function viewportForRectClearOf(
+  rect: Rect,
+  containerWidth: number,
+  containerHeight: number,
+  frame: FitFrame | null,
+  zoom?: number
+): Viewport | null {
+  const centred = viewportForRect(rect, containerWidth, containerHeight, zoom)
+  if (!centred || !frame) return centred
+  const width = rect.width * centred.zoom
+  const height = rect.height * centred.zoom
   return {
-    x: (frame.left + frame.right) / 2 - (rect.x + rect.width / 2) * zoom,
-    y: (frame.top + frame.bottom) / 2 - (rect.y + rect.height / 2) * zoom,
-    zoom
+    zoom: centred.zoom,
+    x: centred.x + shiftInto(centred.x + rect.x * centred.zoom, width, frame.left, frame.right),
+    y: centred.y + shiftInto(centred.y + rect.y * centred.zoom, height, frame.top, frame.bottom)
   }
 }
 

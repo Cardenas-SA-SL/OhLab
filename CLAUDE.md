@@ -2703,16 +2703,23 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   The geometry is `renderer/lib/nodeFocus.ts`: the node's rect from React Flow's own measurement
   when it has one (`getInternalNode` — `measured` reaches OUR node objects one render later via
   `onNodesChange`, and `internals.positionAbsolute` also accounts for `extent:'parent'` clamping),
-  else `nodeFitRect` from the PERSISTED size, resolving the group-parent chain. Then the
-  chrome-free frame (`solveFitFrame`, pane-local — the same solve `fitAll`'s padding is expressed
-  through) → `viewportForRectInFrame`, which centres the node in the space it can actually be seen
-  in; no solvable frame ⇒ `viewportForRect` against the whole pane at the flat ratio. Unknowable
-  size or no pane ⇒ the camera **stands still**. Two rules a refactor must not undo: framing goes
-  through `frameNode` and nothing else (`canvas-wiring.test.tsx` pins that it contains no
-  `fitView(`), and a "stands still" branch must never be "helpfully" replaced by a bare `fitView` —
-  that IS the origin jump. `fitAll` still uses `fitView` deliberately: it is an explicit user
-  gesture on a settled canvas and its fit set is every node, but it carries the same deferral, so
-  do not reach for it from anything automatic.
+  else `nodeFitRect` from the PERSISTED size, resolving the group-parent chain. Then
+  `viewportForRectClearOf`: **centred in the SCREEN**, and only nudged — by the smallest amount
+  that works — when the centred node would slide under the floating chrome (the chrome-free frame
+  comes from `solveFitFrame`, pane-local, the same solve `fitAll`'s padding is expressed through).
+  Centring in that FRAME instead was tried and is wrong: the free rect is whatever the dock and the
+  sidebar leave over, not where the eye looks, so a node landed too far right on an ultrawide and
+  half off-screen on a laptop. A node too large for the frame is left centred — a shift there only
+  swaps which edge is covered. Unknowable size or no pane ⇒ the camera **stands still**.
+  `settings.focusZoomToNode` (Behavior, default ON) is the escape hatch for the rescale: off, the
+  camera keeps the zoom `getZoom()` reports and only pans, and that zoom is passed through
+  **unclamped** — it is one the canvas is already displaying, and re-clamping it to the framing
+  range would rescale the view the option exists to leave alone. Two rules a refactor must not
+  undo: framing goes through `frameNode` and nothing else (`canvas-wiring.test.tsx` pins that it
+  contains no `fitView(`), and a "stands still" branch must never be "helpfully" replaced by a bare
+  `fitView` — that IS the origin jump. `fitAll` still uses `fitView` deliberately: it is an
+  explicit user gesture on a settled canvas and its fit set is every node, but it carries the same
+  deferral, so do not reach for it from anything automatic.
 - **Breadcrumb trail** (`renderer/lib/breadcrumbs.ts` — all the pure logic lives there) — every
   deliberate `goToNode` landing records a `NavStop` ({nodeId, at, note}) for the ACTIVE project, and
   **Cmd+[ / Cmd+]** (`canvas.goBack` / `canvas.goForward`, bound in `shared/keybindings.ts`) plus the

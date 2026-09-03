@@ -269,7 +269,7 @@ import {
   isMeasured,
   nodeFitRect,
   viewportForRect,
-  viewportForRectInFrame,
+  viewportForRectClearOf,
   type FocusableNode
 } from '../lib/nodeFocus'
 import { NODE_MAXIMIZE_MARGIN_PX, maximizeTargetRect } from '../lib/nodeMaximize'
@@ -6673,14 +6673,20 @@ export function Canvas() {
       // Size unknowable / no pane yet: leave the camera where it is. Standing still beats
       // teleporting the user to the origin, which is the failure this whole path exists for.
       if (!rect || !wrap) return
-      const frame = solveFitFrame(wrap, rect.width, rect.height)
       const box = wrap.getBoundingClientRect()
-      const viewport = frame
-        ? viewportForRectInFrame(rect, frame)
-        : viewportForRect(rect, box.width, box.height)
+      // `focusZoomToNode` off: keep the zoom the user settled on and only pan. The node is still
+      // centred and still kept clear of the chrome — only the rescale is dropped.
+      const keepZoom = useSettings.getState().settings.focusZoomToNode ? undefined : getZoom()
+      const viewport = viewportForRectClearOf(
+        rect,
+        box.width,
+        box.height,
+        solveFitFrame(wrap, rect.width, rect.height),
+        keepZoom
+      )
       if (viewport) void setViewport(viewport, { duration: 300 })
     },
-    [setViewport, getInternalNode]
+    [setViewport, getInternalNode, getZoom]
   )
 
   const goToNode = useCallback(

@@ -170,6 +170,17 @@ describe('breadcrumb wiring the CLAUDE.md bullet calls load-bearing', () => {
     expect(frame).toContain('setViewport(viewport, { duration: 300 })')
   })
 
+  it('frames the node in the SCREEN, honouring the keep-my-zoom setting', () => {
+    // Centring in the chrome-free rect instead read as "too far right" on a wide display and as
+    // half off-screen on a laptop; `viewportForRectClearOf` centres in the pane and only nudges.
+    const frame = CANVAS_SRC.slice(
+      CANVAS_SRC.indexOf('const frameNode = useCallback'),
+      CANVAS_SRC.indexOf('const goToNode = useCallback')
+    )
+    expect(frame).toContain('viewportForRectClearOf(')
+    expect(frame).toContain('settings.focusZoomToNode ? undefined : getZoom()')
+  })
+
   it('the resume card slot is spent only on a card that can render, and only when opted in', () => {
     // Gated on settings.showResumeCard (default off) FIRST — a disabled card must not spend the
     // one-shot slot — then once per app run, only with a live stop, and never under the opaque
