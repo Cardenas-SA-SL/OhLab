@@ -1670,6 +1670,26 @@ body,
   color: #bf7af0;
 }
 
+/* DROPPED: the agent process is gone and nothing accounted for it (see agent-liveness.ts). Warn
+   colour, not danger — the conversation is intact on disk and one click brings it back — and the
+   dot does NOT pulse: nothing is happening, this is a verdict about a process that already died.
+   A <button> like SLEEPING/PAUSED, so it needs the same base-chip reset. */
+.term-node__status--dropped {
+  color: var(--warn);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.term-node__status--dropped:hover {
+  color: var(--text);
+}
+
 /* SLEEPING: the agent CLI was exited to reclaim its RAM (Eco); the session itself is fine, so
    this is the quietest chip on the header — grey, no pulse. It is a <button> (click = resume),
    which the base chip's styling does not cover. */
@@ -9512,6 +9532,12 @@ button.group-node__setup:disabled {
 .kanban-badge--sleeping {
   color: var(--muted);
   background: rgba(var(--tint-rgb), 0.08);
+}
+/* The agent process is gone and nothing accounted for it. Warn-coloured like NEEDS YOU, because it
+   does need the user — but for a different reason, which is why it gets its own label. */
+.kanban-badge--dropped {
+  color: var(--warn);
+  background: rgba(255, 159, 10, 0.12);
 }
 .kanban-card__unread {
   width: 7px;

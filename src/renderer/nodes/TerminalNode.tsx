@@ -126,6 +126,12 @@ import {
   type PauseOutcome,
   type ResumePhaseOutcome
 } from '../terminal/agent-restart'
+import {
+  looksDropped,
+  looksDroppedCandidate,
+  LIVENESS_POLL_MS,
+  LIVENESS_QUERY_MS
+} from '../terminal/agent-liveness'
 import { shouldAutoWake, shouldColdResume } from '../terminal/hibernation-policy'
 import { WakeInputBuffer } from '../terminal/wake-input-buffer'
 import { FindBar } from '../components/FindBar'
@@ -1567,6 +1573,8 @@ export function TerminalNode({
   const wakeInputBufferRef = useRef(new WakeInputBuffer())
   const paneWriteRef = useRef<(data: string) => void>(() => {})
   const wakeRef = useRef<(attempt?: number) => void>(() => {})
+  /** The liveness check's own asker, published by its effect for the reveal edge to call. */
+  const livenessAskRef = useRef<(() => Promise<void>) | null>(null)
   wakeRef.current = (attempt = 0): void => {
     // A wake that could not run YET is retried a couple of times: at mount the spawn is still in
     // flight, and a node coming back from an offscreen DISPOSE re-registers its pair one render
@@ -1584,7 +1592,12 @@ export function TerminalNode({
     // session instead, leaving `hibernated` unset), but either flag means there is a conversation
     // this closure knows how to bring back.
     const stNow = useAgentStatus.getState().byId[id]
-    if (!stNow?.hibernated && !stNow?.paused) return
+    // `dropped` joins the two pause flags here because it is the same job with a different cause:
+    // the pane holds a bare shell and there is a conversation this closure knows how to bring back.
+    // The resume half is what makes it safe to admit — it re-reads the pane itself and refuses
+    // anything that is not a shell, so a node whose CLI came back on its own between the verdict
+    // and the click is declined rather than typed into.
+    if (!stNow?.hibernated && !stNow?.paused && !stNow?.dropped) return
     const fns = agentHibernateFns(id)
     if (!fns) return retryLater() // no terminal here yet (mid-spawn, or an offscreen revive)
     wakeInFlightRef.current = true
@@ -1600,6 +1613,9 @@ export function TerminalNode({
         if (outcome === 'resumed') {
           useAgentStatus.getState().setHibernated(id, false)
           useAgentStatus.getState().setPaused(id, false)
+          // The resume line is in the pane; the CLI's own SessionStart will confirm it shortly, but
+          // the chip must not survive the click that answered it.
+          useAgentStatus.getState().setDropped(id, false)
           return
         }
         // 'not-eligible' — usually timing, not a refusal that will stand: at mount the spawn is
@@ -1645,6 +1661,74 @@ export function TerminalNode({
       setNodeOffscreen(id, false)
     }
   }, [id])
+  /**
+   * LIVENESS — did this node's agent CLI die without telling us? (See `agent-liveness.ts` for the
+   * rule and every refusal in it; this effect only supplies the pane reading and records the
+   * verdict.)
+   *
+   * WHEN it asks is the whole cost story. `paneCommand` is one tmux `display-message` — measured at
+   * 4 ms against a local socket, one exec channel on an existing ControlMaster for an SSH project —
+   * but a canvas can hold fifty agent nodes, and fifty of anything on a timer is a background load
+   * nobody asked for. So this asks only for a node that is BOTH watched (on screen, or a kanban
+   * card modal is open on it) and already believed to be a parked agent: a `done` node that is
+   * neither hibernated nor paused. Everything else costs one map lookup and no I/O.
+   *
+   * The cadence is deliberately coarser than the badge feels: the verdict is about a process that
+   * is already gone and is not going to come back on its own, so re-asking fast buys nothing. The
+   * reveal edge is what makes it feel immediate — the user looks at the node, and a check runs then.
+   *
+   * `null` (a lapsed or failed read) leaves the previous verdict ALONE rather than clearing it: a
+   * ControlMaster that drops must not quietly retract a DROPPED chip and leave a dead session
+   * looking healthy. `looksDropped` already refuses to raise one on `null`; this is the other half.
+   */
+  useEffect(() => {
+    let stopped = false
+    let asking = false
+    const ask = async (): Promise<void> => {
+      if (asking || stopped) return
+      const st = useAgentStatus.getState().byId[id]
+      // Cheap gate first, so a canvas of healthy or plain-terminal nodes never reaches the pane.
+      // Note it admits an ALREADY-dropped node too: that is how the chip clears itself when the
+      // user relaunches the CLI by hand (no hook has to arrive for the pane to answer).
+      if (!st?.dropped && !looksDroppedCandidate(agentId, st?.state, st?.hibernated, st?.paused))
+        return
+      if (!isNodeWatched(id)) return
+      asking = true
+      try {
+        const pane = await queryPaneWithin(() => api.pty.paneCommand(id), LIVENESS_QUERY_MS)
+        if (stopped || pane === null) return
+        // Re-read: the await is long enough for a turn to have started, or for the user to have
+        // paused the node from the menu.
+        const now = useAgentStatus.getState().byId[id]
+        useAgentStatus
+          .getState()
+          .setDropped(
+            id,
+            looksDropped({
+              agentId,
+              state: now?.state,
+              hibernated: now?.hibernated,
+              paused: now?.paused,
+              pane
+            })
+          )
+      } catch {
+        // Same contract as `null` — an unreadable pane is never evidence either way.
+      } finally {
+        asking = false
+      }
+    }
+    // Published for the reveal edge below (the visibility observer is not a subscribable store, so
+    // the edge calls this rather than this effect re-running on it). Identity-checked on clear.
+    livenessAskRef.current = ask
+    void ask()
+    const t = setInterval(() => void ask(), LIVENESS_POLL_MS)
+    return () => {
+      stopped = true
+      clearInterval(t)
+      if (livenessAskRef.current === ask) livenessAskRef.current = null
+    }
+  }, [id, agentId, api])
   // Held launch (canvas-control `--after`). Canvas owns firing it; the node only surfaces that
   // it is armed, and by WHAT it is blocked — dep titles read straight off the live canvas, since
   // "waits for term-17" tells the user nothing.
@@ -4087,6 +4171,11 @@ export function TerminalNode({
         const stVisible = useAgentStatus.getState().byId[id]
         if (visible && !wasVisible && shouldAutoWake(stVisible?.hibernated, stVisible?.paused))
           wakeRef.current()
+        // …and the liveness check, for the same reason and on the same edge: a node whose CLI died
+        // while nobody was looking should say so by the time the user has finished panning to it,
+        // not on the interval's next tick. Cheap — the asker's own gate returns before any I/O for
+        // a node that is not a parked agent.
+        if (visible && !wasVisible) void livenessAskRef.current?.()
         // A visible node is not in an offscreen stretch at all — the next hidden edge starts a
         // fresh clock for the Eco deferral's cap.
         if (visible) offscreenSinceRef.current = null
@@ -4897,7 +4986,26 @@ export function TerminalNode({
             revealing the node resumes the conversation. Clickable because the automatic wake can
             refuse (a pane that now belongs to something else, a spawn that is still coming up),
             and a badge with no way forward is a dead end. Muted on purpose: nothing is wrong. */}
-        {status?.paused ? (
+        {/* DROPPED: the CLI left this pane and nothing accounted for it — on a busy host, almost
+            always the OOM killer. Unlike SLEEPING/PAUSED this is NOT a state we chose, so it reads
+            in the warning colour: the conversation is still on disk, but nothing is running and
+            nothing will resume it on its own. Clicking resumes it, through the same closure the
+            hibernation wake uses. Ranked ABOVE the two pause chips because they are mutually
+            exclusive by construction (`looksDropped` refuses a hibernated or paused node), so the
+            ordering is about reading the JSX, not about resolving a conflict. */}
+        {status?.dropped ? (
+          <button
+            className="term-node__status term-node__status--dropped nodrag"
+            title="This session's agent process is gone (it did not exit cleanly) — click to resume the conversation"
+            onClick={(e) => {
+              e.stopPropagation()
+              wakeRef.current()
+            }}
+          >
+            <span className="term-node__status-dot" />
+            DROPPED
+          </button>
+        ) : status?.paused ? (
           <button
             className="term-node__status term-node__status--paused nodrag"
             title="Session paused — click to resume"

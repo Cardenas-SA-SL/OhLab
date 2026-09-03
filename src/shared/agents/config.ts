@@ -202,6 +202,21 @@ export const CHAT_CAPABLE = ['claude', 'grok'] as const
 export const CLAUDE_TRANSCRIPT_READABLE = ['claude'] as const
 // Agents whose native transcript we can read + render for cross-agent transfer.
 export const TRANSFER_SOURCE_CAPABLE = ['claude', 'codex', 'gemini', 'grok'] as const
+// Agents whose hooks announce that a session ENDED — i.e. whose orderly `/exit` we will hear about.
+//
+// Derived by reading `normalize.ts`, not by intent: exactly four normalizers map an event to
+// `sessionPhase: 'end'` (claude `SessionEnd`, gemini `SessionEnd`, copilot `SessionEnd`, grok
+// `sessionend`). `normalizeCodex` and `normalizeOpencode` map none, which is why they are absent
+// here — and their absence is load-bearing, not an oversight to tidy up later.
+//
+// What it gates today is the DROPPED chip (`terminal/agent-liveness.ts`): "the pane went back to a
+// shell but nobody told us the session ended" is only evidence of a CRASH for an agent that WOULD
+// have told us. On codex and opencode a deliberate `/quit` and an OOM kill leave byte-identical
+// evidence, so a chip there could only be a coin flip shown as a fact.
+//
+// Before adding an id: find its normalizer's `sessionPhase: 'end'` branch. If there isn't one, the
+// branch is the change — this list is a consequence of it, never a substitute for it.
+export const SESSION_END_CAPABLE = ['claude', 'gemini', 'copilot', 'grok'] as const
 // Agents that accept a node title being PUSHED back into the session — the write leg only. The
 // write is the same literal `/rename <name>` for both, which grok also accepts as `/title`.
 // The READ leg is TITLE_READ_CAPABLE below, which is a superset: an agent can name its own session
@@ -367,6 +382,9 @@ export const canChat = (id: AgentId): boolean => includes(CHAT_CAPABLE, id)
 export const readsClaudeShapedTranscript = (id: AgentId): boolean =>
   includes(CLAUDE_TRANSCRIPT_READABLE, id)
 export const canTransferFrom = (id: AgentId): boolean => includes(TRANSFER_SOURCE_CAPABLE, id)
+/** Will this agent's hooks tell us when its session ends? See SESSION_END_CAPABLE — the honest
+ *  answer for codex and opencode is no, and callers must degrade rather than assume a crash. */
+export const reportsSessionEnd = (id: AgentId): boolean => includes(SESSION_END_CAPABLE, id)
 export const canRename = (id: AgentId): boolean => includes(RENAME_CAPABLE, id)
 export const canReadTitle = (id: AgentId): boolean => includes(TITLE_READ_CAPABLE, id)
 export const canControlCanvas = (id: AgentId): boolean => includes(CANVAS_CONTROL_CAPABLE, id)

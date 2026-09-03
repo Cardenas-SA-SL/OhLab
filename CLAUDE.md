@@ -1352,6 +1352,39 @@ else, and its context links must keep classifying across restarts).
   `NormalizedAgentEvent` from `agent:status`, drives the `agentStatus` store, fires throttled
   (5s/node) background notifications, and records the session id. Header shows a pulsing
   **RUNNING** (working) / **NEEDS YOU** (waiting/blocked) badge.
+- **DROPPED — the CLI died and nobody told us** (`renderer/terminal/agent-liveness.ts`, issue #616).
+  Every ORDERLY exit announces itself: Eco's `/exit` sets `hibernated`, "Pause session" sets
+  `paused`, and a user typing `/exit` fires the CLI's own SessionEnd, which `setState(id, undefined)`
+  records. A KILL announces nothing — the process is gone before it can run a hook, and tmux's shell
+  still owns the pane so the PTY never closes. The node therefore kept rendering its last badge over
+  a dead conversation, with the CLI's parting `Resume this session with: claude --resume <uuid>` and
+  a stray `^[%` in the pane as the only evidence. Not exotic: measured on the reporting host
+  (2026-09-04) 62 GB RAM with swap fully consumed, kernel `oom_kill` at 187, 147 live `claude`
+  processes holding 44 GB. The signal is `#{pane_current_command}` reading as a shell while the
+  status table still believes an agent is parked there, and the four refusals are the feature:
+  a `null` pane read is NEVER evidence (a downed ControlMaster must not make a canvas of healthy
+  remote nodes claim they died); `hibernated`/`paused` are our own exits and already have chips;
+  **only `done`**, never `working` — a turn in flight is exactly when a tool subprocess can own the
+  pane's foreground, so the alarm would fire on a healthy agent running a shell command; and the
+  agent must be in **`SESSION_END_CAPABLE`**. That last list is the false-positive gate and is
+  DERIVED from `normalize.ts`, not chosen: exactly four normalizers map `sessionPhase: 'end'`
+  (claude, gemini, copilot, grok) and **codex and opencode map none**, so on those two a deliberate
+  `/quit` and an OOM kill leave byte-identical evidence and the chip would be a coin flip shown as a
+  fact. Adding an id without first adding its normalizer branch puts a chip on every session its
+  owner quit on purpose — `agent-liveness.test.ts` asserts the list against that source. The verdict
+  (`agentStatus.dropped`) is TRANSIENT, a stronger call than the other clocks: it is a claim about a
+  pane, panes are re-measurable in milliseconds, and a persisted one would strand a stale chip on a
+  node someone resumed by hand. ANY hook event withdraws it — the one self-heal that deliberately
+  does not gate on `alive`, since `done` disproves "there is no CLI in this pane" even though it must
+  not clear `hibernated`. Cost is bounded by asking only for a node that is BOTH watched and already
+  believed to be a parked agent. Resume reuses the hibernation wake closure unchanged, which
+  re-reads the pane and refuses anything that is not a shell. Chip on the node header, the kanban
+  card and the card modal; Desktop and Server Edition identical; relay tabs answer `null` and are
+  never judged. **A second thing this catches, unplanned:** in the same sweep 9 of 149 panes sat at a
+  bare shell because a cold-restore `--resume` had answered *"No conversation found with session
+  ID"* — the persisted `sessionId` outlived its transcript. The chip surfaces those too, but the
+  Resume it offers replays the same dead id; making cold restore fall back to a bare launch when the
+  transcript is gone is a separate, unbuilt fix.
 - **Hook server (loopback HTTP)** — `src/core/agents/hook-server.ts` is a main-process
   loopback HTTP server (per-session bearer token, fail-open) that the installed hook scripts
   POST to; it replaced the old `fs.watch` signal-log mechanism. `buildPtyEnv` injects the
