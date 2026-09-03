@@ -39,10 +39,13 @@ export default function WebNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const [restoring, setRestoring] = useState(false)
   const [revive, setRevive] = useState(0)
   const srcRef = useRef('')
-  /** "Loading" here is the media grant being in flight — the only await between mount and a
-   *  usable src (a live URL is resolved synchronously). Discarding mid-grant would drop the
-   *  answer to a request already made. */
+  /** The media grant being in flight — the only await between mount and a usable src (a live URL
+   *  is resolved synchronously). Discarding mid-grant would drop the answer to a request already
+   *  made. */
   const grantingRef = useRef(false)
+  /** The guest's own navigation, mirrored for the same fire-time read: the hook asks from a
+   *  callback that must not force the observer to be re-created. */
+  const loadingRef = useRef(false)
 
   useEffect(() => {
     let alive = true
@@ -98,11 +101,15 @@ export default function WebNode({ id, data, selected }: NodeProps<CanvasNode>) {
     const wv = wvRef.current as unknown as (EventTarget & { addEventListener: HTMLElement['addEventListener'] }) | null
     if (!wv || !live) return
     const onStart = (): void => {
+      loadingRef.current = true
       setLoading(true)
       // A new attempt is the only thing that clears the plate — see BrowserSurface's `onStart`.
       setFailure(null)
     }
-    const onStop = (): void => setLoading(false)
+    const onStop = (): void => {
+      loadingRef.current = false
+      setLoading(false)
+    }
     const onFail = (e: Event): void => {
       const ev = e as unknown as {
         isMainFrame: boolean
@@ -126,7 +133,7 @@ export default function WebNode({ id, data, selected }: NodeProps<CanvasNode>) {
   }, [live])
 
   useDiscardWhenHidden(rootRef, {
-    isLoading: () => grantingRef.current,
+    isLoading: () => grantingRef.current || loadingRef.current,
     isAudible: () => webviewAudible(wvRef.current),
     hasContent: () => !!srcRef.current,
     onDiscard: () => {
@@ -135,6 +142,7 @@ export default function WebNode({ id, data, selected }: NodeProps<CanvasNode>) {
       srcRef.current = ''
       // The failure belonged to the page we just released; the restore raises its own if it fails.
       setFailure(null)
+      loadingRef.current = false
       setLoading(false)
       // A background keep-alive GHOST (data.ghost — lib/webviewKeepAlive.ts) whose guest is gone
       // is a husk holding a pool slot: end its entry, which unmounts this whole node. An active
