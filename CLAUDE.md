@@ -2410,6 +2410,27 @@ about which machine they describe. Reading + parsing is `core/session-memory.ts`
   observed is killed on the host it observed it on (node ids are only per-launch unique, and nothing
   here rests on more). Ownership is re-resolved at click time, not taken from the row's stale
   `orphan` flag, so a node created since the sweep is not killed as an orphan.
+- **The panel's second action is PAUSE, and it is the one that should usually be clicked.** The `×`
+  was the only thing a row offered, which is the wrong tool for what the panel is mostly opened
+  for. Measured on the reporting host (2026-09-04, 149 `nt-` sessions, 46 GB of tree RSS): the
+  median session with a live `claude` holds **321 MB**, the median session whose CLI has already
+  gone holds **5.6 MB** — so exiting the CLI returns **98.3%** of it, and killing the tmux session
+  on top buys the remaining 1.7% at the price of the pane, its scrollback and the warm reattach.
+  Population-wide the same split is 95% `claude`+`node` against 1.8% shell. **This is the number to
+  quote when someone proposes making a memory lever destroy sessions**, and it is why issue #616's
+  "end the tmux session too" was not built. The control is NOT a third depth: it calls
+  `pauseAgentNode(id, false)` — the same "Pause session" the node menu offers, the same
+  `performExitPhase`, the same PAUSED chip and the same Resume — because a panel-only "hibernate"
+  would be a third concept for the user and a second exit path to keep in step with Eco's. Which
+  rows may offer it is the pure `renderer/lib/sessionPause.ts`, and its two directions are
+  deliberate: a row that could NEVER be paused (an orphan, a plain terminal, an agent we cannot
+  quit-and-resume) renders **nothing** — a dead control on most rows of a machine-wide list is
+  noise about something that was never possible — while a row that is merely refused right now
+  (busy, no session id, or its terminal is not mounted on this canvas, which is the common case in
+  a panel that spans every project) renders **disabled with the reason**. Canvas answers, because
+  it is the only place that can see the node's agent, its registered pause closure and its
+  `restartEligibility` at once; it asks on the same narrow `st?.sessionId` the node menu uses, so a
+  row cannot promise what the closure would refuse.
 - **The name and the host were never the hard part — the SOCKET was.** Two nodeterm tmux sockets
   live on one machine at once (`node-terminal` for a nodeterm running ON it, `nodeterm-rmt` for one
   SSH-ing INTO it) and the sweep lists **both**, while the kill targeted one — so every row off the

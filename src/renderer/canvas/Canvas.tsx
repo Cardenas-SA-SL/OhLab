@@ -294,6 +294,7 @@ import {
   type BreadcrumbTarget
 } from '../lib/breadcrumbs'
 import { planSessionKill } from '../lib/sessionKill'
+import { sessionPauseOffer, type SessionPauseOffer } from '../lib/sessionPause'
 import { RemoteAccessDialog } from '../components/RemoteAccessDialog'
 import { SshProjectDialog } from '../components/SshProjectDialog'
 import { SshPassphrasePrompt } from '../components/SshPassphrasePrompt'
@@ -11271,6 +11272,50 @@ export function Canvas() {
     [closeSession, setConfirm]
   )
 
+  /**
+   * What the session-memory panel should render in a row's pause slot. Canvas answers because it
+   * is the only place that can see all four facts at once — the node's created-with agent, whether
+   * a live `pause` closure is registered for it (i.e. its terminal is mounted HERE), its persisted
+   * pause flags, and its restart eligibility. The rule itself is the pure `sessionPauseOffer`.
+   *
+   * Read from `nodesRef`/the store at CALL time rather than closed over: the panel calls this per
+   * row on every render, and a stale snapshot would light a control for a node that has since gone.
+   */
+  const sessionPauseOfferFor = useCallback(
+    (nodeId: string): SessionPauseOffer => {
+      const node = nodesRef.current.find((n) => n.id === nodeId)
+      const st = useAgentStatus.getState().byId[nodeId]
+      // `restartAgentIdOf`, not a bare `createdAgentId`: it is the ONE shared derivation the
+      // node's own restart/pause closures capture, and it already answers `undefined` for anything
+      // that is not a terminal — which `restartEligibility` reads as `not-resumable`.
+      const agentId = restartAgentIdOf(node)
+      return sessionPauseOffer({
+        // The panel's own `orphan` means "no node in ANY project"; this narrower "not on the active
+        // canvas" is what actually decides, because that is exactly when no pause closure can
+        // exist. Both end at the same refusal via `wired`, so this only has to say whether there is
+        // a node object to read an agent off.
+        orphan: !node,
+        agentId,
+        wired: !!agentPauseFns(nodeId),
+        paused: st?.paused,
+        hibernated: st?.hibernated,
+        // The same narrow fact the node menu's Pause row uses: `st?.sessionId` alone, never the
+        // minted `data.agentSessionId` fallback, because the pause closure gates on the live id and
+        // a row lit by the fallback would enable here and refuse there.
+        eligibility: restartEligibility(agentId, st?.state, st?.sessionId)
+      })
+    },
+    []
+  )
+
+  /** The panel's pause click — the SAME action as the node menu's "Pause session", so a session
+   *  paused from either surface is in one state with one Resume. `pauseAgentNode` raises its own
+   *  notices and re-asks eligibility inside the closure, so nothing is duplicated here. */
+  const pauseSessionById = useCallback(
+    (nodeId: string) => pauseAgentNode(nodeId, false),
+    [pauseAgentNode]
+  )
+
   const renameSession = useCallback(
     (projectId: string, id: string, title: string) => {
       // Both facts about the node are read BEFORE the rename lands: `renameNode` mutates the
@@ -13358,6 +13403,8 @@ export function Canvas() {
             overBoard={kanbanOpen}
             onGoToNode={travelToNode}
             onKillSession={killSessionById}
+            pauseOfferFor={sessionPauseOfferFor}
+            onPauseSession={pauseSessionById}
           />
         
           {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) — the
