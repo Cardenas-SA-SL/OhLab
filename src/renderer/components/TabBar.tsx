@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjects } from '../state/projects'
-import { useViewMode, viewFor } from '../state/viewMode'
+import { isOmniKanbanEnabled, useViewMode, viewFor } from '../state/viewMode'
 import { useAgentStatus } from '../state/agentStatus'
 import { useSettings } from '../state/settings'
 import { accountsForProject, sshAccountsHint, systemAccountDisplay } from '../state/workspace'
@@ -87,7 +87,12 @@ export function TabBar({
   // Closed projects are hidden here (reopen them from the start screen's "Recently closed").
   const projects = useMemo(() => allProjects.filter((p) => !p.closed), [allProjects])
   const activeId = useProjects((s) => s.activeProjectId)
-  const kanbanActive = useViewMode((s) => !!activeId && viewFor(s, activeId) === 'kanban')
+  const omniEnabled = useSettings((s) => isOmniKanbanEnabled(s.settings))
+  const globalKanban = useViewMode((s) => s.globalKanban)
+  const isGlobal = omniEnabled && globalKanban
+  const perProjectKanban = useViewMode((s) => !!activeId && viewFor(s, activeId) === 'kanban')
+  const kanbanActive = isGlobal || perProjectKanban
+  const highlightedId = useViewMode((s) => s.highlightedSwimlaneId)
   // Unread dots need only the unread id set — subscribing to the whole status map re-rendered
   // the TabBar on every working/waiting flip of any agent. Primitive signature → rare updates.
   const unreadIds = useAgentStatus((s) => {
@@ -262,12 +267,13 @@ export function TabBar({
             }}
           >
           {projects.map((p) => {
-            const active = p.id === activeId
+            const active = isGlobal ? (highlightedId ? p.id === highlightedId : p.id === activeId) : p.id === activeId
+            const swimlaneHighlight = isGlobal && p.id === highlightedId
             const unreadCount = p.nodes.filter((n) => unreadSet.has(n.id)).length
             return (
               <div
                 key={p.id}
-                className={`tab${active ? ' active' : ''}${p.unavailable ? ' unavailable' : ''}${dropId === p.id ? ' is-drop-before' : ''}`}
+                className={`tab${active ? ' active' : ''}${swimlaneHighlight ? ' tab--swimlane-highlight' : ''}${p.unavailable ? ' unavailable' : ''}${dropId === p.id ? ' is-drop-before' : ''}`}
                 style={active ? { color: p.color } : undefined}
                 draggable={editingId !== p.id}
                 onDragStart={(e) => {
@@ -298,8 +304,13 @@ export function TabBar({
                 }}
                 onClick={() => {
                   if (editingId) return
-                  // An unavailable tab distinguishes by its bound session source: a dropped RELAY
-                  // tab reconnects on click (Stage 4 Task 7), a missing local folder is inert.
+                  // In global swimlane overview, clicking the top project tab jumps to its
+                  // swimlane instead of switching the canvas project (analog zu Cmd+1..9).
+                  if (isGlobal) {
+                    useViewMode.getState().setHighlightedSwimlaneId(p.id)
+                    window.dispatchEvent(new CustomEvent('nodeterm:swimlane-jump', { detail: { projectId: p.id } }))
+                    return
+                  }
                   const action = tabClickAction(!!p.unavailable, sessionForProject(p.id).source)
                   if (action === 'switch') onSwitch(p.id)
                   else if (action === 'reconnect') onReconnect(p.id)
@@ -370,7 +381,20 @@ export function TabBar({
                     )}
                     onClick={(e) => {
                       e.stopPropagation() // a tab click switches projects, this only flips the view
-                      useViewMode.getState().toggle(p.id)
+                      const vm = useViewMode.getState()
+                      const settings = useSettings.getState().settings
+                      const omni = isOmniKanbanEnabled(settings)
+                      const asDefault = settings.omniKanbanAsDefault === true
+                      // Closing: global overlay is exclusive — any board toggle while it's open closes it.
+                      if (vm.globalKanban) {
+                        vm.toggleGlobalKanban()
+                        return
+                      }
+                      if (omni && asDefault) {
+                        vm.toggleGlobalKanban()
+                      } else {
+                        vm.toggle(p.id)
+                      }
                     }}
                   >
                     {kanbanActive ? <IconCanvasView /> : <IconKanban />}

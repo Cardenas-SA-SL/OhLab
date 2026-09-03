@@ -151,7 +151,7 @@ import { PresenceChips } from '../components/PresenceChips'
 import { useAgentNodes } from '../state/agentNodes'
 import { useTerminalFocus } from '../state/terminalFocus'
 import { useProjects } from '../state/projects'
-import { isKanbanOpen, useViewMode, viewFor } from '../state/viewMode'
+import { isGlobalKanbanOpen, isKanbanOpen, isOmniKanbanEnabled, useViewMode, viewFor } from '../state/viewMode'
 import { useSshConn } from '../state/sshConn'
 import { useWorktrees } from '../state/worktrees'
 import { isRemoteSessionNode } from '@shared/worktree'
@@ -1202,8 +1202,11 @@ export function TerminalNode({
   // an agent's input box off the bottom. So while the board is up we report "not viewing" (null),
   // exactly like a park, and the visible modal drives the shared grid. A node only ever lives in the
   // ACTIVE project's React Flow, so the active project's view is the one that matters.
+  const omniKanbanEnabled = useSettings((s) => isOmniKanbanEnabled(s.settings))
   const boardOpen = useViewMode(
-    (s) => viewFor(s, useProjects.getState().activeProjectId ?? '') === 'kanban'
+    (s) =>
+      (omniKanbanEnabled && s.globalKanban) ||
+      viewFor(s, useProjects.getState().activeProjectId ?? '') === 'kanban'
   )
   const boardOpenRef = useRef(boardOpen)
   const dwellRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2705,7 +2708,7 @@ export function TerminalNode({
         terminalShortcutPolicy() !== 'terminal-first' && liveProjectJumpTarget(e) !== null
       const registryOwns = terminalChordBubbles(
         e,
-        isKanbanOpen(useProjects.getState().activeProjectId ?? '')
+        isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId ?? '')
       )
       const action = terminalKeyAction(e, term.hasSelection(), ownsProjectJump, registryOwns)
       if (action === 'pass') return true

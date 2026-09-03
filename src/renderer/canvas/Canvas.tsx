@@ -461,7 +461,8 @@ import { canClearDirty, canCommitCanvas, canCreateOnCanvas } from '../state/pers
 import { isHidden } from '../lib/ui-visibility'
 import { boardLogEvents } from '../lib/boardLogDiff'
 import { useBoardLog } from '../state/boardLog'
-import { isKanbanOpen, useViewMode, viewFor } from '../state/viewMode'
+import { isGlobalKanbanOpen, isKanbanOpen, isOmniKanbanEnabled, useViewMode, viewFor } from '../state/viewMode'
+import { GlobalKanbanView } from '../components/kanban/GlobalKanbanView'
 import { useFocusNode, FOCUS_SURFACE_ID } from '../state/focusNode'
 import { focusTargetId } from '../lib/focusTarget'
 import {
@@ -2390,7 +2391,7 @@ export function Canvas() {
         if (node) {
           // Same rule as focusNodeById: if the project we just landed on shows the BOARD, the
           // node lives on a card, not on the canvas hidden under it.
-          if (isKanbanOpen(useProjects.getState().activeProjectId)) {
+          if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) {
             useViewMode.getState().requestCard(pending)
           } else {
             setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === pending })))
@@ -2440,7 +2441,11 @@ export function Canvas() {
   // ride the same debounced whole-file save.
   useEffect(() => registerWorkspaceDirty(markDirty), [markDirty])
 
-  const kanbanOpen = useViewMode((s) => !!activeProjectId && viewFor(s, activeProjectId) === 'kanban')
+  const perProjectKanbanOpen = useViewMode((s) => !!activeProjectId && viewFor(s, activeProjectId) === 'kanban')
+  const rawGlobalKanban = useViewMode((s) => s.globalKanban)
+  const omniEnabled = useSettings((s) => isOmniKanbanEnabled(s.settings))
+  const globalKanbanOpen = rawGlobalKanban && omniEnabled
+  const kanbanOpen = globalKanbanOpen || perProjectKanbanOpen
   const projectKanban = useProjects((s) => s.projects.find((p) => p.id === s.activeProjectId)?.kanban)
   // Fresh default per project — ids must not be shared across projects; NOT persisted
   // until the first edit writes it (spec lazy-default rule).
@@ -2528,6 +2533,44 @@ export function Canvas() {
     commitActiveToStore()
     await writeDisk()
   }, [commitActiveToStore, writeDisk])
+
+  // Global kanban reads ALL lanes from serialized `p.nodes`, but the active project's
+  // live React Flow nodes may have uncommitted edits (title rename, new node). Commit
+  // before the board mounts so the active lane matches the canvas — the other lanes are
+  // already serialized and correct. This is the one-definition discipline from the review.
+  useEffect(() => {
+    if (globalKanbanOpen) commitActiveToStore()
+  }, [globalKanbanOpen, commitActiveToStore])
+
+  // Single decision for "toggle the kanban board" — called from both the registry handler
+  // (view.kanbanToggle, under terminal-first) and the desktop menu IPC receiver
+  // (onToggleKanban, under app-first where the menu steals the accelerator). Must stay in one
+  // place: the IPC path bypasses the registry, so duplicating the omni/asDefault choice
+  // caused Cmd+Shift+B on desktop to ignore omniKanbanAsDefault and to toggle the per-project
+  // board underneath the global overlay.
+  const performKanbanToggle = useCallback(() => {
+    if (isGlobalKanbanOpen()) {
+      useViewMode.getState().toggleGlobalKanban()
+      return true
+    }
+    const settings = useSettings.getState().settings
+    if (isOmniKanbanEnabled(settings) && settings.omniKanbanAsDefault === true) {
+      commitActiveToStore()
+      useViewMode.getState().toggleGlobalKanban()
+      return true
+    }
+    const id = useProjects.getState().activeProjectId
+    if (!id) return false
+    useViewMode.getState().toggle(id)
+    return true
+  }, [commitActiveToStore])
+
+  const performGlobalKanbanToggle = useCallback(() => {
+    if (!isOmniKanbanEnabled(useSettings.getState().settings)) return false
+    if (!isGlobalKanbanOpen()) commitActiveToStore()
+    useViewMode.getState().toggleGlobalKanban()
+    return true
+  }, [commitActiveToStore])
 
   // Mirror `dirty` into a ref so the external-change listener (mounted once) reads the
   // live value without re-subscribing on every edit.
@@ -4344,7 +4387,10 @@ export function Canvas() {
       // The popover is reachable from over the kanban board too (`overBoard`) — leave the board
       // so the user actually sees the login node they must interact with. Same rationale as the
       // Settings-overlay close in the add-account listeners above.
-      if (pid && isKanbanOpen(pid)) useViewMode.getState().toggle(pid)
+      if (pid) {
+        if (isGlobalKanbanOpen()) useViewMode.getState().toggleGlobalKanban()
+        else if (isKanbanOpen(pid)) useViewMode.getState().toggle(pid)
+      }
     }
     window.addEventListener('nodeterm:switch-system-account', onSwitchSystemAccount)
     return () => window.removeEventListener('nodeterm:switch-system-account', onSwitchSystemAccount)
@@ -4552,7 +4598,7 @@ export function Canvas() {
     }
 
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (isKanbanOpen(useProjects.getState().activeProjectId)) return
+      if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
       const combo = dictationBinding()
       if (combo === '' || !isHoldChord(combo)) return
 
@@ -5150,10 +5196,9 @@ export function Canvas() {
       if (isTerminalTarget(document.activeElement as unknown as ContextElement | null)) {
         noteTerminalCapture('view.kanbanToggle')
       }
-      const id = useProjects.getState().activeProjectId
-      if (id) useViewMode.getState().toggle(id)
+      performKanbanToggle()
     })
-  }, [])
+  }, [performKanbanToggle])
   // Native app menu → open Settings (⌘,). A menu click does not fire before-input-event, so the
   // Cmd+, keydown handler alone would leave the menu item inert — main forwards it as IPC.
   useEffect(() => {
@@ -6447,7 +6492,7 @@ export function Canvas() {
     return nodesRef.current.filter((n) => !n.parentId).length >= 2
   }, [])
   const arrangeAllNodes = useCallback(() => {
-    if (isKanbanOpen(useProjects.getState().activeProjectId)) return
+    if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
     const targets = nodesRef.current
       .filter((n) => !n.parentId)
       .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
@@ -6582,7 +6627,7 @@ export function Canvas() {
   const stepAndFrame = useCallback(
     (direction: 'back' | 'forward') => {
       const activeId = useProjects.getState().activeProjectId
-      if (!activeId || isKanbanOpen(activeId)) return
+      if (!activeId || isGlobalKanbanOpen() || isKanbanOpen(activeId)) return
       const next = stepBreadcrumb(navRef.current, direction, (nodeId) =>
         nodesRef.current.some((n) => n.id === nodeId)
       )
@@ -6650,7 +6695,7 @@ export function Canvas() {
     }
     // The kanban board is an opaque overlay and its card modal already IS a focused view of a
     // session — engaging under it would just hide the canvas twice.
-    if (isKanbanOpen(useProjects.getState().activeProjectId)) return
+    if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) return
     const target = focusTargetId(nodesRef.current)
     if (!target) {
       setNotice({ kind: 'error', text: FOCUS_NO_TARGET_NOTICE })
@@ -6871,12 +6916,19 @@ export function Canvas() {
   // shell, and the digit addresses an open project). `liveProjectJumpTarget` is the same decision
   // the terminals' swallow asks, so the two can't disagree; a null target leaves the key to
   // whatever has focus. `switchProject` no-ops on the active id.
+  // When the global swimlane kanban is open, the same chord scrolls to the Nth swimlane instead
+  // of switching tabs (see GlobalKanbanView's `nodeterm:swimlane-jump` listener).
   const projectJumpGesture = useCallback((raw: GlobalKeyEvent): boolean => {
     const e = raw as KeyboardEvent
     if (projectJumpDigit(e) === null) return false
     const targetId = liveProjectJumpTarget(e)
     if (!targetId) return false
     e.preventDefault()
+    if (isGlobalKanbanOpen()) {
+      useViewMode.getState().setHighlightedSwimlaneId(targetId)
+      window.dispatchEvent(new CustomEvent('nodeterm:swimlane-jump', { detail: { projectId: targetId } }))
+      return true
+    }
     switchProject(targetId)
     return true
   }, [switchProject])
@@ -6910,7 +6962,7 @@ export function Canvas() {
     // copy on a Linux box. The board is an opaque overlay over the canvas, so a copy there
     // would act on a selection the user cannot see (the canvas-only-shortcut discipline).
     const projects = useProjects.getState()
-    if (!isMac || isKanbanOpen(projects.activeProjectId)) return false
+    if (!isMac || isGlobalKanbanOpen() || isKanbanOpen(projects.activeProjectId)) return false
     const paths = selectedLocalFilePaths(nodesRef.current, {
       projectIsRelay: !!projects.getProject(projects.activeProjectId ?? '')?.remote
     })
@@ -7125,7 +7177,7 @@ export function Canvas() {
   const globalKeyDeps = useRef<GlobalKeydownDeps | null>(null)
   globalKeyDeps.current = {
     activeElement: () => document.activeElement as unknown as ContextElement | null,
-    kanbanOpen: () => isKanbanOpen(useProjects.getState().activeProjectId),
+    kanbanOpen: () => isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId),
     overrides: activeKeybindingOverrides,
     isMac,
     // Read per keystroke (the deps object is rebuilt each render anyway, but the thunk is what
@@ -7139,12 +7191,8 @@ export function Canvas() {
       'app.commandPalette': () => { setPaletteOpen((v) => !v); return true },
       'app.settings': () => { setSettingsSection(undefined); setSettingsOpen(true); return true },
       'app.shortcutsPanel': () => { setShortcutsOpen((v) => !v); return true },
-      'view.kanbanToggle': () => {
-        const id = useProjects.getState().activeProjectId
-        if (!id) return false
-        useViewMode.getState().toggle(id)
-        return true
-      },
+      'view.kanbanToggle': () => performKanbanToggle(),
+      'view.globalKanbanToggle': () => performGlobalKanbanToggle(),
       'view.focusMode': () => { toggleFocusMode(); return true },
       'panel.explorer': () => { showExplorer('toggle'); return true },
       'panel.sourceControl': () => { setScOpen((v) => !v); return true },
@@ -8332,7 +8380,7 @@ export function Canvas() {
         // The board is a full-page overlay: framing the node on the canvas underneath it is
         // invisible, which is why the notch's Go (and every other "go to node" path) read as
         // broken there. On the board, "go to" means OPEN THE CARD.
-        if (isKanbanOpen(useProjects.getState().activeProjectId)) {
+        if (isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId)) {
           useViewMode.getState().requestCard(nodeId)
           useAgentStatus.getState().setActive(nodeId, true)
           useAgentStatus.getState().clearUnread(nodeId)
@@ -8362,6 +8410,14 @@ export function Canvas() {
   )
   focusNodeRef.current = focusNodeById
 
+  // Global kanban swimlane "Open on canvas" path — GlobalKanbanView dispatches this after closing
+  // the overview, so focusNodeById can frame the node on the canvas (project switch included).
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ nodeId: string }>) => focusNodeById(e.detail.nodeId)
+    window.addEventListener('nodeterm:focus-node' as never, handler as never)
+    return () => window.removeEventListener('nodeterm:focus-node' as never, handler as never)
+  }, [focusNodeById])
+
   // Session board cards are derived LIVE from the canvas nodes; the board stores only assignments.
   // Only while the board is OPEN: `nodes` gets a fresh identity on every drag frame, so a closed
   // board was rebuilding a card object per node ~60×/s for a surface that is not mounted. The
@@ -8370,10 +8426,10 @@ export function Canvas() {
   // list existing while the canvas is what you are looking at.
   const kanbanSessions = useMemo(
     () =>
-      kanbanOpen
+      perProjectKanbanOpen
         ? nodes.map(toKanbanSession).filter((s): s is KanbanSession => s !== null)
         : NO_KANBAN_SESSIONS,
-    [nodes, kanbanOpen]
+    [nodes, perProjectKanbanOpen]
   )
 
   // Create a node from the board's per-column "+ New" menu: it lands on the canvas (view
@@ -8454,7 +8510,27 @@ export function Canvas() {
     [emptyNodePos, setNodes, markDirty, seedBoard, api]
   )
 
-  // Delete a session from the board — same confirm + teardown as the canvas Delete key.
+    // Global kanban swimlane "New session" path — creates a node in the target project's
+  // swimlane even when that project is not the active canvas. The per-column create
+  // menu in GlobalKanbanView dispatches this, and we switch to the target project
+  // first so the new TerminalNode mounts and its tmux session starts correctly.
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ projectId: string; choice: KanbanCreateChoice; columnId: string | null }>) => {
+      const { projectId, choice, columnId } = e.detail
+      if (projectId !== useProjects.getState().activeProjectId) {
+        switchProject(projectId)
+        // Project switch is a synchronous store update but React Flow remount is async.
+        // Next tick is enough for the new canvas to be mounted; the previous 120 ms was a guess.
+        setTimeout(() => createNodeInColumn(choice, columnId), 50)
+      } else {
+        createNodeInColumn(choice, columnId)
+      }
+    }
+    window.addEventListener('nodeterm:create-node' as never, handler as never)
+    return () => window.removeEventListener('nodeterm:create-node' as never, handler as never)
+  }, [createNodeInColumn, switchProject])
+
+// Delete a session from the board — same confirm + teardown as the canvas Delete key.
   const deleteNodeFromKanban = useCallback(
     (nodeId: string) => {
       const node = nodesRef.current.find((n) => n.id === nodeId)
@@ -10859,6 +10935,114 @@ export function Canvas() {
     [setNodes, markDirty]
   )
 
+  // Global Kanban delegates active-project mutations to the live canvas (React Flow is
+  // source of truth — direct store writes for the active project would be clobbered by the
+  // next commitActiveToStore). Non-active projects write to the store and then to disk.
+  // Delete uses ConfirmDialog and SSH-aware teardown (local transport.destroy vs remote
+  // sshProject.killSessions with everySocket), not native confirm.
+  useEffect(() => {
+    const onGlobalRename = (e: CustomEvent<{ projectId: string; nodeId: string; title: string }>) => {
+      renameSession(e.detail.projectId, e.detail.nodeId, e.detail.title)
+    }
+    const onGlobalEditSticky = (e: CustomEvent<{ projectId: string; nodeId: string; text: string }>) => {
+      const { projectId, nodeId, text } = e.detail
+      if (projectId === useProjects.getState().activeProjectId) {
+        setNodes((ns) =>
+          ns.map((n) =>
+            n.id === nodeId
+              ? { ...n, data: { ...n.data, text, textUpdatedAt: undefined, textUpdatedBy: undefined } }
+              : n
+          )
+        )
+        markDirty()
+      } else {
+        useProjects.setState((s) => ({
+          projects: s.projects.map((p) =>
+            p.id === projectId ? { ...p, nodes: p.nodes.map((n) => (n.id === nodeId ? { ...n, text } as never : n)) } : p
+          )
+        }))
+        void writeDisk()
+      }
+    }
+    const onGlobalBrowserNav = (
+      e: CustomEvent<{ projectId: string; nodeId: string; patch: { url?: string; title?: string } }>
+    ) => {
+      const { projectId, nodeId, patch } = e.detail
+      if (projectId === useProjects.getState().activeProjectId) {
+        setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n)))
+        markDirty()
+      } else {
+        useProjects.setState((s) => ({
+          projects: s.projects.map((p) =>
+            p.id === projectId ? { ...p, nodes: p.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } as never : n)) } : p
+          )
+        }))
+        void writeDisk()
+      }
+    }
+    const onGlobalDelete = (e: CustomEvent<{ projectId: string; nodeId: string }>) => {
+      const { projectId, nodeId } = e.detail
+      if (projectId === useProjects.getState().activeProjectId) {
+        deleteNodeFromKanban(nodeId)
+        return
+      }
+      const proj = useProjects.getState().getProject(projectId)
+      const label = proj?.nodes.find((n) => n.id === nodeId)?.title || 'this session'
+      setConfirm({
+        message: `Delete ${label}? Its terminal session will end.`,
+        onConfirm: async () => {
+          useProjects.setState((s) => ({
+            projects: s.projects.map((p) =>
+              p.id === projectId ? { ...p, nodes: p.nodes.filter((n) => n.id !== nodeId) } : p
+            )
+          }))
+          const owner = useProjects.getState().projects.find((p) => p.id === projectId)
+          const isSsh = !!owner?.ssh
+          try {
+            if (isSsh) {
+              await (window as unknown as { nodeTerminal: { sshProject: { killSessions: (a: string, b: string[], c: unknown) => Promise<void> } } }).nodeTerminal.sshProject.killSessions(projectId, [nodeId], { everySocket: true } as never)
+            } else {
+              transport.destroy(nodeId)
+            }
+          } catch {}
+          useAgentStatus.getState().remove(nodeId)
+          useAgentNodes.getState().clearForParent(nodeId)
+          useAgentNodes.getState().clearLoop(nodeId)
+          useWebviewKeepAlive.getState().drop(nodeId)
+          clearAttachConsent(nodeId)
+          setConfirm(null)
+          void writeDisk()
+        }
+      })
+    }
+    const onGlobalSetIcon = (e: CustomEvent<{ projectId: string; nodeId: string; icon: import('@shared/node-icon').NodeIcon | undefined }>) => {
+      const { projectId, nodeId, icon } = e.detail
+      if (projectId === useProjects.getState().activeProjectId) {
+        setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, icon } } : n)))
+        markDirty()
+      } else {
+        useProjects.setState((s) => ({
+          projects: s.projects.map((p) =>
+            p.id === projectId ? { ...p, nodes: p.nodes.map((n) => (n.id === nodeId ? { ...n, icon } as never : n)) } : p
+          )
+        }))
+        void writeDisk()
+      }
+    }
+    window.addEventListener('nodeterm:global-rename' as never, onGlobalRename as never)
+    window.addEventListener('nodeterm:global-edit-sticky' as never, onGlobalEditSticky as never)
+    window.addEventListener('nodeterm:global-browser-nav' as never, onGlobalBrowserNav as never)
+    window.addEventListener('nodeterm:global-delete' as never, onGlobalDelete as never)
+    window.addEventListener('nodeterm:global-set-icon' as never, onGlobalSetIcon as never)
+    return () => {
+      window.removeEventListener('nodeterm:global-rename' as never, onGlobalRename as never)
+      window.removeEventListener('nodeterm:global-edit-sticky' as never, onGlobalEditSticky as never)
+      window.removeEventListener('nodeterm:global-browser-nav' as never, onGlobalBrowserNav as never)
+      window.removeEventListener('nodeterm:global-delete' as never, onGlobalDelete as never)
+      window.removeEventListener('nodeterm:global-set-icon' as never, onGlobalSetIcon as never)
+    }
+  }, [renameSession, setNodes, markDirty, writeDisk, deleteNodeFromKanban])
+
   // Sidebar "Name with AI": generate a title from the session's captured terminal output
   // (same BYO-agent path as the terminal node's ✦), then apply it via renameSession.
   const aiNameSession = useCallback(
@@ -12453,7 +12637,9 @@ export function Canvas() {
             )
           })()}
       </div>
-      {kanbanOpen && (
+      {globalKanbanOpen ? (
+        <GlobalKanbanView />
+      ) : perProjectKanbanOpen && (
         <KanbanView
           board={projectKanban ?? seedBoard}
           sessions={kanbanSessions}

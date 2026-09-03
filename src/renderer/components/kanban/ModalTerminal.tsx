@@ -57,6 +57,8 @@ export interface ModalSpawn {
   ssh?: SshConnection
   /** SSH-project node: tmux runs on the REMOTE host (over the project's ControlMaster). */
   sshRemoteTmux?: boolean
+  /** One-shot launch command for a fresh session (agent CLIs). */
+  initialCommand?: string
 }
 
 /**
