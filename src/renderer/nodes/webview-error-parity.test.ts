@@ -30,14 +30,28 @@ describe('every webview surface reports load failures the same way', () => {
     expect(read(file)).toContain('<WebviewLoadingBar')
   })
 
-  it.each(SURFACES)('%s clears the plate on did-start-loading, never on did-navigate', (file) => {
-    // Chromium navigates to its own error page under the URL that just failed, so clearing the
-    // plate from `did-navigate` would wipe it the instant it appears.
+  it.each(SURFACES)('%s clears the plate on did-start-loading', (file) => {
+    // Chromium navigates to its own error page under the URL that just failed, so a new load
+    // starting is the only signal that means "we are trying again".
     const src = read(file)
     const start = src.indexOf('const onStart')
     expect(start).toBeGreaterThan(-1)
     expect(src.slice(start, start + 400)).toContain('setFailure(null)')
+  })
+
+  // The surfaces genuinely differ here, so each is asserted rather than probed: a handle looked up
+  // and not found would take the guard with it and leave the suite green.
+  it('BrowserSurface.tsx never clears the plate from did-navigate', () => {
+    // Clearing there would wipe the plate the instant Chromium's error page navigated under it.
+    const src = read('BrowserSurface.tsx')
     const nav = src.indexOf('const onNav = ')
-    if (nav > -1) expect(src.slice(nav, src.indexOf('const onNavInPage'))).not.toContain('setFailure(')
+    const end = src.indexOf('const onNavInPage')
+    expect(nav).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(nav)
+    expect(src.slice(nav, end)).not.toContain('setFailure(')
+  })
+
+  it('WebNode.tsx has no did-navigate handler the plate could be cleared from', () => {
+    expect(read('WebNode.tsx')).not.toContain('did-navigate')
   })
 })
