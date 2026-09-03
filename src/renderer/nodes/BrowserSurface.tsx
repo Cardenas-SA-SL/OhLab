@@ -217,6 +217,9 @@ export function BrowserSurface({
       // its own if the load fails again.
       setFailure(null)
       setNotice('')
+      // The guest is gone, so no did-stop-loading is coming to end a navigation left in flight.
+      loadingRef.current = false
+      setLoading(false)
       onGuestDiscarded?.()
     },
     onRestore: () => {
