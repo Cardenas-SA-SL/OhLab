@@ -444,6 +444,7 @@ import { WAIT_LABEL, dropAfterDep, edgeHidden, hiddenEdgeNodeIds, missingDepRope
 import { triggerEdges } from '../lib/triggerCard'
 import { freeSpot } from '../lib/placement'
 import { pushSessionRename, sessionNameUnchanged } from '../lib/sessionRename'
+import { queueRelayInitialCommand } from '../lib/relayInitialCommand'
 import { useReopenHistory, type ReopenEntry } from '../state/reopenHistory'
 import { snapshotNode, recreateNodeFromSnapshot } from '../lib/reopenNode'
 import {
@@ -3890,12 +3891,15 @@ export function Canvas() {
       // passing `project?.ssh` straight through.
       const ssh = nodeSshFor(project?.ssh, cwdOverride)
       setNodes((ns) => {
-        const node = createTerminalNode(ns.length, cwd, center ?? emptyNodePos(), initialCommand, ssh)
+        const node = queueRelayInitialCommand(
+          createTerminalNode(ns.length, cwd, center ?? emptyNodePos(), initialCommand, ssh),
+          activeSession.source === 'relay'
+        )
         return [...ns, groupId ? parentInto(node, groupId) : node]
       })
       markDirty()
     },
-    [setNodes, markDirty, emptyNodePos, cwdForNewNodeIn, parentInto]
+    [setNodes, markDirty, emptyNodePos, cwdForNewNodeIn, parentInto, activeSession.source]
   )
 
   /** Open a new terminal that runs a command on start (e.g. gh auth login). `cwd` lets a caller
@@ -4698,7 +4702,7 @@ export function Canvas() {
         `[nodeterm] node-create agent=${agentId} project=${targetProjectId} group=${groupId ?? '-'} cwd=${cwd ?? '-'}`
       )
       setNodes((ns) => {
-        const node = createAgentNode(
+        const node = queueRelayInitialCommand(createAgentNode(
           agentId,
           ns.length,
           cwd,
@@ -4710,7 +4714,7 @@ export function Canvas() {
           // Same funnel as the account above: the active project owns the node, so its own
           // `.nodeterm/settings.json` launch command layers over the global one.
           targetProjectId
-        )
+        ), activeSession.source === 'relay')
         return [...ns, groupId ? parentInto(node, groupId) : node]
       })
       markDirty()
@@ -4721,7 +4725,8 @@ export function Canvas() {
       emptyNodePos,
       cwdForNewNodeIn,
       parentInto,
-      connectedProjectIdForHost
+      connectedProjectIdForHost,
+      activeSession.source
     ]
   )
 
@@ -9874,7 +9879,7 @@ export function Canvas() {
         if (ropes.length) setControlEdges((es) => [...es, ...ropes])
       }
       // Draw real CONTEXT links (persisted `bridges`), not the display-only ropes `connect`
-      // draws — a rope is lineage decoration, a bridge is what get-linked-context reads. This
+      // draws — a rope is lineage decoration, a bridge is what ohlab-linked-context reads. This
       // is what lets an orchestrator fan IN: read back what the nodes it opened produced.
       // Deliberately SILENT: the manual onConnect path pushes a one-shot discovery note into
       // each endpoint, but doing that here would inject a prompt into every member of a team
@@ -10860,7 +10865,7 @@ export function Canvas() {
             setNodes(next)
             memberIds.forEach((mid) => connect(mid))
             // …and CONTEXT-link each member back to the conductor, so the fan-out has a fan-in:
-            // once a member is done, the conductor reads what it produced via get-linked-context
+            // once a member is done, the conductor reads what it produced via ohlab-linked-context
             // instead of asking the user to relay it. Members whose agent isn't context-capable
             // (a custom agent) just keep the display rope.
             const memberEndpoint = (id: string): LinkEndpoint | null => {

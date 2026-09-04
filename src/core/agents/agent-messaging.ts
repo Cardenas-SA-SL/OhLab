@@ -309,7 +309,7 @@ const NOT_PERMITTED_TEXT: Record<NotPermittedReason, string> = {
   'unproven-target-owner':
     'the target pane\'s owning project cannot be proven at runtime (it was not freshly spawned in ' +
     'this session, or its ownership is disputed), so a per-project messaging grant cannot be ' +
-    'applied to it. Re-open the target node so its owner is recorded, then try again.'
+    'applied to it. Restart the agent (Restart agent in the node menu) to make it messageable again.'
 }
 
 /**

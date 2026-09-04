@@ -9,6 +9,8 @@ import { homedir, hostname } from 'os'
 import { randomUUID } from 'crypto'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, powerMonitor, safeStorage, shell, systemPreferences, webContents } from 'electron'
 import { IPC } from '../shared/ipc'
+import { inviteFromLaunchArgs } from '../shared/hub-invite'
+import { createEmbeddedHubHost, type EmbeddedHubHost } from './embedded-hub'
 
 // Debug log ring (issue #78): capture the process console from the first line — a packaged app
 // swallows it entirely, and the boot path is where the interesting warnings are. The ring is
@@ -228,7 +230,7 @@ import { initTranscriptIndex, searchTranscripts } from '../core/transcript-index
 import { initTelemetry } from './telemetry'
 import { initClaudeUsage } from './claude-usage'
 import { remoteUsageTargets } from '../core/usage/remote-claude-usage'
-import { initLicense, isPremium, getStoredEntitlement } from '../core/license'
+import { initLicense, getStoredEntitlement } from '../core/license'
 import { WhisperModelStore } from '../core/speech/whisper-models'
 import { SpeechService } from '../core/speech/speech-service'
 import { registerSpeechIpc } from '../core/speech/register-ipc'
@@ -341,6 +343,13 @@ function isSafeExternalUrl(url: unknown): url is string {
 
 const settingsStore = new SettingsStore()
 let mainHubClient: MainHubClient | null = null
+let embeddedHubHost: EmbeddedHubHost | null = null
+let pendingHubInvite: string | null = inviteFromLaunchArgs(process.argv)
+const deliverHubInvite = (value: string): void => {
+  pendingHubInvite = value
+  const win = getMainWindow()
+  if (win && !win.isDestroyed()) win.webContents.send(IPC.hubEvent, { type: 'invite-prefill', invite: value })
+}
 // ⌘M / ⌘W are registry commands (`node.toggleMarkdown` / `node.close`), so what the window
 // intercepts follows the user's settings. Resolved LAZILY (first keystroke, long after
 // `settingsStore.init()` in `whenReady`) rather than at module load, where `get()` would still be
@@ -427,7 +436,7 @@ const whisperModels = new WhisperModelStore({
   dir: join(app.getPath('userData'), 'speech-models'),
   onProgress: (id, pct) => sendToMain(IPC.speechProgress, { id, pct })
 })
-const speechService = new SpeechService({ models: whisperModels, isPremium })
+const speechService = new SpeechService({ models: whisperModels })
 
 // Relay PEER sinks (docs/remote-sessions.md 4b) — the desktop mirror of src/server/index.ts's
 // setFlowController / setResyncProvider / onClientGone. Wired at boot, BEFORE any peer can register
@@ -669,7 +678,9 @@ const gotSingleInstanceLock = NT_MULTI || app.requestSingleInstanceLock()
 if (!gotSingleInstanceLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    const invite = inviteFromLaunchArgs(argv)
+    if (invite) deliverHubInvite(invite)
     const win = getMainWindow()
     if (!win) return
     if (win.isMinimized()) win.restore()
@@ -677,6 +688,12 @@ if (!gotSingleInstanceLock) {
     win.focus()
   })
 }
+
+app.setAsDefaultProtocolClient('ohlab')
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  if (inviteFromLaunchArgs([url])) deliverHubInvite(url)
+})
 
 // Declare the nt-media:// scheme privileged BEFORE the app is ready (required by Electron).
 // The actual request handler is installed post-ready via initMediaProtocol().
@@ -3664,7 +3681,34 @@ app.whenReady().then(async () => {
       ?? workspace.projects.find((project) => project.name === shared.name)?.id
       ?? null
   })
-  void mainHubClient.sync()
+  void embeddedHubHost?.stop()
+  embeddedHubHost = createEmbeddedHubHost(app.getPath('userData'), (status) => {
+    if (!win.isDestroyed()) win.webContents.send(IPC.hubEvent, { type: 'host-status', status })
+  })
+  corePlatform.handle(IPC.hubHostStatus, () => embeddedHubHost?.status() ?? { state: 'disabled' })
+  corePlatform.handle(IPC.hubPendingInvite, () => {
+    const invite = pendingHubInvite
+    pendingHubInvite = null
+    return invite
+  })
+  const syncHubServices = async (): Promise<void> => {
+    const settings = settingsStore.get()
+    const hosted = await embeddedHubHost!.sync(settings.hubHostEnabled, settings.hubHostPort)
+    if (settings.hubHostEnabled && hosted.state === 'listening' && (!settings.hubUrl.trim() || /^http:\/\/127\.0\.0\.1:\d+$/.test(settings.hubUrl.trim()))) {
+      if (settings.hubUrl.trim() === `http://127.0.0.1:${hosted.port}`) {
+        await mainHubClient!.sync()
+        return
+      }
+      await settingsStore.save({ ...settings, hubUrl: `http://127.0.0.1:${hosted.port}` })
+      return
+    }
+    await mainHubClient!.sync()
+  }
+  void syncHubServices()
+  settingsStore.onChange(() => { void syncHubServices() })
+  win.webContents.once('did-finish-load', () => {
+    if (pendingHubInvite) win.webContents.send(IPC.hubEvent, { type: 'invite-prefill', invite: pendingHubInvite })
+  })
   // Standing (phone) relay host: keep a host connection registered so a paired phone can reach
   // this Mac from anywhere. Honors settings.phoneAccessEnabled internally.
   const standingHost = initStandingHost(win, ptyManager, () => settingsStore.get(), listProjectsOutput, hostBridge)
@@ -3995,6 +4039,8 @@ app.on('before-quit', (e) => {
     // that outlive the app. The next launch rewrites both; a crash skips this, which is what the
     // generated clients' endpoint failover exists for.
     hookServer.stop()
+    mainHubClient?.stop()
+    void embeddedHubHost?.stop()
     // A SIGTERM quit (dev runners, `kill`, logout) arrives through Chromium's shutdown
     // detector, and this pass's re-issued app.quit() cannot resume the OS-initiated
     // termination the first pass preventDefault'ed: both passes run, but will-quit never

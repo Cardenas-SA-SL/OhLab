@@ -26,6 +26,8 @@ import {
   takeSessionOffline,
   type SessionSource,
 } from './session'
+import { useProjects } from '../state/projects'
+import { markWorkspaceDirty } from '../state/workspaceDirty'
 
 /** Backstop for a `ready()` that neither approves nor closes (the network vanished without a FIN). */
 const APPROVAL_TIMEOUT_MS = 60_000
@@ -103,6 +105,14 @@ export async function openRelayTab(
         ? deps.adoptProject({ ...hostProject, remote: true }).id
         : deps.addProject(label).id
     bindProjectToSession(projectId, session.id)
+    // Keep a relay project's serialized canvas current even while another tab is active. Canvas
+    // owns the live React Flow array only when this tab is visible; without this per-session leg,
+    // agent-facing `ohlab list` read the stale project store until the human switched tabs.
+    holdSessionTeardown(session.id, handle.api.canvas.onMutation((_remoteProjectId, mutation) => {
+      const projects = useProjects.getState()
+      if (projects.activeProjectId === projectId) return
+      if (projects.applyNodeMutation(projectId, mutation)) markWorkspaceDirty()
+    }))
     session.remoteProjectId = hostProject?.id
     session.hostAccountId = deps.hostAccountId
     session.memberName = deps.memberName ?? label

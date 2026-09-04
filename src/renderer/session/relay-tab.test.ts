@@ -17,6 +17,7 @@ import {
 import { LocalTransport } from '../terminal/local-transport'
 import type { NodeTerminalApi, Project, Workspace } from '@shared/types'
 import type { RelayApiHandle } from '../bridge/relay-api'
+import { useProjects } from '../state/projects'
 
 /** A fake relayClient.onClosed sink: keeps the callback so the test can fire a socket drop. */
 function fakeRelayClient() {
@@ -39,17 +40,19 @@ function fakeBridgedApi(ws: Workspace = { version: 2, activeProjectId: '', proje
   const ptyCreate = vi.fn().mockResolvedValue({ sessionId: 's1', fresh: false })
   const presenceUnsub = vi.fn()
   const workspaceLoad = vi.fn().mockResolvedValue(ws)
+  let canvasMutation: ((projectId: string, mutation: any) => void) | undefined
   const api = {
     marker: 'relay-bridged',
     pty: { create: ptyCreate },
     workspace: { load: workspaceLoad },
+    canvas: { onMutation: vi.fn((cb) => { canvasMutation = cb; return () => { canvasMutation = undefined } }) },
     presence: {
       hello: vi.fn().mockResolvedValue({ clientId: 'x', peers: [] }),
       onSync: vi.fn(() => presenceUnsub),
       onPeer: vi.fn(() => () => {}),
     },
   } as unknown as NodeTerminalApi
-  return { api, ptyCreate, presenceUnsub, workspaceLoad }
+  return { api, ptyCreate, presenceUnsub, workspaceLoad, fireMutation: (projectId: string, mutation: any) => canvasMutation?.(projectId, mutation) }
 }
 
 function makeDeps(over: Partial<RelayTabDeps> & { handle: RelayApiHandle }): {
@@ -160,6 +163,22 @@ describe('openRelayTab (connect → tab → mount)', () => {
     expect(tab.projectId).toBe('host-proj-adopted')
     expect(sessionForProject('host-proj-adopted').id).toBe(tab.sessionId)
     expect(setActiveProject).toHaveBeenCalledWith('host-proj-adopted')
+  })
+
+  it('applies canvas mutations to an inactive relay tab\'s serialized project', async () => {
+    const hostProject = { id: 'host-bg', name: 'Background', viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] } as unknown as Project
+    const bridged = fakeBridgedApi({ version: 2, activeProjectId: 'host-bg', projects: [hostProject] })
+    const handle: RelayApiHandle = { api: bridged.api, ready: () => Promise.resolve(), close: vi.fn() }
+    useProjects.setState({ projects: [], activeProjectId: '' })
+    const { deps } = makeDeps({
+      handle,
+      adoptProject: (project) => useProjects.getState().adoptProject(project),
+      setActiveProject: (id) => useProjects.getState().setActive(id)
+    })
+    const tab = await openRelayTab('conn-background', 'Background', deps)
+    useProjects.setState({ activeProjectId: 'different-project' })
+    bridged.fireMutation('host-bg', { op: 'upsert', id: 'host-added', seq: 1, src: 9, node: { id: 'host-added', kind: 'terminal', title: 'Added on host', color: '#111', position: { x: 1, y: 2 } } })
+    expect(useProjects.getState().getProject(tab.projectId)?.nodes.some((node) => node.id === 'host-added')).toBe(true)
   })
 
   it('falls back to an empty labelled tab when the host shared nothing (no throw)', async () => {

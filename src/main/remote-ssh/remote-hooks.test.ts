@@ -643,8 +643,8 @@ describe('RemoteHooks.installContextLink', () => {
     expect(shim).toContain('/context-link/')
     expect(shim).toContain('--unix-socket')
     expect(shim).not.toContain('ELECTRON_RUN_AS_NODE')
-    const skill = calls.find((c) => isWriteTo(c.args, '/home/u/.claude/skills/get-linked-context/SKILL.md'))?.stdin ?? ''
-    expect(skill).toContain('name: get-linked-context')
+    const skill = calls.find((c) => isWriteTo(c.args, '/home/u/.claude/skills/ohlab-linked-context/SKILL.md'))?.stdin ?? ''
+    expect(skill).toContain('name: ohlab-linked-context')
     expect(skill).toContain('sh "/home/u/.nodeterm/context.sh"')
     expect(calls.some((c) => (c.stdin ?? '').includes('ohlab:get-linked-context:start'))).toBe(true)
     expect(joined.some((j) => j.includes('~/'))).toBe(false)
@@ -671,7 +671,7 @@ describe('RemoteHooks.installContextLink', () => {
   it('installs the skill into a remote managed-account config dir', async () => {
     const { rh, calls } = harness()
     await rh.installContextLinkSkillIntoAccountDir(conn, '/s.sock', '/home/u', 'acc-1')
-    const target = '/home/u/.nodeterm/claude-accounts/acc-1/skills/get-linked-context/SKILL.md'
+    const target = '/home/u/.nodeterm/claude-accounts/acc-1/skills/ohlab-linked-context/SKILL.md'
     expect(calls.some((c) => isWriteTo(c.args, target))).toBe(true)
     expect(calls.some((c) => isWriteTo(c.args, '/home/u/.nodeterm/context.sh'))).toBe(true)
   })

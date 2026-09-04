@@ -55,7 +55,7 @@ function cliShimPath(): string {
   return path.join(contextLinkDir(), 'context.sh')
 }
 function skillPath(): string {
-  return path.join(os.homedir(), '.claude', 'skills', 'get-linked-context', 'SKILL.md')
+  return path.join(os.homedir(), '.claude', 'skills', 'ohlab-linked-context', 'SKILL.md')
 }
 
 function writeCliFiles(): void {
@@ -363,7 +363,7 @@ export function setContextLinks(map: ContextLinkMap): Promise<void> {
 /**
  * Boot Context Link: register the hook-server read handler, (re)write the shim under `dataDir`,
  * and — only when `options.installAgentIntegrations` says so — install the discovery surface into
- * the machine's REAL agent configuration directories (`~/.claude/skills/get-linked-context`, plus
+ * the machine's REAL agent configuration directories (`~/.claude/skills/ohlab-linked-context`, plus
  * the marker block in `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and opencode's `AGENTS.md`).
  *
  * `options` is REQUIRED and its flag is a plain `boolean`, deliberately: those instruction files

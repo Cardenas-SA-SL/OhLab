@@ -79,8 +79,8 @@ export function buildNotePushMessage(title: string, text: string, agentId?: stri
   const flat = oneLine(text.replace(/\s*\r?\n\s*/g, ' ⏎ '))
   const pointer =
     !agentId || agentId === 'claude'
-      ? 'read the full note with the get-linked-context skill'
-      : 'read the full note with the OhLab linked-context CLI — see the get-linked-context section in your global agent instructions'
+      ? 'read the full note with the ohlab-linked-context skill'
+      : 'read the full note with the OhLab linked-context CLI — see the ohlab-linked-context section in your global agent instructions'
   const body =
     flat.length > NOTE_PUSH_MAX ? flat.slice(0, NOTE_PUSH_MAX) + ` … [truncated — ${pointer}]` : flat
   return `[nodeterm] Sticky note "${oneLine(title)}" linked as context: ${body}`
@@ -107,9 +107,9 @@ export function buildContextLinkNote(
   // agent that reads it as a task launches an unsolicited investigation of the linked node
   // (observed with gemini). "No action needed" keeps it a notification.
   if (!agentId || agentId === 'claude') {
-    return `[nodeterm] You are now linked to "${other}". Use the get-linked-context skill to read its context when you need it. No action needed now — just acknowledge briefly.`
+    return `[nodeterm] You are now linked to "${other}". Use the ohlab-linked-context skill to read its context when you need it. No action needed now — just acknowledge briefly.`
   }
-  return `[nodeterm] You are now linked to "${other}". When you need its context (and only then) run: sh "${shimPath}" list — then summary | transcript | terminal --node <id>. Details are in the get-linked-context section of your global agent instructions. No action needed now — acknowledge briefly and do not run these commands yet.`
+  return `[nodeterm] You are now linked to "${other}". When you need its context (and only then) run: sh "${shimPath}" list — then summary | transcript | terminal --node <id>. Details are in the ohlab-linked-context section of your global agent instructions. No action needed now — acknowledge briefly and do not run these commands yet.`
 }
 
 // The link-map builders moved to @shared: the Server Edition derives the same map from persisted

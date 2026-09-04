@@ -32,29 +32,29 @@ describe('SpeechService', () => {
   })
 
   it('transcribes with a free model without premium', async () => {
-    const svc = new SpeechService({ models, isPremium: () => false, engineFactory: factory() })
+    const svc = new SpeechService({ models, engineFactory: factory() })
     await expect(svc.transcribe(pcm, { model: 'tiny', language: 'auto' })).resolves.toBe('hello world')
   })
 
   it('allows every bundled model without a paid entitlement', async () => {
-    const svc = new SpeechService({ models, isPremium: () => false, engineFactory: factory() })
+    const svc = new SpeechService({ models, engineFactory: factory() })
     await expect(svc.transcribe(pcm, { model: 'base', language: 'auto' })).resolves.toBe('hello world')
     expect(loads).toHaveLength(1)
   })
 
-  it('allows Pro models with premium', async () => {
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory: factory() })
+  it('allows larger models without an entitlement', async () => {
+    const svc = new SpeechService({ models, engineFactory: factory() })
     await expect(svc.transcribe(pcm, { model: 'base', language: 'auto' })).resolves.toBe('hello world')
   })
 
   it('errors when the model is not downloaded', async () => {
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory: factory() })
+    const svc = new SpeechService({ models, engineFactory: factory() })
     await expect(svc.transcribe(pcm, { model: 'small', language: 'auto' }))
       .rejects.toThrow(/Download the/)
   })
 
   it('reuses one loaded engine and frees it on model switch', async () => {
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory: factory() })
+    const svc = new SpeechService({ models, engineFactory: factory() })
     await svc.transcribe(pcm, { model: 'tiny', language: 'auto' })
     await svc.transcribe(pcm, { model: 'tiny', language: 'auto' })
     expect(loads).toHaveLength(1)
@@ -64,7 +64,7 @@ describe('SpeechService', () => {
   })
 
   it('maps an empty transcript to "No speech detected."', async () => {
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory: factory('   ') })
+    const svc = new SpeechService({ models, engineFactory: factory('   ') })
     await expect(svc.transcribe(pcm, { model: 'tiny', language: 'auto' }))
       .rejects.toThrow('No speech detected.')
   })
@@ -107,7 +107,6 @@ describe('SpeechService.shutdown', () => {
   it('frees the loaded engine', async () => {
     const svc = new SpeechService({
       models,
-      isPremium: () => true,
       engineFactory: async (modelPath) => ({
         transcribe: async () => 'hi',
         free: async () => { freed.push(modelPath) },
@@ -119,14 +118,14 @@ describe('SpeechService.shutdown', () => {
   })
 
   it('is a no-op when no engine was ever loaded', async () => {
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory: async () => { throw new Error('nope') } })
+    const svc = new SpeechService({ models, engineFactory: async () => { throw new Error('nope') } })
     await expect(svc.shutdown()).resolves.toBeUndefined()
     expect(freed).toEqual([])
   })
 
   it('never frees while a transcribe is in flight — the crash guard', async () => {
     const { engineFactory, release } = blockingFactory()
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory })
+    const svc = new SpeechService({ models, engineFactory })
     const inFlight = svc.transcribe(pcm, { model: 'tiny', language: 'auto' })
     // Let the engine load and the native transcribe start.
     await new Promise((r) => setTimeout(r, 0))
@@ -145,7 +144,7 @@ describe('SpeechService.shutdown', () => {
 
   it('gives up after the timeout so a stuck transcribe cannot hold quit open', async () => {
     const { engineFactory, release } = blockingFactory()
-    const svc = new SpeechService({ models, isPremium: () => true, engineFactory })
+    const svc = new SpeechService({ models, engineFactory })
     void svc.transcribe(pcm, { model: 'tiny', language: 'auto' }).catch(() => {})
     await new Promise((r) => setTimeout(r, 0))
     await expect(svc.shutdown(10)).resolves.toBeUndefined()
@@ -156,7 +155,6 @@ describe('SpeechService.shutdown', () => {
   it('swallows a rejecting free() — quit must proceed regardless', async () => {
     const svc = new SpeechService({
       models,
-      isPremium: () => true,
       engineFactory: async () => ({
         transcribe: async () => 'hi',
         free: async () => { throw new Error('whisper.free blew up') },
@@ -170,7 +168,6 @@ describe('SpeechService.shutdown', () => {
     const loads: string[] = []
     const svc = new SpeechService({
       models,
-      isPremium: () => true,
       engineFactory: async (modelPath) => {
         loads.push(modelPath)
         return { transcribe: async () => 'hi', free: async () => { freed.push(modelPath) } }

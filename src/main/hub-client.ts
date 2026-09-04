@@ -1,13 +1,16 @@
-import type { BrowserWindow } from 'electron'
+import { Notification, type BrowserWindow } from 'electron'
 import { IPC } from '../shared/ipc'
 import type { HubEvent, HubProject, HubStatus, Settings } from '../shared/types'
 import { HubClient } from '../core/hub/client'
 import type { ElectronPlatform } from './platform-electron'
 import { loadOrCreatePeerKeyPair } from './remote/peer-identity'
-import { connectRelayHost, type RelayHostSession } from './remote/relay-host'
+import { connectRelayHost, killRelayHostsByPeerKey, type RelayHostSession } from './remote/relay-host'
 import { encodeOffer } from './remote/pairing'
 import { loadApprovedDevices, saveApprovedDevices } from './remote/approved-devices'
 import { pinDevice } from './remote/approved-devices-core'
+import { hostname } from 'node:os'
+import { retainUntilDismissed } from './notifications'
+import { createRevoker } from './remote/revocation'
 
 type SessionRequest = {
   type: 'session-request'
@@ -32,7 +35,12 @@ export function initHubClient(
 ): MainHubClient {
   let client: HubClient | null = null
   let configuredUrl = ''
-  const hosted = new Set<RelayHostSession>()
+  const hosted = new Map<string, RelayHostSession>()
+  const memberRevoker = createRevoker({
+    load: loadApprovedDevices,
+    save: saveApprovedDevices,
+    onRevoke: (publicKey) => killRelayHostsByPeerKey(publicKey)
+  })
   let status: HubStatus = { state: 'disabled' }
 
   const send = (event: HubEvent): void => {
@@ -80,9 +88,10 @@ export function initHubClient(
         pending.confirm()
       },
       onOpen: () => {},
-      onClose: () => hosted.delete(session)
+      onClose: () => hosted.delete(member.accountId)
     })
-    hosted.add(session)
+    hosted.get(member.accountId)?.close()
+    hosted.set(member.accountId, session)
   }
 
   async function sync(): Promise<HubStatus> {
@@ -102,10 +111,28 @@ export function initHubClient(
     client = new HubClient({
       hubUrl: url,
       accountName: settings.hubAccountName,
+      machineLabel: hostname(),
       keys,
       onStatus: updateStatus,
       onEvent: (event) => {
         send(event)
+        if (event.type === 'member-joined' && Notification.isSupported()) {
+          void client?.listProjects().then((projects) => {
+            const project = projects.find((item) => item.projectId === event.projectId)
+            const member = project?.members?.find((item) => item.accountId === event.accountId)
+            if (project && member) {
+              const notification = new Notification({
+                title: `${member.name} wants to join ${project.name}`,
+                body: 'Open Settings > Team to approve or decline.'
+              })
+              retainUntilDismissed(notification)
+              notification.on('click', () => {
+                if (!win.isDestroyed()) win.webContents.send(IPC.appOpenSettings)
+              })
+              notification.show()
+            }
+          }).catch(() => undefined)
+        }
         if (event.type === 'session-request') {
           void acceptSessionRequest(event as unknown as SessionRequest).catch((error) =>
             console.warn('[hub] session request failed:', error)
@@ -129,8 +156,24 @@ export function initHubClient(
     (await needClient()).createProject(String(name ?? ''), typeof projectId === 'string' ? projectId : undefined)
   )
   platform.handle(IPC.hubProjectsJoin, async (code: unknown) => (await needClient()).joinProject(String(code ?? '')))
-  platform.handle(IPC.hubProjectsApprove, async (projectId: unknown, accountId: unknown) => (await needClient()).approveMember(String(projectId), String(accountId)))
-  platform.handle(IPC.hubProjectsRemove, async (projectId: unknown, accountId: unknown) => (await needClient()).removeMember(String(projectId), String(accountId)))
+  platform.handle(IPC.hubProjectsApprove, async (projectId: unknown, accountId: unknown) => {
+    const hub = await needClient()
+    const member = (await hub.listProjects()).find((p) => p.projectId === String(projectId))?.members?.find((m) => m.accountId === String(accountId))
+    const result = await hub.approveMember(String(projectId), String(accountId))
+    if (member?.publicKeyB64) await saveApprovedDevices(pinDevice(await loadApprovedDevices(), member.publicKeyB64))
+    return result
+  })
+  platform.handle(IPC.hubProjectsRemove, async (projectId: unknown, accountId: unknown) => {
+    const hub = await needClient()
+    const member = (await hub.listProjects()).find((p) => p.projectId === String(projectId))?.members?.find((m) => m.accountId === String(accountId))
+    const result = await hub.removeMember(String(projectId), String(accountId))
+    if (member?.publicKeyB64) {
+      const revoked = await memberRevoker.revoke(member.publicKeyB64)
+      if (!revoked.persisted || !revoked.killed) throw new Error('The member was removed, but relay access could not be fully revoked. Retry before sharing this project again.')
+    }
+    hosted.delete(String(accountId))
+    return result
+  })
   platform.handle(IPC.hubInviteRegenerate, async (projectId: unknown) => (await needClient()).regenerateInvite(String(projectId)))
   platform.handle(IPC.hubProjectsConnect, async (projectId: unknown, toAccountId: unknown, machineLabel?: unknown) => {
     const hub = await needClient()
@@ -151,7 +194,7 @@ export function initHubClient(
     stop() {
       client?.stop()
       client = null
-      for (const session of hosted) session.close()
+      for (const session of hosted.values()) session.close()
       hosted.clear()
     }
   }

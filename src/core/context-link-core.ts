@@ -79,7 +79,7 @@ export function mergeInstructionsBlock(existing: string, block: string): string 
 /** The instructions body telling codex/gemini how to read linked-node context. */
 export function buildLinkedContextInstructions(shimPath: string): string {
   return [
-    '# Reading linked OhLab nodes (get-linked-context)',
+    '# Reading linked OhLab nodes (ohlab-linked-context)',
     '',
     'When you run inside an OhLab canvas session, this node may be linked to other agent',
     'nodes (Claude, Codex or Gemini) or sticky notes by a context-link edge. You can READ a',
@@ -103,7 +103,7 @@ export function buildLinkedContextInstructions(shimPath: string): string {
 
 /**
  * The sandboxed-Codex transport guidance (issue #367), rendered into BOTH agent-facing bodies —
- * the get-linked-context skill and the codex/gemini instructions block — quoting the shim's real
+ * the ohlab-linked-context skill and the codex/gemini instructions block — quoting the shim's real
  * error sentences so the docs and the generated script cannot drift apart (the parity test in
  * context-link-core.test.ts walks the constants against both bodies).
  */
@@ -323,12 +323,12 @@ export function buildContextShimScript(identityRoot?: string): string {
 /** Machine-neutral variant used by SSH installation and legacy tests. */
 export const CONTEXT_SHIM_SCRIPT = buildContextShimScript()
 
-/** The get-linked-context SKILL.md body, pointing at the shim at `shimPath`. Parameterized
+/** The ohlab-linked-context SKILL.md body, pointing at the shim at `shimPath`. Parameterized
  *  because the same skill is installed twice with different paths: into the desktop's config
  *  dirs, and onto an SSH host for remote agent nodes. */
 export function buildContextLinkSkillBody(shimPath: string): string {
   return `---
-name: get-linked-context
+name: ohlab-linked-context
 description: Read the conversation/transcript, a recent summary, or the terminal output of another agent node (Claude, Codex or Gemini) you are linked to on the OhLab canvas. Use when you need to know what a connected node has been doing, hand off, or continue its work. Only meaningful inside an OhLab session with a context-link edge. Also reads sticky notes linked to this node as context.
 ---
 

@@ -36,7 +36,7 @@ export interface DictationOverlayProps {
   onClose: () => void
 }
 
-type Phase = 'idle' | 'recording' | 'transcribing'
+type Phase = 'idle' | 'downloading' | 'recording' | 'transcribing'
 /** 'no-model' = dictation is off (Whisper engine with the explicit None selection, issue #143) —
  *  never records, explains where to turn it on. 'warning' = no target at press time (never
  *  records). 'pill' = the compact recording/transcribing/error capsule — the whole surface for a
@@ -94,6 +94,7 @@ export function DictationOverlay({ target, stopSignal, onClose }: DictationOverl
   const [elapsedMs, setElapsedMs] = useState(0)
   const [levelHistory, setLevelHistory] = useState<number[]>([])
   const [capped, setCapped] = useState(false)
+  const [downloadPct, setDownloadPct] = useState(0)
 
   const captureRef = useRef<PcmCapture | null>(null)
   const consentAskedRef = useRef(false)
@@ -168,6 +169,22 @@ export function DictationOverlay({ target, stopSignal, onClose }: DictationOverl
     if (!target) return
     setError(null)
     setCapped(false)
+    if (speech.engine === 'whisper') {
+      try {
+        const selected = (await window.nodeTerminal.speech.models()).find((model) => model.id === speech.model)
+        if (!selected?.downloaded) {
+          setPhase('downloading')
+          const unsubscribe = window.nodeTerminal.speech.onProgress((progress) => {
+            if (progress.id === speech.model) setDownloadPct(progress.pct)
+          })
+          try { await window.nodeTerminal.speech.downloadModel(speech.model) } finally { unsubscribe() }
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not download the speech model.')
+        setPhase('idle')
+        return
+      }
+    }
     if (!consentAskedRef.current) {
       consentAskedRef.current = true
       try {
@@ -209,7 +226,7 @@ export function DictationOverlay({ target, stopSignal, onClose }: DictationOverl
         void stopRecording()
       }
     }, LEVEL_POLL_MS)
-  }, [target, stopRecording])
+  }, [target, stopRecording, speech.engine, speech.model])
 
   // Press-to-talk: a target means "start recording now" (this instance is a fresh mount each
   // time Canvas opens the overlay, and the target is frozen for its lifetime — see
@@ -324,6 +341,13 @@ export function DictationOverlay({ target, stopSignal, onClose }: DictationOverl
           <div className="dictation__transcribing">
             <span className="dictation__spinner" />
             <span>{capped ? 'Recording capped at 2:30 — transcribing…' : 'Transcribing…'}</span>
+          </div>
+        )}
+
+        {phase === 'downloading' && (
+          <div className="dictation__transcribing">
+            <span className="dictation__spinner" />
+            <span>Downloading speech model... {Math.round(downloadPct)}%</span>
           </div>
         )}
 

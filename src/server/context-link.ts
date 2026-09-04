@@ -43,7 +43,7 @@ export interface ServerContextLinkDeps {
   sweepMs?: number
   /**
    * Whether to write the context-link discovery surface into the machine's REAL agent
-   * configuration directories: `~/.claude/skills/get-linked-context/SKILL.md` and the marker
+   * configuration directories: `~/.claude/skills/ohlab-linked-context/SKILL.md` and the marker
    * block in `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and opencode's `AGENTS.md`. `true` =
    * the server's `installHooks` gate said yes; `false` = leave them alone (the read handler and
    * the shim under `dataDir` are registered either way, so the feature still works for sessions

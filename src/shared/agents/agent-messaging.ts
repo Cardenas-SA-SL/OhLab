@@ -44,7 +44,7 @@ export interface AgentMessageDeliverRequest {
  */
 export const NOTIFY_BODY =
   'A linked agent updated shared coordination context. Read the latest linked context ' +
-  '(get-linked-context) before continuing.'
+  '(ohlab-linked-context) before continuing.'
 
 /** The rendered control reply for one delivery — the exact shape every other control verb answers
  *  with, so the hook server and the shim need no messaging-specific branch. */

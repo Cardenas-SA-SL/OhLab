@@ -338,7 +338,7 @@ would otherwise be blocked) — rebuild the renderer or update the rewrite.
 
 ### Dictation
 
-Voice-to-text input works in the browser via the **same core speech service** the desktop app uses. Dictate with ⌘⌥D (or the dock mic button); transcribed text goes into the overlay's editable field and is sent only via explicit Send/Insert into the node that was selected when the overlay opened — nothing auto-submits. **Browser constraints:** `getUserMedia` requires a **secure context** — HTTPS or `localhost`; the microphone permission prompt is the browser's own. **Model storage:** Downloaded models (tiny free tier; larger Pro models) are stored on the **server's data dir** under `speech-models/`, persisted across sessions and server restarts.
+Voice-to-text input works in the browser via the **same core speech service** the desktop app uses. Dictate with ⌘⌥ (or the dock mic button); transcribed text goes into the overlay's editable field and is sent only via explicit Send/Insert into the node that was selected when the overlay opened. Nothing auto-submits. **Browser constraints:** `getUserMedia` requires a **secure context**, either HTTPS or `localhost`; the microphone permission prompt is the browser's own. **Model storage:** Downloaded models are free and stored on the **server's data dir** under `speech-models/`, persisted across sessions and server restarts.
 
 ## Documented deviations from the spec
 
@@ -468,7 +468,7 @@ Consequences worth knowing:
   the first browser connects. Read-only on purpose — sidelining a conflicted
   `project.json` stays a renderer/probe decision.
 - **Boot also writes into agent configuration directories** when managed hook installation
-  is on: the `get-linked-context` Claude skill, plus marker-delimited instruction blocks in
+  is on: the `ohlab-linked-context` Claude skill, plus marker-delimited instruction blocks in
   `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and opencode's `AGENTS.md`. The blocks are
   idempotent and preserve surrounding content. Set **`installHooks: false`** to skip every
   one of those writes — the Context Link read handler still works, agents simply have to be

@@ -694,7 +694,7 @@ export class RemoteHooks {
         conn,
         controlPath,
         `${remoteHome}/.claude`,
-        'get-linked-context',
+        'ohlab-linked-context',
         buildContextLinkSkillBody(shim)
       )
       const block = buildLinkedContextInstructions(shim)
@@ -727,7 +727,7 @@ export class RemoteHooks {
         conn,
         controlPath,
         `${remoteHome}/.nodeterm/claude-accounts/${accountId}`,
-        'get-linked-context',
+        'ohlab-linked-context',
         buildContextLinkSkillBody(shim)
       )
     } catch {

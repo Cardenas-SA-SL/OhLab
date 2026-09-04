@@ -140,7 +140,7 @@ export const SUBAGENT_CAPABLE = ['claude', 'codex'] as const
 export const RECURRING_CAPABLE = ['claude'] as const // /loop, /schedule, /cron
 export const BRANCH_CAPABLE = ['claude'] as const
 // grok joins with NO installer of its own: it scans `~/.claude/skills` for Claude Code
-// compatibility, which is exactly where `get-linked-context` is already written — the same
+// compatibility, which is exactly where `ohlab-linked-context` is already written — the same
 // argument `CANVAS_CONTROL_CAPABLE` makes below. That premise used to be marked unverified;
 // MEASURED on 1.0.13 (2026-09-01): `grok inspect --json` lists the skill with
 // `vendor: 'claude', compatibilityStatus: 'enabled'`, and `externalCompat.cells` reports

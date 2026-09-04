@@ -154,7 +154,8 @@ export function createHub(config: HubConfig): Hub {
           name: typeof body.name === 'string' ? body.name : undefined,
           publicKeyB64: String(body.publicKeyB64 ?? ''),
           challengeId: String(body.challengeId ?? ''),
-          proofB64: String(body.proofB64 ?? '')
+          proofB64: String(body.proofB64 ?? ''),
+          machineLabel: typeof body.machineLabel === 'string' ? body.machineLabel : undefined
         })
         send(res, 201, result)
         return

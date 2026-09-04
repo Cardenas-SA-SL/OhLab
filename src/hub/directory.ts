@@ -10,6 +10,7 @@ export interface Account {
   name: string
   publicKeyB64: string
   createdAt: number
+  machineLabel?: string
 }
 
 export type ProjectMember = {
@@ -31,6 +32,7 @@ export interface SharedProject {
 export type DirectoryEvent =
   | { type: 'member-joined'; projectId: string; accountId: string }
   | { type: 'member-approved'; projectId: string; accountId: string }
+  | { type: 'member-declined'; projectId: string; accountId: string }
   | { type: 'member-online' | 'member-offline'; accountId: string }
   | {
       type: 'session-request'
@@ -126,6 +128,7 @@ export class HubDirectory {
     publicKeyB64: string
     challengeId: string
     proofB64: string
+    machineLabel?: string
   }): Promise<{ account: Account; sessionToken: string; exp: number }> {
     const challenge = this.challenges.get(input.challengeId)
     this.challenges.delete(input.challengeId)
@@ -141,11 +144,12 @@ export class HubDirectory {
     if (!account) {
       const name = input.name?.trim()
       if (!name) throw new Error('name is required for registration')
-      account = { accountId: randomUUID(), name, publicKeyB64: input.publicKeyB64, createdAt: this.now() }
+      account = { accountId: randomUUID(), name, publicKeyB64: input.publicKeyB64, createdAt: this.now(), machineLabel: input.machineLabel?.trim().slice(0, 80) }
       this.accounts.set(account.accountId, account)
       await this.save()
-    } else if (input.name?.trim() && account.name !== input.name.trim()) {
-      account.name = input.name.trim()
+    } else if ((input.name?.trim() && account.name !== input.name.trim()) || (input.machineLabel?.trim() && account.machineLabel !== input.machineLabel.trim())) {
+      if (input.name?.trim()) account.name = input.name.trim()
+      if (input.machineLabel?.trim()) account.machineLabel = input.machineLabel.trim().slice(0, 80)
       await this.save()
     }
     const sessionToken = opaque()
@@ -221,17 +225,19 @@ export class HubDirectory {
   async removeMember(projectId: string, ownerId: string, accountId: string): Promise<SharedProject> {
     const project = this.requireOwner(projectId, ownerId)
     if (accountId === ownerId) throw new Error('the project owner cannot be removed')
+    const removed = project.members.find((item) => item.accountId === accountId)
     project.members = project.members.filter((item) => item.accountId !== accountId)
     await this.save()
+    if (removed?.status === 'pending') this.push(accountId, { type: 'member-declined', projectId, accountId })
     return project
   }
 
-  members(projectId: string, accountId: string): Array<ProjectMember & { name: string; publicKeyB64: string; online: boolean }> {
+  members(projectId: string, accountId: string): Array<ProjectMember & { name: string; publicKeyB64: string; online: boolean; machineLabel?: string }> {
     const project = this.projectForMember(projectId, accountId)
     if (!project) throw new Error('project not found')
     return project.members.flatMap((member) => {
       const account = this.accounts.get(member.accountId)
-      return account ? [{ ...member, name: account.name, publicKeyB64: account.publicKeyB64, online: this.isOnline(account.accountId) }] : []
+      return account ? [{ ...member, name: account.name, publicKeyB64: account.publicKeyB64, online: this.isOnline(account.accountId), machineLabel: account.machineLabel }] : []
     })
   }
 

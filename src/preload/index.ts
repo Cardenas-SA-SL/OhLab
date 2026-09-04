@@ -454,6 +454,8 @@ const api: NodeTerminalApi = {
   },
   hub: {
     status: () => ipcRenderer.invoke(IPC.hubStatus),
+    hostStatus: () => ipcRenderer.invoke(IPC.hubHostStatus),
+    pendingInvite: () => ipcRenderer.invoke(IPC.hubPendingInvite),
     connect: () => ipcRenderer.invoke(IPC.hubConnect),
     listProjects: () => ipcRenderer.invoke(IPC.hubProjectsList),
     createProject: (name, projectId) => ipcRenderer.invoke(IPC.hubProjectsCreate, name, projectId),

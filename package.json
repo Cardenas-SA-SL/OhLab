@@ -38,6 +38,7 @@
   "build": {
     "appId": "com.ohlab.app",
     "productName": "OhLab",
+    "protocols": [{ "name": "OhLab team invite", "schemes": ["ohlab"] }],
     "directories": {
       "output": "dist",
       "buildResources": "build"

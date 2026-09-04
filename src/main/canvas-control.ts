@@ -69,7 +69,7 @@ export function installCanvasSkillInto(configDir: string): void {
 
 // Codex/Gemini/Copilot/opencode use global instruction files here — merge the canvas-control block
 // instruction files (marker-delimited, idempotent, other content preserved). Same pattern
-// as context-link's get-linked-context block. The CLI env-gate keeps the block inert in
+// as context-link's ohlab-linked-context block. The CLI env-gate keeps the block inert in
 // the user's normal (non-nodeterm) codex/gemini/opencode sessions.
 function installAgentInstructions(): void {
   const block = buildCanvasControlInstructions(shimPath())

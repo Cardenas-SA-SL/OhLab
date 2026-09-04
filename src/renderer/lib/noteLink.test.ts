@@ -142,7 +142,7 @@ describe('buildNotePushMessage', () => {
   it('truncates past 2000 chars and points at the skill', () => {
     const msg = buildNotePushMessage('T', 'x'.repeat(3000))!
     expect(msg.length).toBeLessThan(2200)
-    expect(msg).toContain('[truncated — read the full note with the get-linked-context skill]')
+    expect(msg).toContain('[truncated — read the full note with the ohlab-linked-context skill]')
   })
 })
 
@@ -218,7 +218,7 @@ describe('buildContextLinkNote', () => {
   it('claude gets the skill wording', () => {
     const msg = buildContextLinkNote('claude', 'Builder', '/x/context.sh')
     expect(msg).toContain('[nodeterm] You are now linked to "Builder"')
-    expect(msg).toContain('get-linked-context skill')
+    expect(msg).toContain('ohlab-linked-context skill')
   })
   it('codex/gemini get the inline CLI command, single line', () => {
     const msg = buildContextLinkNote('codex', 'Builder', '/x/context.sh')
@@ -356,8 +356,8 @@ describe('buildBackgroundLinkMaps', () => {
 
 describe('buildNotePushMessage per-agent wording', () => {
   it('keeps the skill pointer for claude and omitted agent', () => {
-    expect(buildNotePushMessage('T', 'x'.repeat(3000), 'claude')).toContain('get-linked-context skill')
-    expect(buildNotePushMessage('T', 'x'.repeat(3000))).toContain('get-linked-context skill')
+    expect(buildNotePushMessage('T', 'x'.repeat(3000), 'claude')).toContain('ohlab-linked-context skill')
+    expect(buildNotePushMessage('T', 'x'.repeat(3000))).toContain('ohlab-linked-context skill')
   })
   it('points non-claude agents at the CLI instructions', () => {
     const msg = buildNotePushMessage('T', 'x'.repeat(3000), 'codex')!

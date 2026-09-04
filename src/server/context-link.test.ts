@@ -187,7 +187,7 @@ describe('initServerContextLink', () => {
       installAgentIntegrations: false
     })
     expect(registered).toBe(true)
-    expect(existsSync(join(home, '.claude', 'skills', 'get-linked-context', 'SKILL.md'))).toBe(false)
+    expect(existsSync(join(home, '.claude', 'skills', 'ohlab-linked-context', 'SKILL.md'))).toBe(false)
     expect(existsSync(join(home, '.codex', 'AGENTS.md'))).toBe(false)
     await link.stop()
   })
@@ -203,7 +203,7 @@ describe('initServerContextLink', () => {
       installAgentIntegrations: true
     })
     expect(registered).toBe(true)
-    expect(existsSync(join(home, '.claude', 'skills', 'get-linked-context', 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(home, '.claude', 'skills', 'ohlab-linked-context', 'SKILL.md'))).toBe(true)
     expect(readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8')).toContain(
       'ohlab:get-linked-context'
     )

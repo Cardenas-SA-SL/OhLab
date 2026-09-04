@@ -1,23 +1,30 @@
 # OhLab Hub
 
-OhLab Hub is the small, self-hosted rendezvous service used by OhLab desktops and phones. It keeps
-the team/project directory, issues short-lived pairing tokens, and forwards WebSocket frames between
-two peers. Terminal, transcript, canvas, and RPC payloads remain end-to-end encrypted. The Hub sees
-only opaque tunnel frames. The directory necessarily sees account names, public keys, project
-membership, presence, and connection requests.
+The Hub lets two OhLab installations find each other and broker end-to-end encrypted relay sessions. It stores team names, public keys, project membership, presence, and join requests, but it cannot read terminal, transcript, canvas, or RPC payloads.
 
-## Run it
+## Two brothers, two homes
 
-With Node 22 or newer:
+Tailscale is the easiest and safest way to make one computer reachable from another home. Install Tailscale on both computers and sign them into the same tailnet first. No router port forwarding is needed.
+
+1. Sebastián opens Settings > Team, enables **Host a hub on this computer**, and leaves port `8791` selected.
+2. OhLab shows the Tailscale address when one is available. If it only shows a local-network address, confirm Tailscale is connected before continuing.
+3. Sebastián opens the project, returns to Settings > Team, selects **Share this project**, and copies the `ohlab-invite:...` code.
+4. His brother installs the OhLab DMG, opens Settings > Team, pastes the code under **Join with an invite code**, enters his name, and selects **Join**.
+5. Sebastián receives a notification and approves the pending row in Settings > Team. Decline rejects it instead.
+6. Both enable **Agent messaging for this project** in Team. The setting is deliberately per-project and must be on at both ends.
+7. Each member now appears with a live online indicator. Select **Open** to open the other computer's project as a tab.
+
+The embedded Hub binds all interfaces. OhLab does not use UPnP or open router ports. A plain LAN address only works within one home unless you configure Tailscale or a port forward yourself.
+
+## Always-on standalone Hub
+
+For an always-on computer or VPS, run the Electron-free service separately with Node 22 or newer:
 
 ```sh
 npm run hub
 ```
 
-The default data directory is `~/.ohlab-hub` and the default listener is `0.0.0.0:8791`. Override
-them with `--data-dir`, `--host`, and `--port`, or `OHLAB_HUB_DATA_DIR`, `OHLAB_HUB_HOST`, and
-`OHLAB_HUB_PORT`. Put `{ "adminToken": "a-long-random-secret" }` in `<data-dir>/hub.json` to enable
-the account/project administration endpoints. `--admin-token` can override it for an ephemeral run.
+It listens on `0.0.0.0:8791` and stores data in `~/.ohlab-hub`. Override these with `--data-dir`, `--host`, and `--port`, or `OHLAB_HUB_DATA_DIR`, `OHLAB_HUB_HOST`, and `OHLAB_HUB_PORT`.
 
 Docker is also supported:
 
@@ -26,59 +33,17 @@ docker build -f Dockerfile.hub -t ohlab-hub .
 docker run --restart unless-stopped -p 8791:8791 -v ohlab-hub:/data ohlab-hub
 ```
 
-Check it with `curl http://127.0.0.1:8791/healthz`.
+Check readiness with `curl http://127.0.0.1:8791/healthz`. For a public VPS, put an HTTPS reverse proxy such as Caddy in front of the Hub and proxy WebSocket upgrades. Plain HTTP should be limited to a trusted LAN or tailnet.
 
-## API overview
+## Troubleshooting
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/healthz` | Readiness and version |
-| `POST` | `/v1/pair/token` | Mint a ten-minute, single-use relay pairing token |
-| `POST` | `/v1/relay/host-token` | Register a standing phone host |
-| `POST` | `/v1/relay/device` | Register a phone for a standing host |
-| `POST` | `/v1/relay/join` | Mint a client token for that standing host |
-| `POST` | `/v1/relay/device/revoke` | Revoke a phone relay registration |
-| `POST` | `/v1/accounts/challenge` | Start key-possession authentication |
-| `POST` | `/v1/accounts/register` | Prove the challenge and receive a bearer session |
-| `GET`, `POST` | `/v1/projects` | List or create shared projects |
-| `POST` | `/v1/projects/join` | Join by invite code as a pending member |
-| `GET` | `/v1/projects/:id/members` | List members, keys, approval, and online status |
-| `POST` | `/v1/projects/:id/invite` | Regenerate an invite code as owner |
-| `POST` | `/v1/projects/:id/members/:accountId/approve` | Approve a pending member as owner |
-| `DELETE` | `/v1/projects/:id/members/:accountId` | Remove a member as owner |
-| `POST` | `/v1/projects/:id/connect` | Broker an E2EE relay session to an online approved member |
-| `GET`, `DELETE` | `/v1/admin/accounts[/:id]` | List or delete accounts with the admin bearer token |
-| `GET`, `DELETE` | `/v1/admin/projects[/:id]` | List or delete projects with the admin bearer token |
-| WebSocket | `/relay?token=...` | Forward opaque frames between the two token holders |
-| WebSocket | `/dir?session=...` | Presence and directory events for one account |
+| Symptom | Check |
+| --- | --- |
+| Cannot reach Hub | Confirm the host says **listening**, both computers are online in Tailscale, port `8791` is allowed by the host firewall, and the invite contains the shown Tailscale address rather than `127.0.0.1` or a home-only LAN address. |
+| Join stays pending forever | The owner must be online and select **Approve** in Settings > Team. Regenerating an invite invalidates the old code. |
+| Member is offline | Open OhLab on that computer and confirm Settings > Team says connected. **Open** remains disabled while the directory socket is offline. |
+| Agent messages are refused | Enable agent messaging for the shared project on both computers. After restarting OhLab, restart a warm-attached agent from its node menu before messaging it. |
 
-## Connecting two homes
+## Privacy and authentication
 
-Tailscale is the recommended deployment. Install it on the Hub machine and both OhLab computers,
-then enter `http://<hub-tailscale-name>:8791` in OhLab's Settings > Team. Traffic stays on the tailnet
-and no public inbound port is needed.
-
-For a public VPS, bind the Hub locally and put Caddy in front of it. Caddy supplies HTTPS/WSS and
-must proxy WebSocket upgrades. For example:
-
-```caddy
-hub.example.com {
-  reverse_proxy 127.0.0.1:8791
-}
-```
-
-Enter `https://hub.example.com` in OhLab. The app derives `wss://hub.example.com/relay` and
-`wss://hub.example.com/dir` automatically. Plain HTTP is appropriate only on a trusted private
-network such as Tailscale. The Hub intentionally contains no TLS stack of its own.
-
-## Key possession authentication
-
-Accounts have no passwords. OhLab reuses its persistent NaCl box peer identity. The Hub encrypts a
-fresh challenge to that public key with an ephemeral Hub box key; the desktop decrypts it and returns
-the challenge once. A successful proof yields a one-hour bearer session. This avoids creating a
-second identity while ensuring that publishing somebody else's public key cannot register or log in
-as them.
-
-The directory metadata is not end-to-end encrypted. Administrators of the Hub can see names, public
-keys, project membership, presence, and connection timing. They cannot decrypt relayed terminal or
-transcript bytes.
+Accounts have no passwords. OhLab proves possession of its persistent NaCl public key through an encrypted challenge, then receives a short-lived Hub session. Approving a member pins that key; removing the member revokes it and closes the live relay session.

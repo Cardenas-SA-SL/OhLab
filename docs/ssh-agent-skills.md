@@ -1,14 +1,14 @@
 # nodeterm skills in SSH projects
 
-How the agent-facing skills (`manage-nodeterm-canvas`, `get-linked-context`) reach an agent
+How the agent-facing skills (`manage-ohlab-canvas`, `ohlab-linked-context`) reach an agent
 that is running on a **remote host** in an SSH project.
 
 ## The problem
 
 Both skills were installed only into the desktop's own home:
 
-- `manage-nodeterm-canvas` → `~/.claude/skills/…` + `<userData>/canvas-control/`
-- `get-linked-context` → `~/.claude/skills/…` + `<userData>/context-links/`
+- `manage-ohlab-canvas` → `~/.claude/skills/…` + `<userData>/canvas-control/`
+- `ohlab-linked-context` → `~/.claude/skills/…` + `<userData>/context-links/`
 
 An SSH project's agent runs on the **host**, reads the **host's** `~/.claude/skills`, and finds
 nothing. Copying the files over would not have helped either: both shims were generated as
@@ -101,7 +101,7 @@ terminals (same discipline as the managed hook script).
 
 ## What shipped: context link over SSH
 
-`get-linked-context` could not use the canvas-control trick as-is: its CLI was a ~230-line parser
+`ohlab-linked-context` could not use the canvas-control trick as-is: its CLI was a ~230-line parser
 for three transcript formats (claude JSONL, codex rollout, gemini event-sourced, plus an opencode
 export), too much to express in sh — and the host may have no `node` at all.
 

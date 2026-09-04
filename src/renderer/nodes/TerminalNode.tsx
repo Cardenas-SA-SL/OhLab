@@ -1071,6 +1071,7 @@ export function TerminalNode({
   // namespaces (pty, fs) go through it; app-global ones (clipboard, shell) stay on the global.
   const session = useSession()
   const { api } = session
+  const [needsMessagingRestart, setNeedsMessagingRestart] = useState(false)
   const remoteLinksJson = useProjects((state) => JSON.stringify(
     state.projects.flatMap((project) =>
       (project.bridges ?? [])
@@ -2998,6 +2999,7 @@ export function TerminalNode({
           if (sshProjectId) reportSshDrop(sshProjectId, id)
           return
         }
+        setNeedsMessagingRestart(Boolean(data.agentId && !fresh && session.source === 'local'))
         // REFUSED: core's tombstone says another client deleted this node while we weren't
         // subscribed (our project was closed/inactive, so no `pty:closed` could reach us). Nothing
         // was spawned — land in the same "closed by <name>" state a subscribed co-viewer gets.
@@ -4948,6 +4950,9 @@ export function TerminalNode({
           <span className="term-node__session" title={status.session}>
             {status.session}
           </span>
+        )}
+        {needsMessagingRestart && (
+          <span className="term-node__session" title="Not messageable until restarted. Use Restart agent in the node menu.">!</span>
         )}
         {remoteLinks.map(({ projectId, bridge }) => (
           <button

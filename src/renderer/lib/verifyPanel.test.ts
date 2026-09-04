@@ -40,11 +40,11 @@ describe('verifyLensPrompt', () => {
 
   it('points claude at the skill and other agents at the CLI shim', () => {
     expect(verifyLensPrompt({ ...base, lens: 'tests', agentId: 'claude' })).toContain(
-      'get-linked-context skill'
+      'ohlab-linked-context skill'
     )
     const codex = verifyLensPrompt({ ...base, lens: 'tests', agentId: 'codex' })
     expect(codex).toContain('/x/ohlab.sh')
-    expect(codex).not.toContain('get-linked-context skill')
+    expect(codex).not.toContain('ohlab-linked-context skill')
   })
 
   it('gives an unknown lens a generic brief instead of dropping it', () => {

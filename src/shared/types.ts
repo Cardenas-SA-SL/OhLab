@@ -1582,6 +1582,10 @@ export interface Settings {
   hubUrl: string
   /** Name published to the Hub directory. Empty falls back to the local presence name. */
   hubAccountName: string
+  /** Run the team Hub inside this desktop process. Off by default. */
+  hubHostEnabled: boolean
+  /** TCP port for the embedded Hub. It always binds all interfaces, never loopback only. */
+  hubHostPort: number
   /** Send APNs push notifications to relay-paired phones when an agent needs approval, asks a
    *  question, or finishes a turn (spec: apns-push). Default on — it only fires for users who
    *  have paired a phone. Toggle in Settings → Notifications. */
@@ -1752,6 +1756,8 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneAccessEnabled: true,
   hubUrl: '',
   hubAccountName: '',
+  hubHostEnabled: false,
+  hubHostPort: 8791,
   mobilePushEnabled: true,
   mobilePushNeedsYou: true,
   mobilePushDone: true,
@@ -1771,11 +1777,9 @@ export const DEFAULT_SETTINGS: Settings = {
   notchWidth: 168,
   notchHoverExpand: true,
   // model: '' = the explicit "no dictation" state (SPEECH_MODEL_NONE, issue #143). Dictation is
-  // opt-in: nothing is selected — and so nothing downloads and no shortcut records — until the
-  // user picks a model in onboarding or Settings → Speech. Existing installs keep whatever their
-  // settings.json already says (the merge only fills ABSENT keys), so nobody's working dictation
-  // is switched off by an upgrade.
-  speech: { engine: 'whisper', model: '', language: 'auto', shortcut: 'Cmd+Alt' },
+  // Voice works without setup: the multilingual small model downloads on first use. Existing
+  // installs keep an explicit prior choice because settings hydration only fills absent keys.
+  speech: { engine: 'whisper', model: 'small', language: 'auto', shortcut: 'Cmd+Alt' },
 }
 
 export interface SettingsApi {
@@ -1794,7 +1798,7 @@ export interface SpeechApi {
   /** Transcribe a chunk of mono PCM audio (16kHz Float32 samples) to text.
    *  `language` is a BCP-47-ish hint or 'auto'; defaults to the user's speech settings. */
   transcribe(pcm: Float32Array, language?: string): Promise<{ text: string }>
-  /** List the known whisper models with their download/pro status. */
+  /** List the known whisper models with their download status. */
   models(): Promise<SpeechModelInfo[]>
   /** Download a whisper model to disk (progress via `onProgress`). */
   downloadModel(id: string): Promise<void>
@@ -2856,6 +2860,20 @@ export interface HubStatus {
   error?: string
 }
 
+export interface HubHostAddress {
+  address: string
+  url: string
+  kind: 'tailscale' | 'lan'
+  label: string
+}
+
+export interface HubHostStatus {
+  state: 'disabled' | 'starting' | 'listening' | 'error'
+  port?: number
+  addresses?: HubHostAddress[]
+  error?: string
+}
+
 export interface HubProjectMember {
   accountId: string
   name: string
@@ -2864,6 +2882,7 @@ export interface HubProjectMember {
   status: 'pending' | 'approved'
   joinedAt: number
   online: boolean
+  machineLabel?: string
 }
 
 export interface HubProject {
@@ -2877,9 +2896,12 @@ export interface HubProject {
 
 export type HubEvent =
   | { type: 'member-joined' | 'member-approved'; projectId: string; accountId: string }
+  | { type: 'member-declined'; projectId: string; accountId: string }
   | { type: 'member-online' | 'member-offline'; accountId: string }
   | { type: 'session-request'; projectId: string; fromAccountId: string; machineLabel?: string }
   | { type: 'status'; status: HubStatus }
+  | { type: 'host-status'; status: HubHostStatus }
+  | { type: 'invite-prefill'; invite: string }
 
 export interface HubApi {
   status(): Promise<HubStatus>
@@ -2891,6 +2913,8 @@ export interface HubApi {
   removeMember(projectId: string, accountId: string): Promise<HubProject>
   connectMember(projectId: string, toAccountId: string, machineLabel?: string): Promise<{ offer: string }>
   regenerateInvite(projectId: string): Promise<HubProject>
+  hostStatus(): Promise<HubHostStatus>
+  pendingInvite(): Promise<string | null>
   onEvent(listener: (event: HubEvent) => void): () => void
 }
 

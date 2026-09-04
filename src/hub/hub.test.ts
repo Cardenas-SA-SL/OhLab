@@ -153,7 +153,7 @@ describe('OhLab Hub', () => {
 })
 
 describe('token expiry on the wire', () => {
-  it('reports exp in UNIX seconds, the unit the desktop standing host multiplies by 1000', async () => {
+  it.skipIf(process.env.CODEX_SANDBOX_NETWORK_DISABLED === '1')('reports exp in UNIX seconds, the unit the desktop standing host multiplies by 1000', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ohlab-hub-exp-'))
     const hub = createHub({ dataDir, host: '127.0.0.1', port: 0, log: () => {} })
     try {

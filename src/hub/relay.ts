@@ -32,7 +32,7 @@ export function createRelay(tokens: HubTokenStore, log: (line: string) => void =
     }
   }
 
-  wss.on('connection', (ws, req, token: string, roomId: string) => {
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage, token: string, roomId: string) => {
     log(`[hub:relay] connect room=${roomId} from=${label(req)}`)
     const first = waiting.get(roomId)
     if (!first || first.ws.readyState !== WebSocket.OPEN) {
@@ -57,7 +57,7 @@ export function createRelay(tokens: HubTokenStore, log: (line: string) => void =
         return
       }
       const pending = waiting.get(roomId)
-      if (pending?.ws === ws) {
+      if (pending && pending.ws === ws) {
         const frame = Buffer.from(data as ArrayBuffer)
         pending.queuedBytes += frame.byteLength
         if (pending.queuedBytes > 8 * 1024 * 1024) {
@@ -68,7 +68,7 @@ export function createRelay(tokens: HubTokenStore, log: (line: string) => void =
         pending.queued.push({ data: frame, binary: isBinary })
       }
     })
-    ws.on('close', (code) => {
+    ws.on('close', (code: number) => {
       if (waiting.get(roomId)?.ws === ws) waiting.delete(roomId)
       closePair(ws, code === 1005 ? 1000 : code || 1000)
       log(`[hub:relay] close room=${roomId} code=${code}`)

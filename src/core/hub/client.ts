@@ -15,6 +15,7 @@ type WsLike = {
 export interface HubClientOptions {
   hubUrl: string
   accountName: string
+  machineLabel?: string
   keys: KeyPair
   onStatus?(status: HubStatus): void
   onEvent?(event: HubEvent): void
@@ -117,7 +118,8 @@ export class HubClient {
       name: this.options.accountName.trim() || 'Someone',
       publicKeyB64,
       challengeId: challenge.challengeId,
-      proofB64: Buffer.from(plain).toString('base64')
+      proofB64: Buffer.from(plain).toString('base64'),
+      machineLabel: this.options.machineLabel
     })
   }
 

@@ -6,6 +6,8 @@ describe('DEFAULT_SETTINGS', () => {
   it('starts with Hub connectivity disabled and lets Team use the presence name', () => {
     expect(DEFAULT_SETTINGS.hubUrl).toBe('')
     expect(DEFAULT_SETTINGS.hubAccountName).toBe('')
+    expect(DEFAULT_SETTINGS.hubHostEnabled).toBe(false)
+    expect(DEFAULT_SETTINGS.hubHostPort).toBe(8791)
   })
 
   it('enables git auto-fetch by default', () => {

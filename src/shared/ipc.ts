@@ -550,6 +550,8 @@ export const IPC = {
   relayClientConnect: 'relay:client:connect',
   // Self-hosted OhLab Hub directory and session broker.
   hubStatus: 'hub:status',
+  hubHostStatus: 'hub:host-status',
+  hubPendingInvite: 'hub:pending-invite',
   hubConnect: 'hub:connect',
   hubProjectsList: 'hub:projects:list',
   hubProjectsCreate: 'hub:projects:create',

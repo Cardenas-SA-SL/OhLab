@@ -39,7 +39,7 @@ function start(deps: ContextLinkDeps = {}): void {
   initPlatform(plat)
   captured = []
   // `false` is not incidental here: this file never redirects HOME, so before the flag became
-  // required every run of this suite installed the get-linked-context skill into the developer's
+  // required every run of this suite installed the ohlab-linked-context skill into the developer's
   // own ~/.claude and merged nodeterm's marker block into their ~/.codex/AGENTS.md,
   // ~/.gemini/GEMINI.md and opencode AGENTS.md. Nothing under test needs those writes — the read
   // handler and the dataDir shim are registered regardless.

@@ -244,6 +244,8 @@ export function buildStubApi(): Omit<
     },
     hub: {
       status: () => Promise.resolve({ state: 'disabled' as const }),
+      hostStatus: () => Promise.resolve({ state: 'disabled' as const }),
+      pendingInvite: () => Promise.resolve(null),
       connect: U('hub.connect'),
       listProjects: U('hub.listProjects'),
       createProject: U('hub.createProject'),

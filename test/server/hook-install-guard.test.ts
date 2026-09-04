@@ -52,7 +52,7 @@ describe('startServer: managed hook install is opt-out-able', () => {
     const srv = await boot(false)
     close = srv.close
     expect(installManagedAgentHooks).not.toHaveBeenCalled()
-    expect(fs.existsSync(path.join(testHome, '.claude', 'skills', 'get-linked-context', 'SKILL.md'))).toBe(false)
+    expect(fs.existsSync(path.join(testHome, '.claude', 'skills', 'ohlab-linked-context', 'SKILL.md'))).toBe(false)
     expect(fs.existsSync(path.join(testHome, '.codex', 'AGENTS.md'))).toBe(false)
   }, 30_000)
 
@@ -60,7 +60,7 @@ describe('startServer: managed hook install is opt-out-able', () => {
     const srv = await boot(undefined)
     close = srv.close
     expect(installManagedAgentHooks).toHaveBeenCalledOnce()
-    expect(fs.existsSync(path.join(testHome, '.claude', 'skills', 'get-linked-context', 'SKILL.md'))).toBe(true)
+    expect(fs.existsSync(path.join(testHome, '.claude', 'skills', 'ohlab-linked-context', 'SKILL.md'))).toBe(true)
     expect(fs.existsSync(path.join(testHome, '.codex', 'AGENTS.md'))).toBe(true)
   }, 30_000)
 })

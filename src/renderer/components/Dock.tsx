@@ -364,7 +364,7 @@ export function Dock({
                 dictationShortcut === ''
                 ? 'Dictate'
                 : isHoldChord(dictationShortcut)
-                  ? `Dictate (hold ${formatShortcut(dictationShortcut, isMac)})`
+                  ? `Hold ${formatShortcut(dictationShortcut, isMac)} to talk`
                   : `Dictate (${formatShortcut(dictationShortcut, isMac)})`
           }
           onClick={onDictate}

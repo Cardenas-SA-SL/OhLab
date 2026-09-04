@@ -186,7 +186,7 @@ describe('grok capabilities', () => {
     // conversation, but as CHUNKS interleaved with tool-call and hook events, so our line parser
     // finds no `type` on any line and the linked agent gets an empty transcript with no error. Discovery needs no installer of its own,
     // and that is now MEASURED rather than assumed: on 1.0.13, `grok inspect --json` lists
-    // `get-linked-context` as `vendor: 'claude', compatibilityStatus: 'enabled'`.
+    // `ohlab-linked-context` as `vendor: 'claude', compatibilityStatus: 'enabled'`.
     expect(canContextLink('grok')).toBe(true)
   })
 

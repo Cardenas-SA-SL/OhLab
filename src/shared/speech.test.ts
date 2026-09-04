@@ -23,8 +23,7 @@ describe('whisper model catalog', () => {
     expect(WHISPER_MODELS.map((m) => m.file)).toEqual([
       'ggml-tiny.bin', 'ggml-base.bin', 'ggml-small.bin', 'ggml-large-v3-turbo.bin',
     ])
-    // Only tiny is free — the Pro split the spec mandates.
-    expect(WHISPER_MODELS.filter((m) => !m.pro).map((m) => m.id)).toEqual(['tiny'])
+    expect(WHISPER_MODELS.every((m) => !('pro' in m))).toBe(true)
   })
 
   it('looks up by id and rejects unknowns', () => {
@@ -36,10 +35,10 @@ describe('whisper model catalog', () => {
     expect(WHISPER_DOWNLOAD_BASE).toBe('https://huggingface.co/ggerganov/whisper.cpp/resolve/main/')
   })
 
-  it('speech settings default to dictation OFF — nothing downloads until the user asks (#143)', () => {
+  it('defaults to the multilingual small model for zero-configuration voice', () => {
     expect(DEFAULT_SETTINGS.speech).toEqual({
       engine: 'whisper',
-      model: SPEECH_MODEL_NONE,
+      model: 'small',
       language: 'auto',
       shortcut: 'Cmd+Alt'
     })

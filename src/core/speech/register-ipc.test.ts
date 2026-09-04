@@ -16,7 +16,7 @@ function setup(engine: 'whisper' | 'cloud' = 'whisper', language = 'auto', cloud
   const factory = async (): Promise<WhisperEngineHandle> => ({
     transcribe: async () => 'from whisper', free: async () => {},
   })
-  const service = new SpeechService({ models, isPremium: () => false, engineFactory: factory })
+  const service = new SpeechService({ models, engineFactory: factory })
   registerSpeechIpc({
     handle: (ch, fn) => handlers.set(ch, fn),
     service, models,
@@ -76,7 +76,8 @@ describe('registerSpeechIpc', () => {
   it('lists models merged with catalog metadata', async () => {
     const { handlers } = setup()
     const list = await handlers.get('speech:models')!({})
-    expect(list.find((m: any) => m.id === 'tiny')).toMatchObject({ downloaded: true, pro: false, approxMB: 75 })
-    expect(list.find((m: any) => m.id === 'base')).toMatchObject({ downloaded: false, pro: true })
+    expect(list.find((m: any) => m.id === 'tiny')).toMatchObject({ downloaded: true, approxMB: 75 })
+    expect(list.find((m: any) => m.id === 'base')).toMatchObject({ downloaded: false })
+    expect(list.some((m: any) => 'pro' in m)).toBe(false)
   })
 })

@@ -1,14 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
-  <defs>
-    <linearGradient id="ntg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#a38dff"/>
-      <stop offset="1" stop-color="#622994"/>
-    </linearGradient>
-  </defs>
-  <path d="M13 12 L31 24 L13 36" fill="none" stroke="url(#ntg)" stroke-width="5"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="13" cy="12" r="3.6" fill="#a38dff"/>
-  <circle cx="13" cy="36" r="3.6" fill="#a38dff"/>
-  <circle cx="31" cy="24" r="3.6" fill="#fff"/>
-  <rect x="33.5" y="32.5" width="10.5" height="5" rx="2.5" fill="#a38dff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs><linearGradient id="mark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7a4bd0"/><stop offset="1" stop-color="#22c1c3"/></linearGradient></defs>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 8V20L11 43Q7 50 15 53L32 57L49 53Q57 50 53 43L40 20V8" fill="none" stroke="url(#mark)" stroke-width="4.5"/>
+    <path d="M15 40Q32 34 49 40L54 48Q54 52 48 54L32 57L16 54Q10 52 10 48Z" fill="url(#mark)" opacity=".88"/>
+    <path d="M24 18H40" fill="none" stroke="#d9ffff" stroke-opacity=".75" stroke-width="3"/>
+    <circle cx="24" cy="8" r="3.8" fill="#7a4bd0"/><circle cx="40" cy="8" r="3.8" fill="#22c1c3"/><circle cx="32" cy="57" r="3.8" fill="#fff"/>
+  </g>
 </svg>

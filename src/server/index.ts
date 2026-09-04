@@ -96,7 +96,7 @@ import { IPC } from '@shared/ipc'
 import { WhisperModelStore } from '../core/speech/whisper-models'
 import { SpeechService } from '../core/speech/speech-service'
 import { registerSpeechIpc } from '../core/speech/register-ipc'
-import { isPremium, getStoredEntitlement } from '../core/license'
+import { getStoredEntitlement } from '../core/license'
 
 // Same env-override + default as src/core/check.ts / license.ts / src/main/telemetry.ts — each
 // shell derives it locally rather than sharing an import (src/server must not import src/main).
@@ -244,7 +244,7 @@ export async function startServer(
     dir: path.join(config.dataDir, 'speech-models'),
     onProgress: (id, pct) => platform.broadcast(IPC.speechProgress, { id, pct })
   })
-  const speechService = new SpeechService({ models: whisperModels, isPremium })
+  const speechService = new SpeechService({ models: whisperModels })
   registerSpeechIpc({
     handle: (channel, fn) => platform.handle(channel, fn),
     service: speechService,

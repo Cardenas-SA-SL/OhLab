@@ -29,12 +29,9 @@ export function isGgmlModelHeader(header: Uint8Array): boolean {
 
 /** Local dictation via whisper.cpp (smart-whisper). One loaded model at a
  * time (they are hundreds of MB of RAM); same-model loads dedupe onto one
- * in-flight promise; transcriptions run FIFO on a promise chain. The Pro
- * rule (non-tiny needs premium) is validated HERE, not only in the UI, so a
- * bypassed renderer lock still can't use a paid model. */
+ * in-flight promise; transcriptions run FIFO on a promise chain. All model sizes are free. */
 export class SpeechService {
   private readonly models: WhisperModelStore
-  private readonly isPremium: () => boolean
   private readonly engineFactory: (modelPath: string) => Promise<WhisperEngineHandle>
   private loaded: { path: string; engine: Promise<WhisperEngineHandle> } | null = null
   private queue: Promise<unknown> = Promise.resolve()
@@ -42,11 +39,9 @@ export class SpeechService {
 
   constructor(opts: {
     models: WhisperModelStore
-    isPremium: () => boolean
     engineFactory?: (modelPath: string) => Promise<WhisperEngineHandle>
   }) {
     this.models = opts.models
-    this.isPremium = opts.isPremium
     this.engineFactory = opts.engineFactory ?? defaultEngineFactory
   }
 

@@ -223,6 +223,10 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
               </svg>
               <span>Lay your work out in space — pan, zoom, group, connect</span>
             </div>
+            <div className="onb-prop">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="8" cy="9" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M2.5 20c.5-4 2.5-6 5.5-6s5 2 5.5 6M13 16c3-2 7 0 7.5 4" /></svg>
+              <span>Share a project with a teammate on another machine - Settings &gt; Team</span>
+            </div>
           </div>
           <button className="onb-btn onb-btn--primary onb-cover__cta" autoFocus onClick={next}>
             Set up in a minute →

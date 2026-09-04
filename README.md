@@ -48,6 +48,10 @@ same live sessions.
 📚 **Full documentation lives in [the docs directory](https://github.com/Cardenas-SA-SL/OhLab/tree/main/docs)** — get
 started, concepts, agents, remote access, troubleshooting.
 
+## Team
+
+Host a Hub inside OhLab, share one project with an invite code, approve teammates, and open each other's projects as live tabs across machines. Start with the [two-computer walkthrough and Tailscale setup](./docs/HUB.md).
+
 ## ✨ Features
 
 <table>
