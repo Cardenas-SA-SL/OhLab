@@ -6941,6 +6941,29 @@ button.group-node__setup:disabled {
   font-variant-numeric: tabular-nums;
   color: var(--text-strong);
 }
+/* Pause: the non-destructive reclaim, sharing the kill button's geometry so the two controls line
+   up, but never its danger colour on hover — this one keeps the session. A disabled offer stays
+   VISIBLE and dimmed rather than hidden, because it carries the reason in its tooltip. */
+.sessmem-row__pause {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(var(--tint-rgb), 0.45);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sessmem-row__pause:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(var(--tint-rgb), 0.08);
+}
+.sessmem-row__pause:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .sessmem-row__kill {
   flex: 0 0 auto;
   width: 20px;
