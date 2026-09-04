@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { pinNeutralMachineNoun } from './testMachineNoun'
 import { presentAccount } from './accountPresentation'
+
+
+// The copy under test names the machine, and `machineNoun()` sniffs the host — pin it so the
+// literals below hold on a Mac too (see testMachineNoun.ts).
+pinNeutralMachineNoun()
 
 describe('presentAccount', () => {
   it('uses a chosen name before the email and identifies a local login', () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { pinNeutralMachineNoun } from './testMachineNoun'
 import type { LicenseDetail } from '@shared/types'
 import {
   licenseSentence,
@@ -22,6 +23,11 @@ const keygen = (over: Partial<LicenseDetail> = {}): LicenseDetail => ({
   error: null,
   ...over
 })
+
+
+// The copy under test names the machine, and `machineNoun()` sniffs the host — pin it so the
+// literals below hold on a Mac too (see testMachineNoun.ts).
+pinNeutralMachineNoun()
 
 describe('licenseSentence — a keygen license that read cleanly', () => {
   it('reports usage against the cap and names phones as devices', () => {
