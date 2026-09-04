@@ -15,6 +15,10 @@ export interface WorkspaceSession {
   label: string
   api: NodeTerminalApi
   status: 'connected' | 'connecting' | 'offline'
+  remoteProjectId?: string
+  hostAccountId?: string
+  memberName?: string
+  machineLabel?: string
 }
 
 /** The per-session renderer store instances (the multiplayer tables that must not be shared
@@ -157,6 +161,11 @@ export function activeSessionApi(): NodeTerminalApi {
   return getActiveSession().api
 }
 
+/** The API owned by this machine, independent of which local or relay tab is focused. */
+export function localSessionApi(): NodeTerminalApi {
+  return localOrActiveSession().api
+}
+
 /** How many sessions are registered. `1` for a solo user today — UI affordances that only make
  *  sense with multiple cores (the tab session label) gate on `> 1` so the solo UI is unchanged. */
 export function sessionCount(): number {
@@ -191,6 +200,14 @@ export function sessionForProject(projectId: string): WorkspaceSession {
     PROJECT_BINDINGS.delete(projectId) // stale binding (session disposed) → resolve local
   }
   return localOrActiveSession()
+}
+
+export function sessionById(sessionId: string): WorkspaceSession | undefined {
+  return SESSIONS.get(sessionId)?.session
+}
+
+export function workspaceSessions(): WorkspaceSession[] {
+  return [...SESSIONS.values()].map((entry) => entry.session)
 }
 
 /** Re-broadcast the local human's identity on EVERY live session (obligation 2). Renaming yourself

@@ -203,6 +203,9 @@ export const IPC = {
   canvasMut: 'canvas:mut',
   contextLinkSetLinks: 'context-link:set-links',
   contextLinkInfo: 'context-link:info',
+  contextLinkRemoteRead: 'context-link:remote-read',
+  contextLinkRelayResolve: 'context-link:relay-resolve',
+  contextLinkRelayResult: 'context-link:relay-result',
   /** Board-log (`.nodeterm/board-log.jsonl`): request/response append + read, routed per project
    *  (local cwd / desktop-ssh / unsupported) in core/board-log-handlers.ts. */
   /** Debug log panel (issue #78) — invoke: the whole ring (LogRecord[]) for the initial fill. */

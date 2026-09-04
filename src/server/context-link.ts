@@ -96,8 +96,9 @@ export function initServerContextLink(deps: ServerContextLinkDeps): {
   const agentSessions = deps.agentSessions ?? sessionNameSweepEntries
   const transcriptOf = deps.transcriptOf ?? transcriptPathOf
 
-  // No remote deps: the Server Edition runs ON the host whose transcripts and tmux it reads, so
-  // the local-only behavior is the complete answer (SSH projects are a desktop-only concept here).
+  // No relay deps: Server Edition is itself one core and has no desktop relay-session registry.
+  // Cross-machine bridges therefore deliberately degrade to absent there; a desktop relay peer
+  // asks this server/host only through the narrow sender-checked remote-read RPC.
   initContextLink(deps.ptyManager, {}, {
     installAgentIntegrations: deps.installAgentIntegrations
   })

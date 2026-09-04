@@ -256,7 +256,10 @@ export function buildStubApi(): Omit<
     },
     contextLink: {
       setLinks: pnoop,
-      info: U('contextLink.info')
+      info: U('contextLink.info'),
+      remoteRead: async () => ({ ok: false as const, reason: 'unavailable' as const }),
+      onRelayResolve: noopUnsub,
+      sendRelayResult: noop
     },
     usage: {
       // Superseded by the real WS-backed namespace in ws-bridge (the core usage service runs in

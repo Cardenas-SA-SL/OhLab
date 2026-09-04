@@ -39,6 +39,7 @@ export type DirectoryEvent =
       fromPublicKeyB64: string
       pairingToken: string
       relayUrl: string
+      machineLabel: string
     }
 
 interface DirectoryFile {

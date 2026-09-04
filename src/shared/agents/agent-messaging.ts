@@ -24,6 +24,15 @@ export interface AgentMessageDeliverRequest {
   /** The sender's text for send/reply. IGNORED for notify — its body is app-owned and composed
    *  in main (`NOTIFY_BODY`), which is the whole point of that verb. */
   body: string
+  /** Relay clients attach display attribution. It is never an authorization input: the host
+   * overwrites the project/account facts from its sender registry before delivery. */
+  remoteOrigin?: {
+    memberName: string
+    machineLabel: string
+    sourceTitle: string
+    hostAccountId?: string
+    grantedProjectId?: string
+  }
 }
 
 /**
@@ -45,4 +54,13 @@ export interface AgentMessageReply {
   error?: string
   /** The typed outcome (an `AgentMessageOutcome` from `src/core`), for JSON clients. */
   result?: unknown
+}
+
+/** A relay tab has no carrier, so there is no queue to accept the message. */
+export function memberOfflineReply(member?: string): AgentMessageReply {
+  return {
+    ok: false,
+    error: `memberOffline: ${member || 'the remote member'} is offline. Do not retry.`,
+    result: { kind: 'memberOffline', member }
+  }
 }

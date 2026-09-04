@@ -123,9 +123,9 @@ describe('OhLab Hub', () => {
       const event = JSON.parse(raw.toString()) as Record<string, unknown>
       if (event.type === 'session-request') resolve(event)
     }))
-    const connection = await post<{ pairingToken: string }>(base, `/v1/projects/${project.projectId}/connect`, { toAccountId: member.accountId }, owner.token)
+    const connection = await post<{ pairingToken: string }>(base, `/v1/projects/${project.projectId}/connect`, { toAccountId: member.accountId, machineLabel: "Owner's Mac" }, owner.token)
     expect(connection.pairingToken).toHaveLength(43)
-    expect((await request).fromAccountId).toBe(owner.accountId)
+    expect(await request).toMatchObject({ fromAccountId: owner.accountId, machineLabel: "Owner's Mac" })
     const unauthorized = await fetch(`${base}/v1/admin/accounts`)
     expect(unauthorized.status).toBe(401)
     const accounts = await fetch(`${base}/v1/admin/accounts`, { headers: { authorization: 'Bearer admin-secret' } }).then((r) => r.json()) as unknown[]
@@ -149,5 +149,24 @@ describe('OhLab Hub', () => {
     }).then((r) => r.json()) as Array<{ projectId: string; members: unknown[] }>
     expect(restoredProjects).toEqual([expect.objectContaining({ projectId: 'local-project-1' })])
     expect(restoredProjects[0].members).toHaveLength(2)
+  })
+})
+
+describe('token expiry on the wire', () => {
+  it('reports exp in UNIX seconds, the unit the desktop standing host multiplies by 1000', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ohlab-hub-exp-'))
+    const hub = createHub({ dataDir, host: '127.0.0.1', port: 0, log: () => {} })
+    try {
+      const address = await hub.listen()
+      const res = await fetch(`http://127.0.0.1:${address.port}/v1/pair/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+      const json = (await res.json()) as { exp: number }
+      const nowSeconds = Math.floor(Date.now() / 1000)
+      expect(json.exp).toBeGreaterThan(nowSeconds)
+      expect(json.exp).toBeLessThan(nowSeconds + 2 * 24 * 60 * 60)
+      expect(json.exp * 1000 - Date.now()).toBeLessThan(2 ** 31 - 1)
+    } finally {
+      await hub.close()
+      await fs.rm(dataDir, { recursive: true, force: true })
+    }
   })
 })

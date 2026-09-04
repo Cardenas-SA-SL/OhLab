@@ -301,7 +301,7 @@ describe('RETRYABLE', () => {
   it('answers for every outcome kind the union declares', () => {
     // Runtime half. The compile-time half is below and is enforced by `npm run typecheck`.
     const kinds = Object.keys(RETRYABLE) as AgentMessageOutcomeKind[]
-    expect(kinds.length).toBe(17)
+    expect(kinds.length).toBe(18)
     for (const k of kinds) expect(typeof RETRYABLE[k]).toBe('boolean')
   })
 
@@ -320,6 +320,7 @@ describe('RETRYABLE', () => {
     expect(RETRYABLE.targetNotPasteAware).toBe(false)
     expect(RETRYABLE.targetGone).toBe(false)
     expect(RETRYABLE.notPermitted).toBe(false)
+    expect(RETRYABLE.memberOffline).toBe(false)
     expect(RETRYABLE.targetStatusStale).toBe(true)
     expect(RETRYABLE.targetBusy).toBe(true)
     expect(RETRYABLE.targetNotIdleUnknown).toBe(true)

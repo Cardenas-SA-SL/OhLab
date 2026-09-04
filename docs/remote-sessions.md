@@ -398,6 +398,46 @@ users before 4d is wired (it grants `pty.create` to peers).
   RELAY project (while a LOCAL tab is active) isn't live — only the active session's `onMutation` is
   subscribed; it re-syncs on reactivation.
 
+### Task 2: cross-machine agent collaboration
+
+A context link between a local node and a node shown in a relay tab is owned by the local project.
+It is persisted in that project's `bridges[]`; the relay project itself remains runtime-only. The
+wire shape is:
+
+```json
+{
+  "id": "bridge-id",
+  "source": "local-node-id",
+  "target": "remote-node-id",
+  "remote": {
+    "endpoint": "target",
+    "sessionId": "relay-1",
+    "remoteProjectId": "host-project-id",
+    "hostAccountId": "hub-account-id",
+    "memberName": "Jorge",
+    "machineLabel": "Jorge's computer"
+  }
+}
+```
+
+`sessionId` is only a live reconnect hint. Resolution after a reconnect uses the stable
+`hostAccountId + remoteProjectId` pair, so several members and several shared tabs from one member
+do not cross-wire. When no matching live relay session exists, the bridge remains persisted and is
+rendered as offline.
+
+Remote context uses `context-link:remote-read`; its request contains only the granted project id,
+node id, read kind (`transcript` or `terminal`), and a byte cap. The authenticated relay sender must
+be scoped to that exact project, the node must actually belong to it, and the host resolves its own
+transcript path or fixed tmux capture. The peer can send neither a filesystem path nor a command.
+Agent messages reuse `agent:message-deliver`. The host overwrites member, machine, account, and
+granted-project attribution from the authenticated relay session, then runs the ordinary local
+delivery pipeline and returns its typed receipt. An unavailable relay session returns the
+non-retryable `memberOffline` outcome; there is intentionally no persisted catch-up queue.
+
+Server Edition has no desktop relay-session registry. Its persisted-map derivation therefore keeps
+ordinary local bridges but omits cross-machine bridges; a desktop relay peer reaches the hosting
+core only through the sender-checked RPC above.
+
 **Retained on the OLD dialect (do NOT delete — a shipped feature):** the phone server path —
 `host-service.ts`, `standing-host.ts`, `host-canvas-hub.ts`, `framing.ts`, `snapshot.ts`,
 `src/main/remote/canvas-sync.ts` (`sanitizeClientMutation`), `phone-presence.ts`, the `remoteHost`

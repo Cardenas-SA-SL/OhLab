@@ -68,6 +68,9 @@ function makeDeps(over: Partial<RelayTabDeps> & { handle: RelayApiHandle }): {
     setActiveProject: over.setActiveProject ?? setActiveProject,
     buildApi: () => over.handle,
     timeoutMs: over.timeoutMs,
+    hostAccountId: over.hostAccountId,
+    memberName: over.memberName,
+    machineLabel: over.machineLabel,
   }
   return { deps, addProject, adoptProject, setActiveProject }
 }
@@ -107,6 +110,25 @@ describe('openRelayTab (connect → tab → mount)', () => {
     expect(close).toHaveBeenCalledTimes(1)
     expect(sessionForProject(tab.projectId).source).toBe('local') // unbound → local
     expect(sessionCount()).toBe(1) // only local remains
+  })
+
+  it('records stable host/project identity and the member machine label for discovery', async () => {
+    const hostProject = { id: 'host-project', name: 'Shared', nodes: [] } as unknown as Project
+    const { api } = fakeBridgedApi({ version: 2, activeProjectId: 'host-project', projects: [hostProject] })
+    const handle: RelayApiHandle = { api, ready: () => Promise.resolve(), close: vi.fn() }
+    const { deps } = makeDeps({
+      handle,
+      hostAccountId: 'account-b',
+      memberName: 'Jorge',
+      machineLabel: "Jorge's PC"
+    })
+    const tab = await openRelayTab('conn-identity', 'Jorge', deps)
+    expect(sessionForProject(tab.projectId)).toMatchObject({
+      remoteProjectId: 'host-project',
+      hostAccountId: 'account-b',
+      memberName: 'Jorge',
+      machineLabel: "Jorge's PC"
+    })
   })
 
   it('populates the tab by ADOPTING the host\'s scoped project (nodes intact, remote:true)', async () => {

@@ -16,6 +16,7 @@ export interface LinkNodeInfo {
   agentId?: string
   sessionId?: string
   accountId?: string
+  remote?: ContextLinkInfo['remote']
 }
 
 /**
@@ -34,6 +35,7 @@ export function buildLinkMap(
     if (n.agentId) e.agentId = n.agentId
     if (n.sessionId) e.sessionId = n.sessionId
     if (n.accountId) e.accountId = n.accountId
+    if (n.remote) e.remote = n.remote
     return e
   }
   for (const e of edges) {
@@ -73,15 +75,30 @@ export function buildBackgroundLinkMaps(
   projects: Array<{ id: string; nodes: CanvasNodeState[]; bridges?: BridgeLink[] }>,
   activeProjectId: string | null,
   sessionIdOf: (nodeId: string) => string | undefined,
-  agentIdOf?: (nodeId: string) => string | undefined
+  agentIdOf?: (nodeId: string) => string | undefined,
+  remoteInfoOf?: (bridge: BridgeLink, nodeId: string) => LinkNodeInfo | undefined
 ): ContextLinkMap {
   const map: ContextLinkMap = {}
   for (const p of projects) {
     if (p.id === activeProjectId || !p.bridges?.length) continue
     const byId = new Map(p.nodes.map((n) => [n.id, n]))
-    const edges = p.bridges.filter((e) => byId.has(e.source) && byId.has(e.target))
+    const edges = p.bridges.filter((e) => {
+      if (!e.remote) return byId.has(e.source) && byId.has(e.target)
+      const localId = e.remote.endpoint === 'source' ? e.target : e.source
+      const remoteId = e.remote.endpoint === 'source' ? e.source : e.target
+      return byId.has(localId) && !!remoteInfoOf?.(e, remoteId)
+    })
     const infoOf = (id: string): LinkNodeInfo => {
-      const n = byId.get(id)!
+      const n = byId.get(id)
+      if (!n) {
+        const bridge = edges.find((edge) => {
+          if (!edge.remote) return false
+          return (edge.remote.endpoint === 'source' ? edge.source : edge.target) === id
+        })
+        const remote = bridge ? remoteInfoOf?.(bridge, id) : undefined
+        if (remote) return remote
+        return { id, title: id, sticky: false }
+      }
       const sticky = n.kind === 'sticky'
       const agentId = sticky ? undefined : (n.agentId ?? agentIdOf?.(id))
       return {

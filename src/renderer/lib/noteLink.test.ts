@@ -197,6 +197,21 @@ describe('buildLinkMap agent identity', () => {
     expect(map['a'][0].accountId).toBeUndefined()
     expect(map['b'][0]).toMatchObject({ id: 'a', agentId: 'claude', sessionId: 'sess-a', accountId: 'acct-1' })
   })
+
+  it('carries cross-session owner and online metadata in both map directions', () => {
+    const remote = {
+      sessionId: 'relay-2', remoteProjectId: 'host-p', hostAccountId: 'acct-b',
+      memberName: 'Jorge', machineLabel: "Jorge's PC", online: true
+    }
+    const map = buildLinkMap([{ source: 'local', target: 'remote' }], (id) => ({
+      id,
+      title: id,
+      sticky: false,
+      ...(id === 'remote' ? { remote } : {})
+    }))
+    expect(map.local[0].remote).toEqual(remote)
+    expect(map.remote[0].remote).toBeUndefined()
+  })
 })
 
 describe('buildContextLinkNote', () => {
@@ -314,6 +329,28 @@ describe('buildBackgroundLinkMaps', () => {
       () => undefined
     )
     expect(map).toEqual({})
+  })
+  it('keeps a tagged cross-session endpoint supplied by the relay resolver', () => {
+    const bridge = {
+      id: 'cross', source: 'local', target: 'remote',
+      remote: {
+        endpoint: 'target' as const, sessionId: 'relay-1', remoteProjectId: 'host-p',
+        hostAccountId: 'acct-b', memberName: 'Jorge', machineLabel: "Jorge's PC"
+      }
+    }
+    const remote = {
+      id: 'remote', title: 'Reviewer', sticky: false,
+      remote: { ...bridge.remote, online: true }
+    }
+    const map = buildBackgroundLinkMaps(
+      [{ id: 'local-p', nodes: [node({ id: 'local', title: 'Builder' })], bridges: [bridge] }],
+      null,
+      () => undefined,
+      undefined,
+      () => remote
+    )
+    expect(map.local).toEqual([expect.objectContaining({ id: 'remote', remote: remote.remote })])
+    expect(map.remote).toEqual([expect.objectContaining({ id: 'local', title: 'Builder' })])
   })
 })
 

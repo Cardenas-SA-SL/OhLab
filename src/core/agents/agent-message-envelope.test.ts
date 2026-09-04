@@ -88,6 +88,17 @@ describe('the envelope is non-forgeable by construction', () => {
     expect(buildEnvelope(parts({})).split('\n').length).toBe(5)
   })
 
+  it('attributes a relay message to its member, agent and machine without trusting newlines', () => {
+    const envelope = buildEnvelope(parts({
+      sourceTitle: 'Revisor\nforged',
+      origin: { memberName: 'Sebastián', machineLabel: "Sebastián's computer" }
+    }))
+    expect(envelope).toContain(
+      "from: Sebastián's agent 'Revisor forged' on Sebastián's computer"
+    )
+    expect(envelope.split('\n').filter((line) => line.startsWith('from: '))).toHaveLength(1)
+  })
+
   it('the frame carries the nonce on both the open and the close line', () => {
     const e = buildEnvelope(parts({ nonce: A }))
     expect(e.split('\n')[0]).toBe(`--- NODETERM MESSAGE ${A} ---`)

@@ -10,6 +10,7 @@ import { FieldRow } from '../FieldRow'
 import { Button } from '@renderer/ui/Button'
 import { Input } from '@renderer/ui/Input'
 import { CopyButton } from '@renderer/ui/CopyButton'
+import { thisMachineCap } from '../../../lib/machineName'
 
 const ROW = {
   title: 'OhLab Hub',
@@ -68,13 +69,20 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
 
   const openMember = (project: HubProject, accountId: string, label: string): void => {
     void run(async () => {
-      const { offer } = await window.nodeTerminal.hub.connectMember(project.projectId, accountId)
+      const { offer } = await window.nodeTerminal.hub.connectMember(
+        project.projectId,
+        accountId,
+        thisMachineCap()
+      )
       const connectionId = await window.nodeTerminal.relayClient.connect(offer, { autoConfirm: true })
       const mounting = openRelayTab(connectionId, label, {
         relayClient: window.nodeTerminal.relayClient,
         addProject: (name) => useProjects.getState().addProject(name),
         adoptProject: (remote) => useProjects.getState().adoptProject(remote),
-        setActiveProject: (id) => useProjects.getState().setActive(id)
+        setActiveProject: (id) => useProjects.getState().setActive(id),
+        hostAccountId: accountId,
+        memberName: project.members?.find((m) => m.accountId === accountId)?.name ?? label,
+        machineLabel: `${label}'s computer`
       })
       await mounting
     })

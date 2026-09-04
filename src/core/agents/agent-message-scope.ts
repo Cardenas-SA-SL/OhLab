@@ -157,6 +157,33 @@ export function resolveDeliveryScope(
   return { kind: 'refused', reason: 'cross-project', targetFound }
 }
 
+/** Host-side branch for a relay peer. The peer does not own a source node in this core, so the
+ * ordinary same-project proof cannot apply. Authority is instead the project id recorded when the
+ * authenticated relay session was opened. The target must occur exactly once and in that project. */
+export function resolveRemoteDeliveryScope(
+  projects: readonly ScopeProject[],
+  grantedProjectId: string | undefined,
+  sourceNodeId: string,
+  targetNodeId: string
+): DeliveryScope {
+  const targetFound = projects.some((p) => p.nodes.some((n) => n.id === targetNodeId))
+  if (!grantedProjectId || !isSafeNodeId(sourceNodeId) || !isSafeNodeId(targetNodeId)) {
+    return {
+      kind: 'refused',
+      reason: !isSafeNodeId(sourceNodeId) || !isSafeNodeId(targetNodeId)
+        ? 'unaddressable-node-id'
+        : 'cross-project',
+      targetFound
+    }
+  }
+  const owners = projects.filter((p) => p.nodes.some((n) => n.id === targetNodeId))
+  if (owners.length > 1)
+    return { kind: 'refused', reason: 'ambiguous-target-node-id', targetFound: true }
+  if (owners.length === 1 && owners[0].id === grantedProjectId)
+    return { kind: 'same-project', projectId: grantedProjectId }
+  return { kind: 'refused', reason: 'cross-project', targetFound }
+}
+
 /** The `notPermitted` fact `decideDelivery` takes, or `undefined` when the pair may proceed.
  *  Keeping the mapping here means a caller cannot invent a third answer. */
 export function scopeRefusal(scope: DeliveryScope): NotPermittedReason | undefined {

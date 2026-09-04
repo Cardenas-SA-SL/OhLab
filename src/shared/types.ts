@@ -512,6 +512,17 @@ export interface BridgeLink {
   id: string
   source: string
   target: string
+  /** A cross-machine bridge keeps its local endpoint in source/target and tags the endpoint that
+   * lives in a relay project. The runtime session id is a reconnect hint only; the stable
+   * account/project pair is what lets the renderer re-resolve it after a restart. */
+  remote?: {
+    endpoint: 'source' | 'target'
+    sessionId: string
+    remoteProjectId: string
+    hostAccountId: string
+    memberName: string
+    machineLabel: string
+  }
 }
 
 /** One kanban board column. Column order = array order in ProjectKanban.columns. */
@@ -2144,6 +2155,15 @@ export interface ContextLinkInfo {
   sessionId?: string
   /** Managed Claude account of the linked node — scopes the claude locator fallback. */
   accountId?: string
+  /** Present when the linked node is owned by another member's relay core. */
+  remote?: {
+    sessionId: string
+    remoteProjectId: string
+    hostAccountId: string
+    memberName: string
+    machineLabel: string
+    online: boolean
+  }
 }
 
 /** Map of node id → the nodes it is context-linked to. Sent to main so it can write link files. */
@@ -2154,6 +2174,26 @@ export interface ContextLinkApi {
   setLinks(map: ContextLinkMap): Promise<void>
   /** Static facts the renderer needs to compose link messages: the CLI shim's absolute path. */
   info(): Promise<{ shimPath: string }>
+  /** Narrow host-side read used by relay peers. The host resolves transcript paths itself and
+   * accepts only a node in the project granted to the calling peer. */
+  remoteRead(req: {
+    projectId: string
+    nodeId: string
+    kind: 'transcript' | 'terminal'
+    maxBytes?: number
+  }): Promise<{ ok: true; text: string } | { ok: false; reason: 'forbidden' | 'unavailable' }>
+  onRelayResolve(listener: (req: {
+    requestId: string
+    sessionId: string
+    projectId: string
+    nodeId: string
+    kind: 'transcript' | 'terminal'
+    maxBytes: number
+  }) => void): () => void
+  sendRelayResult(result: {
+    requestId: string
+    result: { ok: true; text: string } | { ok: false; reason: 'forbidden' | 'unavailable' }
+  }): void
 }
 
 /** One usage window (5h session or 7d weekly) as shown in the indicator. */
@@ -2838,7 +2878,7 @@ export interface HubProject {
 export type HubEvent =
   | { type: 'member-joined' | 'member-approved'; projectId: string; accountId: string }
   | { type: 'member-online' | 'member-offline'; accountId: string }
-  | { type: 'session-request'; projectId: string; fromAccountId: string }
+  | { type: 'session-request'; projectId: string; fromAccountId: string; machineLabel?: string }
   | { type: 'status'; status: HubStatus }
 
 export interface HubApi {
@@ -2849,7 +2889,7 @@ export interface HubApi {
   joinProject(inviteCode: string): Promise<HubProject>
   approveMember(projectId: string, accountId: string): Promise<HubProject>
   removeMember(projectId: string, accountId: string): Promise<HubProject>
-  connectMember(projectId: string, toAccountId: string): Promise<{ offer: string }>
+  connectMember(projectId: string, toAccountId: string, machineLabel?: string): Promise<{ offer: string }>
   regenerateInvite(projectId: string): Promise<HubProject>
   onEvent(listener: (event: HubEvent) => void): () => void
 }

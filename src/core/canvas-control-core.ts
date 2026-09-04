@@ -26,6 +26,8 @@ function messagingGuidanceLines(): string[] {
   for (const [kind, retryable] of Object.entries(RETRYABLE)) (retryable ? yes : no).push(kind)
   return [
     'Messaging outcomes (send/reply/notify): every reply names a typed outcome and says whether',
+    '`list` also shows nodes in open relay tabs with member, machine and online state. Cross-machine',
+    '`send`/`reply` use the same receipts; "member offline" is final until that tab reconnects.',
     'retrying can help — believe the reply over your instincts:',
     `- Worth retrying, after the wait the reply names: ${yes.join(', ')}.`,
     `- NOT worth retrying — the cause will not clear on its own: ${no.join(', ')}.`,
@@ -471,8 +473,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     'Multi-repo orchestration: one project per repository — `open-project --cwd <repo>` (the user',
     'confirms once), then `open-agent --agent claude --project <returned id> --prompt "…"` per repo,',
     'one repo at a time. Sessions in a non-active project start when the user views that project —',
-    'do not poll for them. v1 has no cross-project links: read a repo\'s results by opening a',
-    'reader agent inside that project and linking within it.'
+    'do not poll for them. A context link may cross into an online relay member\'s shared project;',
+    'it stays visible but unreadable while that member is offline.'
   ].join('\n')
 }
 
@@ -1016,8 +1018,7 @@ piling every session onto your canvas: \`open-project --cwd <repo>\` (the user c
 idempotent thereafter), then \`open-agent --agent claude --project <returned id> --prompt
 "<task>"\` — one repo at a time. With a RETURNED id neither verb moves the user's view, and a
 session opened into a non-active project starts when the user next views that project — do not
-poll for it. v1 has no
-cross-project links: read a repo's results by opening a reader agent inside that project and
-linking within it.
+poll for it. A context link may cross into an online relay member's shared project; it remains
+listed but unreadable while that member is offline.
 `
 }

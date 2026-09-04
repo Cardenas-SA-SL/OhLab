@@ -37,7 +37,7 @@ import {
 } from './agent-message-decide'
 import { noteNewTurn, noteSent, reserveFlow } from './agent-message-flow'
 import { recordDelivery } from './agent-message-trace'
-import { resolveDeliveryScope, scopeRefusal } from './agent-message-scope'
+import { resolveDeliveryScope, resolveRemoteDeliveryScope, scopeRefusal } from './agent-message-scope'
 import {
   DeliveryQueue,
   type DeliveryQueueDeps,
@@ -439,6 +439,12 @@ export function renderMessageOutcome(o: AgentMessageOutcome): AgentMessageReply 
         error: `targetGone: no live session exists for the target node. ${advice}`,
         result: o
       }
+    case 'memberOffline':
+      return {
+        ok: false,
+        error: `memberOffline: ${o.member || 'the remote member'} is offline. ${advice}`,
+        result: o
+      }
     case 'notPermitted':
       return {
         ok: false,
@@ -474,7 +480,14 @@ export async function runDelivery(
   // WHO MAY BE ADDRESSED — the serialized store, never a live canvas (there is nothing to travel
   // toward, by construction: see agent-message-scope.ts). This is also where `isSafeNodeId` runs,
   // which the pair limiter's key and the tmux session namespace both depend on.
-  const scope = resolveDeliveryScope(projects, req.sourceNodeId, req.targetNodeId)
+  const scope = req.remoteOrigin
+    ? resolveRemoteDeliveryScope(
+        projects,
+        req.remoteOrigin.grantedProjectId,
+        req.sourceNodeId,
+        req.targetNodeId
+      )
+    : resolveDeliveryScope(projects, req.sourceNodeId, req.targetNodeId)
   let notPermitted = scopeRefusal(scope)
   const projectId = scope.kind === 'same-project' ? scope.projectId : undefined
   if (!notPermitted && deps.callerOwnsTarget &&
@@ -553,7 +566,10 @@ export async function runDelivery(
         sourceNodeId: req.sourceNodeId,
         // The from-line is composed HERE from the store's title (oneLine'd inside buildEnvelope);
         // the renderer never supplies a string that ends up inside the frame.
-        sourceTitle: sourceNode?.title || req.sourceNodeId,
+        sourceTitle: req.remoteOrigin?.sourceTitle || sourceNode?.title || req.sourceNodeId,
+        origin: req.remoteOrigin
+          ? { memberName: req.remoteOrigin.memberName, machineLabel: req.remoteOrigin.machineLabel }
+          : undefined,
         // notify's body is APP-OWNED (#98): substituted here, in main, whatever the request
         // carried — the renderer's `--text` refusal is UX, this line is the boundary. The test
         // sends a hostile body over the IPC shape and asserts it never reaches the envelope.

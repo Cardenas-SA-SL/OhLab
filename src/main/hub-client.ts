@@ -16,6 +16,7 @@ type SessionRequest = {
   fromPublicKeyB64: string
   pairingToken: string
   relayUrl: string
+  machineLabel?: string
 }
 
 export interface MainHubClient {
@@ -64,6 +65,11 @@ export function initHubClient(
       ourKeys: keys,
       platform,
       sharedProjectId: localProjectId,
+      peerScope: {
+        accountId: member.accountId,
+        memberName: member.name,
+        machineLabel: event.machineLabel || `${member.name}'s computer`
+      },
       onPeerPending: (pending) => {
         if (pending.peerKeyB64() !== event.fromPublicKeyB64) {
           console.warn('[hub] refused session request whose tunnel key did not match the directory')
@@ -126,9 +132,13 @@ export function initHubClient(
   platform.handle(IPC.hubProjectsApprove, async (projectId: unknown, accountId: unknown) => (await needClient()).approveMember(String(projectId), String(accountId)))
   platform.handle(IPC.hubProjectsRemove, async (projectId: unknown, accountId: unknown) => (await needClient()).removeMember(String(projectId), String(accountId)))
   platform.handle(IPC.hubInviteRegenerate, async (projectId: unknown) => (await needClient()).regenerateInvite(String(projectId)))
-  platform.handle(IPC.hubProjectsConnect, async (projectId: unknown, toAccountId: unknown) => {
+  platform.handle(IPC.hubProjectsConnect, async (projectId: unknown, toAccountId: unknown, machineLabel?: unknown) => {
     const hub = await needClient()
-    const result = await hub.connectMember(String(projectId), String(toAccountId))
+    const result = await hub.connectMember(
+      String(projectId),
+      String(toAccountId),
+      typeof machineLabel === 'string' ? machineLabel : undefined
+    )
     const keys = await loadOrCreatePeerKeyPair()
     return {
       offer: encodeOffer({ relayEndpoint: result.relayUrl, pairingToken: result.pairingToken, hostPublicKeyB64: result.toPublicKeyB64 }),

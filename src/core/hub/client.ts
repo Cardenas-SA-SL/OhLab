@@ -21,6 +21,14 @@ export interface HubClientOptions {
   webSocket?(url: string): WsLike
 }
 
+/** A non-2xx Hub answer, carrying the status so callers can tell a lost session (401) apart. */
+export class HubHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'HubHttpError'
+  }
+}
+
 const RETRY_MS = [500, 1000, 2000, 4000, 8000, 15_000]
 
 export class HubClient {
@@ -91,8 +99,8 @@ export class HubClient {
     return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/invite`)
   }
 
-  connectMember(projectId: string, toAccountId: string): Promise<{ pairingToken: string; relayUrl: string; toPublicKeyB64: string }> {
-    return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/connect`, { toAccountId })
+  connectMember(projectId: string, toAccountId: string, machineLabel?: string): Promise<{ pairingToken: string; relayUrl: string; toPublicKeyB64: string }> {
+    return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/connect`, { toAccountId, machineLabel })
   }
 
   private async authenticate(): Promise<{ account: { accountId: string; name: string }; sessionToken: string }> {
@@ -115,7 +123,19 @@ export class HubClient {
 
   private async request<T>(method: string, route: string, body?: unknown): Promise<T> {
     if (!this.session) throw new Error('Hub is not connected')
-    return this.fetchJson<T>(method, route, body, this.session)
+    try {
+      return await this.fetchJson<T>(method, route, body, this.session)
+    } catch (error) {
+      if (!(error instanceof HubHttpError) || error.status !== 401 || this.stopped) throw error
+      // The Hub keeps sessions in memory, so a Hub restart (or an expired session) turns every
+      // authenticated call into a 401 while the directory socket may not have noticed yet. Re-prove
+      // the key once and retry the same call; a second 401 is a real refusal and propagates.
+      const auth = await this.authenticate()
+      this.session = auth.sessionToken
+      this.accountId = auth.account.accountId
+      if (!this.socket) this.openSocket()
+      return this.fetchJson<T>(method, route, body, this.session)
+    }
   }
 
   private requestUnauthed<T>(method: string, route: string, body?: unknown): Promise<T> {
@@ -129,7 +149,7 @@ export class HubClient {
       body: body === undefined ? undefined : JSON.stringify(body)
     })
     const value = await response.json().catch(() => ({})) as { error?: string }
-    if (!response.ok) throw new Error(value.error || `Hub request failed (${response.status})`)
+    if (!response.ok) throw new HubHttpError(value.error || `Hub request failed (${response.status})`, response.status)
     return value as T
   }
 

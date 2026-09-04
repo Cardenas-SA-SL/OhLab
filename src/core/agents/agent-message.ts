@@ -82,6 +82,7 @@ export interface DeliveryRequest {
   notPermitted?: NotPermittedReason
   /** Set by PR 4's per-pair limiter. */
   retryAfterMs?: number
+  origin?: { memberName: string; machineLabel: string }
   /**
    * Does a live session exist for this node at all? Supplied by the caller (the shell knows;
    * `src/core` does not), defaulting to true.
@@ -434,7 +435,8 @@ export async function deliverAgentMessage(
       sourceId: req.sourceNodeId,
       sourceTitle: req.sourceTitle,
       replyTo: req.sourceNodeId,
-      body: req.body
+      body: req.body,
+      origin: req.origin
     })
     // The receipt watch opens BEFORE the bytes go out. A fast target can submit its next turn while
     // the post-write probe is still in flight — 2s locally, a real ssh round-trip remotely — and a

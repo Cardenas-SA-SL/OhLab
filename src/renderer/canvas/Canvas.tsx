@@ -390,7 +390,7 @@ import {
   invalidateProjectLaunchInfo,
   projectLaunchInfoNow
 } from '../state/projectLaunchInfo'
-import { activeSessionApi } from '../session/session'
+import { activeSessionApi, localSessionApi } from '../session/session'
 import {
   agentConfig,
   hasHooks,
@@ -407,6 +407,7 @@ import {
 } from '@shared/agents/config'
 import { withPermissionMode } from '@shared/agents/approval-mode'
 import { promptFilePathError } from '@shared/agents/launch'
+import { memberOfflineReply } from '@shared/agents/agent-messaging'
 import { parseTeamSpec } from '../lib/teamSpec'
 import { relativeTime } from '../lib/relativeTime'
 import { AgentIcon } from '../lib/agentIcons'
@@ -418,6 +419,9 @@ import {
   useSession,
   SessionProvider,
   sessionForProject,
+  sessionById,
+  workspaceSessions,
+  getSessionStores,
   presenceForProject,
   setActiveSession,
   disposeSession,
@@ -1993,7 +1997,10 @@ export function Canvas() {
     // rides the rope's delete, so it can never become an invisible link with nothing to click.
     // `--after` deps are ropes too, so their fan-in bridges hide the same way.
     const hiddenLinks = hiddenLinkIds(linkEdges, controlEdges)
-    const decorated = linkEdges.filter((e) => !hiddenLinks.has(e.id)).map((e) => {
+    const visibleIds = new Set(nodesRef.current.map((node) => node.id))
+    const decorated = linkEdges.filter((e) =>
+      !hiddenLinks.has(e.id) && visibleIds.has(e.source) && visibleIds.has(e.target)
+    ).map((e) => {
       const sel = !!e.selected
       const isNote = stickyIds.has(e.source)
       const stroke = sel ? '#ffffff' : accent
@@ -2347,7 +2354,12 @@ export function Canvas() {
     if (project.cwd && !project.ssh) {
       void useWorktrees.getState().refresh(project.cwd, boundGroups(flow))
     }
-    setLinkEdges((project.bridges ?? []).map((b) => ({ id: b.id, source: b.source, target: b.target })))
+    setLinkEdges((project.bridges ?? []).map((b) => ({
+      id: b.id,
+      source: b.source,
+      target: b.target,
+      data: b.remote ? { remote: b.remote } : undefined
+    })))
     // A wait with no rope is a wait nothing on screen explains. Ropes for `--after` are written by
     // the verbs that arm a node, so an arming that predates them (persisted `pendingLaunch`, no
     // persisted rope) — or any future path that forgets one — is healed here on the next load.
@@ -2539,7 +2551,14 @@ export function Canvas() {
           id,
           flowToNodeStates(nodesRef.current),
           viewportRef.current,
-          linkEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target })),
+          linkEdgesRef.current.map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            ...((e.data as { remote?: BridgeLink['remote'] } | undefined)?.remote
+              ? { remote: (e.data as { remote: BridgeLink['remote'] }).remote }
+              : {})
+          })),
           controlEdgesRef.current.map((e) => ({ id: e.id, source: e.source, target: e.target }))
         )
   }, [])
@@ -3334,6 +3353,18 @@ export function Canvas() {
     [setLinkEdges, markDirty, disarmDepsFor, nonWaitingRopeIds]
   )
 
+  useEffect(() => {
+    const remove = (event: Event): void => {
+      const detail = (event as CustomEvent<{ projectId: string; bridgeId: string }>).detail
+      if (!detail?.bridgeId) return
+      setLinkEdges((edges) => edges.filter((edge) => edge.id !== detail.bridgeId))
+      useProjects.getState().removeCanvasBridge(detail.projectId, detail.bridgeId)
+      markDirty()
+    }
+    window.addEventListener('ohlab:remove-remote-link', remove)
+    return () => window.removeEventListener('ohlab:remove-remote-link', remove)
+  }, [setLinkEdges, markDirty])
+
   // Route edge changes (selection) to the right store: `ctrl-` ids are control ropes (local
   // state), everything else is a context link. Ephemeral subagent/loop edges emit no changes
   // worth applying — applyEdgeChanges on unknown ids is a no-op either way.
@@ -3375,18 +3406,67 @@ export function Canvas() {
     }
     return sig
   })
+  const persistedRemoteBridgeSig = useProjects((state) =>
+    state.projects.flatMap((project) => (project.bridges ?? [])
+      .filter((bridge) => !!bridge.remote)
+      .map((bridge) => `${project.id}:${bridge.id}:${bridge.remote?.sessionId}`)).join('|')
+  )
 
   // Prune links whose endpoints were deleted, then push the link map to main (debounced) so
   // it can rewrite the per-node link files the context CLI reads.
   useEffect(() => {
     const ids = new Set(nodes.map((n) => n.id))
-    const valid = linkEdges.filter((e) => ids.has(e.source) && ids.has(e.target))
+    const valid = linkEdges.filter((e) => {
+      const remote = (e.data as { remote?: BridgeLink['remote'] } | undefined)?.remote
+      if (!remote) return ids.has(e.source) && ids.has(e.target)
+      const localId = remote.endpoint === 'source' ? e.target : e.source
+      return ids.has(localId)
+    })
     if (valid.length !== linkEdges.length) {
       setLinkEdges(valid)
       return // re-runs with the pruned set
     }
     const infoOf = (id: string) => {
       const n = nodes.find((nn) => nn.id === id)
+      const remoteEdge = valid.find((e) => {
+        const r = (e.data as { remote?: BridgeLink['remote'] } | undefined)?.remote
+        return !!r && (r.endpoint === 'source' ? e.source : e.target) === id
+      })
+      const persistedRemote = (remoteEdge?.data as { remote?: BridgeLink['remote'] } | undefined)?.remote
+      if (!n && persistedRemote) {
+        const remoteProject = useProjects
+          .getState()
+          .projects.find((p) => p.nodes.some((candidate) => candidate.id === id))
+        const rn = remoteProject?.nodes.find((candidate) => candidate.id === id)
+        const resolved = workspaceSessions().find((s) =>
+          s.source === 'relay' &&
+            (s.id === persistedRemote.sessionId ||
+              (!!persistedRemote.hostAccountId &&
+                s.hostAccountId === persistedRemote.hostAccountId &&
+                s.remoteProjectId === persistedRemote.remoteProjectId))
+        )
+        const status = resolved?.status ?? 'offline'
+        const remoteStatus = resolved
+          ? getSessionStores(resolved.id).agentStatus.store.getState().byId[id]
+          : undefined
+        return {
+          id,
+          title: rn?.title || id,
+          cwd: '',
+          sticky: false,
+          agentId: rn?.agentId,
+          sessionId: remoteStatus?.sessionId,
+          accountId: rn?.accountId,
+          remote: {
+            sessionId: resolved?.id ?? persistedRemote.sessionId,
+            remoteProjectId: resolved?.remoteProjectId ?? persistedRemote.remoteProjectId,
+            hostAccountId: persistedRemote.hostAccountId,
+            memberName: resolved?.memberName ?? persistedRemote.memberName,
+            machineLabel: resolved?.machineLabel ?? persistedRemote.machineLabel,
+            online: status === 'connected'
+          }
+        }
+      }
       const sticky = n?.type === 'sticky'
       const agentId = sticky ? undefined : agentIdOf(id)
       return {
@@ -3409,14 +3489,47 @@ export function Canvas() {
         projects,
         activeProjectId,
         (id) => useAgentStatus.getState().byId[id]?.sessionId,
-        (id) => useAgentStatus.getState().byId[id]?.agentId
+        (id) => useAgentStatus.getState().byId[id]?.agentId,
+        (bridge, id) => {
+          const saved = bridge.remote
+          if (!saved) return undefined
+          const remoteProject = projects.find((p) => p.nodes.some((n) => n.id === id))
+          const node = remoteProject?.nodes.find((n) => n.id === id)
+          const resolved = workspaceSessions().find((s) =>
+            s.source === 'relay' &&
+              (s.id === saved.sessionId ||
+                (!!saved.hostAccountId &&
+                  s.hostAccountId === saved.hostAccountId &&
+                  s.remoteProjectId === saved.remoteProjectId))
+          )
+          const remoteStatus = resolved
+            ? getSessionStores(resolved.id).agentStatus.store.getState().byId[id]
+            : undefined
+          return {
+            id,
+            title: node?.title || id,
+            cwd: '',
+            sticky: false,
+            agentId: node?.agentId,
+            sessionId: remoteStatus?.sessionId,
+            accountId: node?.accountId,
+            remote: {
+              sessionId: resolved?.id ?? saved.sessionId,
+              remoteProjectId: resolved?.remoteProjectId ?? saved.remoteProjectId,
+              hostAccountId: saved.hostAccountId,
+              memberName: resolved?.memberName ?? saved.memberName,
+              machineLabel: resolved?.machineLabel ?? saved.machineLabel,
+              online: resolved?.status === 'connected'
+            }
+          }
+        }
       ),
       ...buildLinkMap(valid, infoOf)
     }
     const t = setTimeout(() => void window.nodeTerminal.contextLink.setLinks(map), 150)
     return () => clearTimeout(t)
     // linkSessionSig is read only as an effect trigger — infoOf re-reads sessionIds via getState().
-  }, [linkEdges, nodes, setLinkEdges, agentIdOf, linkSessionSig])
+  }, [linkEdges, nodes, setLinkEdges, agentIdOf, linkSessionSig, persistedRemoteBridgeSig])
 
   // Reflect Claude nodes with unread output as a macOS Dock badge count (across all projects).
   // Subscribes to the derived count (a primitive), not the byId map, for the same reason as
@@ -3434,6 +3547,24 @@ export function Canvas() {
   useEffect(() => {
     return window.nodeTerminal.context.onUpdate((u) => useContextWindow.getState().set(u))
   }, [])
+
+  // Local hook requests for a cross-machine link are bounced through the renderer because the
+  // relay RpcClient lives here. The persisted bridge names the remote core session/project; the
+  // host then performs its own sender/project/node check before reading anything.
+  useEffect(() =>
+    window.nodeTerminal.contextLink.onRelayResolve(async (req) => {
+      const remote = sessionById(req.sessionId)
+      const result =
+        remote?.source === 'relay' && remote.status === 'connected'
+          ? await remote.api.contextLink.remoteRead({
+              projectId: req.projectId,
+              nodeId: req.nodeId,
+              kind: req.kind,
+              maxBytes: req.maxBytes
+            }).catch(() => ({ ok: false as const, reason: 'unavailable' as const }))
+          : { ok: false as const, reason: 'unavailable' as const }
+      window.nodeTerminal.contextLink.sendRelayResult({ requestId: req.requestId, result })
+    }), [])
 
   // Prevent a stray file drop (outside a terminal body) from navigating the whole window to
   // the dropped file. Terminal nodes handle their own drop and stopPropagation, so this only
@@ -7484,6 +7615,48 @@ export function Canvas() {
     // debugger + drops the ledger entry), not just hides the chip. Read fresh, like every other row.
     const drivenHere =
       ids.length === 1 && drivingNodeIds(useBrowserLease.getState().entries, Date.now()).has(ids[0])
+    const remoteLinkTargets: MenuItem[] = ids.length === 1 && session.source === 'local'
+      ? useProjects.getState().projects.flatMap((project) => {
+          const remoteSession = sessionForProject(project.id)
+          if (remoteSession.source !== 'relay' || remoteSession.status !== 'connected' || project.unavailable)
+            return []
+          return project.nodes
+            .filter((node) => !!node.agentId && canContextLink(node.agentId as AgentId))
+            .map((node): MenuItem => ({
+              label: `${remoteSession.memberName ?? remoteSession.label} / ${node.title || node.id}`,
+              onClick: () => {
+                const remote: NonNullable<BridgeLink['remote']> = {
+                  endpoint: 'target',
+                  sessionId: remoteSession.id,
+                  remoteProjectId: remoteSession.remoteProjectId ?? project.id,
+                  hostAccountId: remoteSession.hostAccountId ?? remoteSession.id,
+                  memberName: remoteSession.memberName ?? remoteSession.label,
+                  machineLabel: remoteSession.machineLabel ?? remoteSession.label
+                }
+                const bridge: BridgeLink = {
+                  id: `bridge-${ids[0]}-${node.id}`,
+                  source: ids[0],
+                  target: node.id,
+                  remote
+                }
+                setLinkEdges((edges) => {
+                  if (edges.some((edge) => pairKey(edge.source, edge.target) === pairKey(ids[0], node.id)))
+                    return edges
+                  return [...edges, {
+                    id: bridge.id,
+                    source: bridge.source,
+                    target: bridge.target,
+                    data: { remote }
+                  }]
+                })
+                const localProjectId = useProjects.getState().activeProjectId
+                if (localProjectId)
+                  useProjects.getState().appendCanvasLinks(localProjectId, { bridges: [bridge] })
+                markDirty()
+              }
+            }))
+        })
+      : []
     return tidySeparators([
       { type: 'label', label: ids.length > 1 ? `${ids.length} nodes` : '1 node' },
       ...(drivenHere
@@ -7579,6 +7752,13 @@ export function Canvas() {
           ] as MenuItem[])
         : []),
       { type: 'separator' },
+      ...(remoteLinkTargets.length
+        ? ([{
+            type: 'submenu',
+            label: 'Link to remote agent…',
+            children: remoteLinkTargets
+          }] as MenuItem[])
+        : []),
       ...(isHidden('duplicate', hidden)
         ? []
         : ([
@@ -7924,7 +8104,9 @@ export function Canvas() {
     gatewayModels,
     gatewayStatus,
     gatewayError,
-    session.source
+    session.source,
+    setLinkEdges,
+    markDirty
   ])
 
   /** "New <agent>" creation entries shared by the pane and group context menus.
@@ -8844,9 +9026,29 @@ export function Canvas() {
   // reply on BOTH confirm and cancel. Every path replies EXACTLY ONCE so the awaiting CLI call in
   // main never hangs to its 120s timeout.
   useEffect(() => {
-    return api.onAgentControl(async ({ requestId, sourceNodeId, verb, args }) => {
+    const localApi = localSessionApi()
+    return localApi.onAgentControl(async ({ requestId, sourceNodeId, verb, args }) => {
       const reply = (r: { ok: boolean; message?: string; result?: unknown; error?: string }) =>
-        api.sendAgentControlResult({ requestId, ...r })
+        localApi.sendAgentControlResult({ requestId, ...r })
+      const relayRows = () => useProjects.getState().projects.flatMap((project) => {
+        const owner = sessionForProject(project.id)
+        if (owner.source !== 'relay') return []
+        return project.nodes.map((node) => ({
+          id: node.id,
+          kind: node.kind ?? 'terminal',
+          title: node.title ?? '',
+          member: owner.memberName ?? owner.label,
+          machine: owner.machineLabel ?? owner.label,
+          online: owner.status === 'connected' && !project.unavailable,
+          linked: useProjects.getState().projects.some((candidate) =>
+            (candidate.bridges ?? []).some((bridge) =>
+              !!bridge.remote &&
+              ((bridge.source === sourceNodeId && bridge.target === node.id) ||
+                (bridge.target === sourceNodeId && bridge.source === node.id))
+            )
+          )
+        }))
+      })
       // `--dry-run` (issue #532): validate + report, mutate nothing. Only DRY_RUN_VERBS reach
       // this process with the flag set — main's setControlHandler refuses it for every other
       // verb before forwarding — so the per-case branches below are the whole renderer story:
@@ -8894,6 +9096,36 @@ export function Canvas() {
           reply({ ok: false, error: 'source node is not a control-capable agent' })
           return
         }
+        const targetProject = useProjects
+          .getState()
+          .projects.find((p) => p.nodes.some((n) => n.id === targetId))
+        const targetSession = targetProject ? sessionForProject(targetProject.id) : undefined
+        if (targetSession?.source === 'relay') {
+          if (targetSession.status !== 'connected' || targetProject?.unavailable) {
+            reply(memberOfflineReply(targetSession.memberName))
+            return
+          }
+          const sourceTitle =
+            (live?.data.title as string | undefined) ?? stored?.title ?? sourceNodeId
+          const sourceProject = useProjects
+            .getState()
+            .projects.find((p) => p.nodes.some((n) => n.id === sourceNodeId))
+          const remoteReply = await targetSession.api.agentMessage.deliver({
+            verb,
+            sourceNodeId,
+            targetNodeId: targetId,
+            body: args.text ?? '',
+            remoteOrigin: {
+              memberName: useSettings.getState().settings.hubAccountName || 'Remote member',
+              machineLabel: sourceProject
+                ? sessionForProject(sourceProject.id).label
+                : 'this computer',
+              sourceTitle
+            }
+          }).catch(() => memberOfflineReply(targetSession.memberName))
+          reply(remoteReply)
+          return
+        }
         // The SAME per-node lock every renderer-driven run that types into the target pane takes
         // (restart, hibernate-exit, wake-resume, the confirmed `write`). Main serialises
         // deliveries against each other; this lock serialises them against those runs — a
@@ -8901,7 +9133,7 @@ export function Canvas() {
         let delivered: { ok: boolean; message?: string; result?: unknown; error?: string } | null =
           null
         const outcome = await guardConcurrentRestart(targetId, async () => {
-          delivered = await api.agentMessage.deliver({
+          delivered = await localApi.agentMessage.deliver({
             verb,
             sourceNodeId,
             targetNodeId: targetId,
@@ -9281,11 +9513,22 @@ export function Canvas() {
             return
           }
           if (!needsLiveCanvas(verb)) {
-            const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [])
+            const rows = [
+              ...storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? []),
+              ...relayRows()
+            ]
             reply({
               ok: true,
               result: rows,
-              message: rows.map((n) => `${n.id} [${n.kind}] ${n.title}`).join('\n')
+              message: rows.map((n) => {
+                const remote = n as typeof n & { member?: string; machine?: string; online?: boolean }
+                return `${n.id} [${n.kind}] ${n.title}` +
+                  (remote.member
+                    ? ` — ${remote.member} / ${remote.machine} (${remote.online ? 'online' : 'offline'})${
+                        (remote as typeof remote & { linked?: boolean }).linked ? ' — LINKED' : ''
+                      }`
+                    : '')
+              }).join('\n')
             })
             return
           }
@@ -9810,12 +10053,12 @@ export function Canvas() {
             // separately would be seven round trips to learn the one thing that changes what it
             // does next.
             const st = useAgentStatus.getState().byId
-            const list = nodesRef.current.map((n) => ({
+            const list = [...nodesRef.current.map((n) => ({
               id: n.id,
               kind: n.type,
               title: n.data.title as string,
               ...(st[n.id]?.lastTurnError ? { lastTurnErrored: true } : {})
-            }))
+            })), ...relayRows()]
             reply({
               ok: true,
               result: list,
@@ -9823,7 +10066,8 @@ export function Canvas() {
                 .map(
                   (n) =>
                     `${n.id} [${n.kind}] ${n.title}` +
-                    (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '')
+                    ('lastTurnErrored' in n && n.lastTurnErrored ? ' — LAST TURN ERRORED' : '') +
+                    ('member' in n ? ` — ${n.member} / ${n.machine} (${n.online ? 'online' : 'offline'})${n.linked ? ' — LINKED' : ''}` : '')
                 )
                 .join('\n')
             })
@@ -10306,7 +10550,54 @@ export function Canvas() {
               reply({ ok: false, error: `link: --from names no existing node (${from})` })
               return
             }
-            const { linked, skipped } = bridgeTo(from, targets)
+            const localTargets = targets.filter((id) => !!linkEndpointOf(id))
+            const remoteLinked: string[] = []
+            const remoteSkipped: Array<{ id: string; why: string }> = []
+            for (const targetId of targets.filter((id) => !localTargets.includes(id))) {
+              const remoteProject = useProjects
+                .getState()
+                .projects.find((project) => project.nodes.some((node) => node.id === targetId))
+              const remoteNode = remoteProject?.nodes.find((node) => node.id === targetId)
+              const remoteSession = remoteProject ? sessionForProject(remoteProject.id) : undefined
+              if (
+                !remoteProject ||
+                !remoteNode?.agentId ||
+                !canContextLink(remoteNode.agentId as AgentId) ||
+                remoteSession?.source !== 'relay'
+              ) {
+                remoteSkipped.push({ id: targetId, why: 'no such context-link-capable node' })
+                continue
+              }
+              if (remoteSession.status !== 'connected' || remoteProject.unavailable) {
+                remoteSkipped.push({ id: targetId, why: 'member offline' })
+                continue
+              }
+              const remote: NonNullable<BridgeLink['remote']> = {
+                endpoint: 'target',
+                sessionId: remoteSession.id,
+                remoteProjectId: remoteSession.remoteProjectId ?? remoteProject.id,
+                hostAccountId: remoteSession.hostAccountId ?? remoteSession.id,
+                memberName: remoteSession.memberName ?? remoteSession.label,
+                machineLabel: remoteSession.machineLabel ?? remoteSession.label
+              }
+              const edge = {
+                id: `bridge-${from}-${targetId}`,
+                source: from,
+                target: targetId,
+                data: { remote }
+              }
+              if (!linkEdgesRef.current.some((candidate) =>
+                pairKey(candidate.source, candidate.target) === pairKey(from, targetId))) {
+                setLinkEdges((edges) => [...edges, edge])
+                remoteLinked.push(targetId)
+                markDirty()
+              } else {
+                remoteSkipped.push({ id: targetId, why: 'already linked' })
+              }
+            }
+            const planned = bridgeTo(from, localTargets)
+            const linked = [...planned.linked, ...remoteLinked]
+            const skipped = [...planned.skipped, ...remoteSkipped]
             if (linked.length === 0) {
               reply({
                 ok: false,

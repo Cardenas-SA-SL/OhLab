@@ -58,6 +58,8 @@ export interface EnvelopeParts {
   sourceTitle: string
   replyTo: string
   body: string
+  /** Human-readable authenticated relay attribution. Display only, never authority. */
+  origin?: { memberName: string; machineLabel: string }
 }
 
 /**
@@ -125,7 +127,11 @@ export function buildEnvelope(p: EnvelopeParts): string {
   const nonce = oneLine(p.nonce)
   return [
     `--- ${FRAME_WORD} ${nonce} ---`,
-    `from: ${oneLine(p.sourceTitle)} (${oneLine(p.sourceId)})`,
+    `from: ${
+      p.origin
+        ? `${oneLine(p.origin.memberName)}'s agent '${oneLine(p.sourceTitle)}' on ${oneLine(p.origin.machineLabel)}`
+        : `${oneLine(p.sourceTitle)} (${oneLine(p.sourceId)})`
+    }`,
     `reply-to: ${oneLine(p.replyTo)}`,
     sanitizePasteText(p.body),
     `--- END ${FRAME_WORD} ${nonce} ---`

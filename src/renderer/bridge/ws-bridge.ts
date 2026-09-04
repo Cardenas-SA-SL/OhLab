@@ -674,6 +674,31 @@ export function buildAgentApi(
   }
 }
 
+/** The two agent-to-agent collaboration RPCs shared by Server Edition and relay tabs. The host
+ * applies sender/project checks; this bridge only preserves request/receipt semantics. */
+export function buildAgentCollaborationApi(
+  client: RpcClient
+): Pick<NodeTerminalApi, 'agentMessage' | 'contextLink'> {
+  return {
+    agentMessage: {
+      deliver: (req) =>
+        client.request(IPC.agentMessageDeliver, req) as ReturnType<
+          NodeTerminalApi['agentMessage']['deliver']
+        >
+    },
+    contextLink: {
+      setLinks: async () => undefined,
+      info: async () => ({ shimPath: '' }),
+      remoteRead: (req) =>
+        client.request(IPC.contextLinkRemoteRead, req) as ReturnType<
+          NodeTerminalApi['contextLink']['remoteRead']
+        >,
+      onRelayResolve: () => () => undefined,
+      sendRelayResult: () => undefined
+    }
+  }
+}
+
 /**
  * Build the `canvas` namespace over an RpcClient: a cast out (`canvas:mut`) and a subscription in on
  * the same channel. The server stamps each mutation with the total order (`seq`) and reflects it to
@@ -1058,6 +1083,7 @@ export async function installWsBridge(): Promise<boolean> {
     ...buildRealApi(client),
     ...buildFilesApi(client),
     ...buildAgentApi(client),
+    ...buildAgentCollaborationApi(client),
     ...buildCanvasApi(client),
     ...buildPresenceApi(client),
     ...buildSpeechApi(client),

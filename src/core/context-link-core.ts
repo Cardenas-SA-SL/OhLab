@@ -94,6 +94,8 @@ export function buildLinkedContextInstructions(shimPath: string): string {
     '',
     'Only meaningful inside OhLab (NODETERM_NODE_ID set) with a linked edge. If the CLI',
     'says "Not an OhLab session" or "No linked nodes", there is nothing to read — do not retry.',
+    'Links may point to agents on an online relay member. `list` names their member/machine;',
+    'an offline linked node remains listed and reads as "linked node is offline".',
     '',
     ...codexSandboxGuidanceLines(CONTEXT_UNREACHABLE_MSG)
   ].join('\n')
@@ -130,6 +132,7 @@ export interface LinkDocEntry {
   sessionId?: string
   /** Present when this entry is a sticky note: its text. Note entries have no transcript/terminal. */
   note?: string
+  remote?: ContextLinkInfo['remote']
 }
 export interface LinkDoc {
   self: { id: string }
@@ -158,6 +161,7 @@ export function buildLinkDoc(
       if (!isNote && n.agentId) entry.agent = n.agentId
       if (!isNote && n.sessionId) entry.sessionId = n.sessionId
       if (isNote) entry.note = n.note
+      if (!isNote && n.remote) entry.remote = n.remote
       return entry
     }),
     tmuxBin: ctx.tmuxBin,

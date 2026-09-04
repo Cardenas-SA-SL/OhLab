@@ -47,6 +47,9 @@ export interface RelayTabDeps {
   buildApi?: (connectionId: string) => RelayApiHandle
   /** TEST SEAM: approval-timeout backstop (default `APPROVAL_TIMEOUT_MS`). */
   timeoutMs?: number
+  hostAccountId?: string
+  memberName?: string
+  machineLabel?: string
 }
 
 export interface RelayTab {
@@ -100,6 +103,10 @@ export async function openRelayTab(
         ? deps.adoptProject({ ...hostProject, remote: true }).id
         : deps.addProject(label).id
     bindProjectToSession(projectId, session.id)
+    session.remoteProjectId = hostProject?.id
+    session.hostAccountId = deps.hostAccountId
+    session.memberName = deps.memberName ?? label
+    session.machineLabel = deps.machineLabel ?? label
     setActiveSession(session.id)
     deps.setActiveProject(projectId)
 

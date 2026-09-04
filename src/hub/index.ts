@@ -7,6 +7,13 @@ import { HubDirectory } from './directory'
 import { createRelay } from './relay'
 import { HubTokenStore } from './tokens'
 
+/** Wire `exp` is UNIX SECONDS (the contract the desktop's standing host applies as `exp * 1000`);
+ *  the store keeps milliseconds internally. Emitting ms here overflowed the refresh timer into a
+ *  1 ms re-mint loop (36k relay connects in one session). */
+function expSeconds(expMs: number): number {
+  return Math.floor(expMs / 1000)
+}
+
 export interface HubConfig {
   host?: string
   port?: number
@@ -90,7 +97,7 @@ export function createHub(config: HubConfig): Hub {
         const item = body.standing === true && typeof body.hostId === 'string'
           ? await tokens.mintStandingHost(body.hostId, ttl)
           : await tokens.mintPair(ttl)
-        send(res, 201, { pairingId: item.pairingId, pairingToken: item.token, exp: item.exp })
+        send(res, 201, { pairingId: item.pairingId, pairingToken: item.token, exp: expSeconds(item.exp) })
         return
       }
 
@@ -99,7 +106,7 @@ export function createHub(config: HubConfig): Hub {
         if (typeof body.hostPublicKeyB64 !== 'string') throw new Error('hostPublicKeyB64 is required')
         const id = hostId(body.hostPublicKeyB64)
         const item = await tokens.mintStandingHost(id)
-        send(res, 201, { pairingToken: item.token, hostId: id, exp: item.exp })
+        send(res, 201, { pairingToken: item.token, hostId: id, exp: expSeconds(item.exp) })
         return
       }
 
@@ -124,7 +131,7 @@ export function createHub(config: HubConfig): Hub {
           return
         }
         const item = await tokens.mintStandingClient(device.hostId)
-        send(res, 201, { pairingToken: item.token, hostId: device.hostId, exp: item.exp })
+        send(res, 201, { pairingToken: item.token, hostId: device.hostId, exp: expSeconds(item.exp) })
         return
       }
 
@@ -206,6 +213,10 @@ export function createHub(config: HubConfig): Hub {
         const body = await json(req)
         const projectId = decodeURIComponent(connect[1])
         const toAccountId = String(body.toAccountId ?? '')
+        const machineLabel = String(body.machineLabel ?? `${account!.name}'s computer`)
+          .replace(/[\r\n\t]+/g, ' ')
+          .trim()
+          .slice(0, 80) || `${account!.name}'s computer`
         const peers = directory.approvedPeers(projectId, account!.accountId, toAccountId)
         if (!directory.isOnline(toAccountId)) return send(res, 409, { error: 'member is offline' })
         const item = await tokens.mintPair()
@@ -215,10 +226,11 @@ export function createHub(config: HubConfig): Hub {
           fromAccountId: account!.accountId,
           fromPublicKeyB64: peers.from.publicKeyB64,
           pairingToken: item.token,
-          relayUrl: relayUrl(req)
+          relayUrl: relayUrl(req),
+          machineLabel
         }
         if (!directory.push(toAccountId, event)) return send(res, 409, { error: 'member is offline' })
-        return send(res, 201, { pairingId: item.pairingId, pairingToken: item.token, exp: item.exp, relayUrl: relayUrl(req), toPublicKeyB64: peers.to.publicKeyB64 })
+        return send(res, 201, { pairingId: item.pairingId, pairingToken: item.token, exp: expSeconds(item.exp), relayUrl: relayUrl(req), toPublicKeyB64: peers.to.publicKeyB64 })
       }
 
       send(res, 404, { error: 'not found' })

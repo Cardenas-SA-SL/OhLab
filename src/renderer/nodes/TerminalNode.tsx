@@ -35,7 +35,7 @@ import {
 import { fileLinkDialect } from '../terminal/file-link-dialect'
 import { hostPlatformFor } from '../terminal/host-platform'
 import { sshFs } from '../terminal/ssh-fs'
-import type { FsApi, PendingLaunch } from '@shared/types'
+import type { BridgeLink, FsApi, PendingLaunch } from '@shared/types'
 import {
   attachReplay,
   closedByLabel,
@@ -1071,6 +1071,16 @@ export function TerminalNode({
   // namespaces (pty, fs) go through it; app-global ones (clipboard, shell) stay on the global.
   const session = useSession()
   const { api } = session
+  const remoteLinksJson = useProjects((state) => JSON.stringify(
+    state.projects.flatMap((project) =>
+      (project.bridges ?? [])
+        .filter((bridge) => !!bridge.remote && (bridge.source === id || bridge.target === id))
+        .map((bridge) => ({ projectId: project.id, bridge }))
+    )))
+  const remoteLinks = JSON.parse(remoteLinksJson) as Array<{
+    projectId: string
+    bridge: BridgeLink
+  }>
   // The path dialect belongs to the core that owns this tab's filesystem, not necessarily this
   // browser/window. Server Edition and relay tabs can be viewed from a different OS, so their
   // core reports `process.platform` through the already-core-bound tmux status call. Keep it in a
@@ -4939,6 +4949,23 @@ export function TerminalNode({
             {status.session}
           </span>
         )}
+        {remoteLinks.map(({ projectId, bridge }) => (
+          <button
+            key={`${projectId}:${bridge.id}`}
+            className="node-account-chip nodrag"
+            title={`Linked to ${bridge.remote?.memberName}/${
+              bridge.source === id ? bridge.target : bridge.source
+            }. Click to remove.`}
+            onClick={(event) => {
+              event.stopPropagation()
+              window.dispatchEvent(new CustomEvent('ohlab:remove-remote-link', {
+                detail: { projectId, bridgeId: bridge.id }
+              }))
+            }}
+          >
+            ⇄ {bridge.remote?.memberName}/{bridge.source === id ? bridge.target : bridge.source}
+          </button>
+        ))}
         {/* The fallback, made visible. A Codex node that could not get a managed shared identity
             runs a perfectly good plain `codex` — but the user has to be able to SEE that it did,
             without reading a log, so the chip states it and its tooltip says why. Absent (and the

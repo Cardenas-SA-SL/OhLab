@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { resolveDeliveryScope, scopeRefusal, type ScopeProject } from './agent-message-scope'
+import {
+  resolveDeliveryScope,
+  resolveRemoteDeliveryScope,
+  scopeRefusal,
+  type ScopeProject
+} from './agent-message-scope'
 import { decideDelivery, decidePreProbe, RETRYABLE } from './agent-message-decide'
 import { MANAGED_SCRIPT_REVISION } from './hooks/managed-script'
 import type { DeliveryFacts } from './agent-message-decide'
@@ -249,6 +254,23 @@ describe('scopeRefusal feeds decideDelivery, and the refusal is terminal', () =>
         notPermitted: scopeRefusal(scope)
       })
     ).toEqual({ kind: 'notPermitted', reason: 'cross-project' })
+  })
+})
+
+describe('relay peer scope is closed by default', () => {
+  it('allows only a unique node in the project granted to the peer', () => {
+    expect(resolveRemoteDeliveryScope(projects, 'p-alpha', 'remote-a', 'a-2')).toEqual({
+      kind: 'same-project', projectId: 'p-alpha'
+    })
+    expect(resolveRemoteDeliveryScope(projects, undefined, 'remote-a', 'a-2')).toMatchObject({
+      kind: 'refused', reason: 'cross-project'
+    })
+    expect(resolveRemoteDeliveryScope(projects, 'p-alpha', 'remote-a', 'b-1')).toMatchObject({
+      kind: 'refused', reason: 'cross-project', targetFound: true
+    })
+    expect(resolveRemoteDeliveryScope(projects, 'p-alpha', 'bad\0source', 'a-2')).toMatchObject({
+      kind: 'refused', reason: 'unaddressable-node-id'
+    })
   })
 })
 

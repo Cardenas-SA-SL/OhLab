@@ -24,6 +24,13 @@ export type { UiSink }
 /** Module singleton: one sink set for the whole desktop process (like the Server Edition's, which
  *  lives on its ServerPlatform). platform-electron.ts reads it; 4c's relay connection feeds it. */
 const registry = new UiSinkRegistry()
+export interface RelayPeerScope {
+  sharedProjectId?: string
+  accountId?: string
+  memberName: string
+  machineLabel: string
+}
+const scopes = new Map<number, RelayPeerScope>()
 let onPeerGone: ((id: number) => void) | null = null
 
 /** A peer sink that keeps THROWING is a dead connection (a half-closed relay socket), and the
@@ -39,8 +46,17 @@ export function peerRegistry(): UiSinkRegistry {
 
 /** A relay peer connected. `id` must come from `allocateRelayClientId()`. The caller joins the
  *  presence hub itself (as ws.ts does), so it can pick the peer `kind`. */
-export function registerPeerSink(id: number, sink: UiSink): void {
+export function registerPeerSink(id: number, sink: UiSink, scope?: RelayPeerScope): void {
   registry.register(id, sink)
+  if (scope) scopes.set(id, scope)
+}
+
+export function relayPeerScope(id: number): RelayPeerScope | undefined {
+  return scopes.get(id)
+}
+
+export function isRelayPeer(id: number): boolean {
+  return registry.has(id)
 }
 
 /**
@@ -69,6 +85,7 @@ export function unregisterPeerSink(id: number): void {
         ' stay frozen for every other viewer. This is a boot-wiring bug in src/main/index.ts.'
     )
   registry.unregister(id)
+  scopes.delete(id)
 }
 
 /** Boot wiring (src/main/index.ts), analogous to src/server/index.ts's platform.setFlowController /

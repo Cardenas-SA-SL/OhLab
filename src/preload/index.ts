@@ -460,7 +460,9 @@ const api: NodeTerminalApi = {
     joinProject: (code) => ipcRenderer.invoke(IPC.hubProjectsJoin, code),
     approveMember: (projectId, accountId) => ipcRenderer.invoke(IPC.hubProjectsApprove, projectId, accountId),
     removeMember: (projectId, accountId) => ipcRenderer.invoke(IPC.hubProjectsRemove, projectId, accountId),
-    connectMember: (projectId, accountId) => ipcRenderer.invoke(IPC.hubProjectsConnect, projectId, accountId),
+    connectMember: (projectId, accountId, machineLabel) => machineLabel === undefined
+      ? ipcRenderer.invoke(IPC.hubProjectsConnect, projectId, accountId)
+      : ipcRenderer.invoke(IPC.hubProjectsConnect, projectId, accountId, machineLabel),
     regenerateInvite: (projectId) => ipcRenderer.invoke(IPC.hubInviteRegenerate, projectId),
     onEvent: subscribeHubEvent
   },
@@ -679,7 +681,14 @@ const api: NodeTerminalApi = {
   },
   contextLink: {
     setLinks: (map) => ipcRenderer.invoke(IPC.contextLinkSetLinks, map),
-    info: () => ipcRenderer.invoke(IPC.contextLinkInfo)
+    info: () => ipcRenderer.invoke(IPC.contextLinkInfo),
+    remoteRead: (req) => ipcRenderer.invoke(IPC.contextLinkRemoteRead, req),
+    onRelayResolve: (listener) => {
+      const handler = (_e: unknown, req: Parameters<typeof listener>[0]) => listener(req)
+      ipcRenderer.on(IPC.contextLinkRelayResolve, handler)
+      return () => ipcRenderer.removeListener(IPC.contextLinkRelayResolve, handler)
+    },
+    sendRelayResult: (result) => ipcRenderer.send(IPC.contextLinkRelayResult, result)
   },
   boardLog: {
     append: (projectId, entry) => ipcRenderer.invoke(IPC.boardLogAppend, projectId, entry),

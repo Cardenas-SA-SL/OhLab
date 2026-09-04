@@ -353,7 +353,12 @@ export function renderList(doc: LinkDoc): string {
   if (!doc.links.length) return 'No linked nodes.'
   return [
     'Linked nodes:',
-    ...doc.links.map((n) => `- ${n.title}${n.note != null ? ' (note)' : ''} (id: ${n.id})`)
+    ...doc.links.map((n) => {
+      const owner = n.remote
+        ? ` — ${n.remote.memberName} / ${n.remote.machineLabel} (${n.remote.online ? 'online' : 'offline'})`
+        : ''
+      return `- ${n.title}${n.note != null ? ' (note)' : ''} (id: ${n.id})${owner}`
+    })
   ].join('\n')
 }
 
@@ -409,6 +414,9 @@ export async function renderContextLink(
   const picked = pickLinkNode(doc, args.node)
   if ('message' in picked) return picked.message
   const node = picked.node
+
+  if (node.remote && !node.remote.online)
+    return `Linked node is offline: ${node.remote.memberName} / ${node.remote.machineLabel}.`
 
   if (node.note != null) return renderNote(node, verb)
 

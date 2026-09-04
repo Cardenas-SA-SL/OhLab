@@ -58,6 +58,7 @@ export interface ConnectRelayHostOptions {
   /** The single project this hosting session shares with the peer. Undefined → unscoped (legacy
    *  behaviour: the peer sees the whole workspace). Held on the session for Task 2's scoped serve. */
   sharedProjectId?: string
+  peerScope?: { accountId?: string; memberName: string; machineLabel: string }
   /** The SAS is known — ask the human to compare it. */
   onPeerPending(session: RelayHostSession): void
   /** Mutually approved: the peer is a CorePlatform client of this core now. */
@@ -163,7 +164,7 @@ export function connectRelayHost(opts: ConnectRelayHostOptions): RelayHostSessio
       // DIES. RelaySocket.bufferedAmount() is honest (ws.bufferedAmount + the pre-open queue).
       // Never make this a constant.
       bufferedAmount: () => socket.bufferedAmount()
-    })
+    }, opts.peerScope ? { ...opts.peerScope, sharedProjectId: opts.sharedProjectId } : undefined)
     // Join AFTER registering the sink, so the hub's `presence:sync` sendTo lands on a live sink (the
     // order src/server/ws.ts uses). A peer desktop is a 'desktop' peer, not a 'phone'.
     presenceHub.join(id, 'desktop')

@@ -180,3 +180,38 @@ describe('handleContextLinkRequest — remote (SSH) reads', () => {
     )
   })
 })
+
+describe('handleContextLinkRequest — relay reads', () => {
+  const remote = {
+    sessionId: 'relay-1', remoteProjectId: 'host-p', hostAccountId: 'acct-b',
+    memberName: 'Jorge', machineLabel: "Jorge's PC", online: true
+  }
+
+  it('gets transcript and terminal bytes only through the narrow relay reader', async () => {
+    const readRelayContext = vi.fn(async (_node, kind: 'transcript' | 'terminal') =>
+      kind === 'transcript' ? CLAUDE_LINE : 'remote pane'
+    )
+    start({ readRelayContext })
+    await setLinks({
+      'node-A': [{ id: 'node-R', title: 'Remote', agentId: 'claude', remote }]
+    })
+    expect(await handleContextLinkRequest({ verb: 'summary', nodeId: 'node-A', args: {} }))
+      .toContain('user: ship it')
+    expect(await handleContextLinkRequest({ verb: 'terminal', nodeId: 'node-A', args: {} }))
+      .toContain('remote pane')
+    expect(readRelayContext).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an offline member listed and does not attempt a read', async () => {
+    const readRelayContext = vi.fn(async () => CLAUDE_LINE)
+    start({ readRelayContext })
+    await setLinks({
+      'node-A': [{ id: 'node-R', title: 'Remote', agentId: 'claude', remote: { ...remote, online: false } }]
+    })
+    expect(await handleContextLinkRequest({ verb: 'list', nodeId: 'node-A', args: {} }))
+      .toContain("Jorge's PC (offline)")
+    expect(await handleContextLinkRequest({ verb: 'summary', nodeId: 'node-A', args: {} }))
+      .toContain('Linked node is offline')
+    expect(readRelayContext).not.toHaveBeenCalled()
+  })
+})

@@ -291,4 +291,31 @@ describe('initServerContextLink', () => {
     writes.mockRestore()
     await link.stop()
   })
+
+  it('omits cross-machine bridges because Server Edition has no relay-session registry', () => {
+    const map = deriveLinkMap({
+      canvases: () => [{
+        id: 'p1',
+        nodes: [node('term-a'), node('term-b')],
+        bridges: [
+          bridge('term-a', 'term-b'),
+          {
+            id: 'remote',
+            source: 'term-a',
+            target: 'remote-node',
+            remote: {
+              endpoint: 'target',
+              sessionId: 'relay-1',
+              remoteProjectId: 'remote-project',
+              hostAccountId: 'account-b',
+              memberName: 'Jorge',
+              machineLabel: "Jorge's PC"
+            }
+          }
+        ]
+      }]
+    })
+    expect(map['term-a']?.map((entry) => entry.id)).toEqual(['term-b'])
+    expect(JSON.stringify(map)).not.toContain('remote-node')
+  })
 })

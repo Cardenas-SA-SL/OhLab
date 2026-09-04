@@ -126,6 +126,13 @@ export interface ContextLinkDeps {
   readRemoteFile?: (nodeId: string, filePath: string, maxBytes: number) => Promise<string | null>
   /** Run one command on a remote node's host and return stdout. null = it failed. */
   runRemoteCommand?: (nodeId: string, command: string) => Promise<string | null>
+  /** Relay nodes are resolved and read on their owning core. Unlike SSH, the client never sees or
+   * guesses the host's transcript path and cannot run an arbitrary command there. */
+  readRelayContext?: (
+    node: LinkDocEntry,
+    kind: 'transcript' | 'terminal',
+    maxBytes: number
+  ) => Promise<string | null>
 }
 
 // Remote transcripts are read from the END: a long-running session's file reaches tens of MB,
@@ -134,6 +141,60 @@ export interface ContextLinkDeps {
 const REMOTE_TRANSCRIPT_MAX_BYTES = 2 * 1024 * 1024
 
 const LINK_LOCATORS = { claude: locateClaude, codex: locateCodex, gemini: locateGemini, grok: locateGrok }
+
+/** Narrow relay-host primitive. Its caller must first prove the requesting peer's project grant
+ * and node membership. Paths are resolved here on the owning core and never cross from client to
+ * host, closing arbitrary-file and arbitrary-command access by construction. */
+export async function readContextNodeForRelay(
+  node: { id: string; agentId?: string; sessionId?: string; accountId?: string },
+  kind: 'transcript' | 'terminal',
+  maxBytes = REMOTE_TRANSCRIPT_MAX_BYTES
+): Promise<string | null> {
+  const safeMaxBytes = Math.min(
+    REMOTE_TRANSCRIPT_MAX_BYTES,
+    Math.max(1, Number.isFinite(maxBytes) ? Math.floor(maxBytes) : REMOTE_TRANSCRIPT_MAX_BYTES)
+  )
+  if (kind === 'terminal') return pty ? await pty.captureSession(node.id) : null
+  if (node.agentId === 'opencode') {
+    if (!node.sessionId) return null
+    try {
+      const { execFile } = await import('node:child_process')
+      return await new Promise<string | null>((resolve) => {
+        execFile('opencode', ['export', node.sessionId ?? ''], { encoding: 'utf8' }, (error, stdout) =>
+          resolve(error ? null : stdout.slice(-safeMaxBytes))
+        )
+      })
+    } catch {
+      return null
+    }
+  }
+  const info = {
+    id: node.id,
+    title: node.id,
+    agentId: node.agentId,
+    sessionId: node.sessionId,
+    accountId: node.accountId
+  }
+  const transcriptPath = await resolveLinkTranscript(info, {
+    hooked: transcriptPathOf,
+    locators: LINK_LOCATORS
+  })
+  if (!transcriptPath) return null
+  try {
+    const fh = await fs.promises.open(transcriptPath, 'r')
+    try {
+      const stat = await fh.stat()
+      const length = Math.min(safeMaxBytes, stat.size)
+      const buf = Buffer.alloc(length)
+      await fh.read(buf, 0, length, Math.max(0, stat.size - length))
+      return buf.toString('utf8')
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return null
+  }
+}
 
 // The link documents, by node id — the same objects written to disk, kept in memory because they
 // are what authorizes a read (a node may only ever name a link inside ITS OWN document).
@@ -160,11 +221,13 @@ async function writeLinkFiles(map: ContextLinkMap): Promise<void> {
       if (n.note != null || resolved.has(n.id)) continue
       resolved.set(
         n.id,
-        await resolveLinkTranscript(n, {
-          hooked: transcriptPathOf,
-          locators: LINK_LOCATORS,
-          isRemote: deps.isRemoteNode
-        })
+        n.remote
+          ? ''
+          : await resolveLinkTranscript(n, {
+              hooked: transcriptPathOf,
+              locators: LINK_LOCATORS,
+              isRemote: deps.isRemoteNode
+            })
       )
     }
   }
@@ -187,6 +250,12 @@ async function writeLinkFiles(map: ContextLinkMap): Promise<void> {
 /** Read a linked node's transcript bytes — from the remote host when it lives there, else from
  *  this machine's disk. null when there is no path yet or it could not be read. */
 async function fetchTranscript(node: LinkDocEntry): Promise<string | null> {
+  if (node.remote) {
+    if (!node.remote.online) return null
+    return deps.readRelayContext
+      ? deps.readRelayContext(node, 'transcript', REMOTE_TRANSCRIPT_MAX_BYTES)
+      : null
+  }
   if (!node.transcriptPath) return null
   if (deps.isRemoteNode?.(node.id)) {
     // The path was jailed at ingest (isSafeRemoteTranscriptPath, where the hook payload arrives),
@@ -204,6 +273,12 @@ async function fetchTranscript(node: LinkDocEntry): Promise<string | null> {
 
 async function fetchOpencodeExport(node: LinkDocEntry): Promise<string | null> {
   if (!node.sessionId) return null
+  if (node.remote) {
+    if (!node.remote.online) return null
+    return deps.readRelayContext
+      ? deps.readRelayContext(node, 'transcript', REMOTE_TRANSCRIPT_MAX_BYTES)
+      : null
+  }
   if (deps.isRemoteNode?.(node.id)) {
     return deps.runRemoteCommand
       ? await deps.runRemoteCommand(node.id, `opencode export ${shellQuote(node.sessionId)}`)
@@ -231,7 +306,13 @@ const fetchers: ContextLinkFetch = {
   transcript: fetchTranscript,
   // captureSession already knows a remote node's tmux lives on the host, so this one call
   // covers both surfaces.
-  terminal: async (node) => (pty ? await pty.captureSession(node.id) : ''),
+  terminal: async (node) => {
+    if (node.remote) {
+      if (!node.remote.online) return ''
+      return (await deps.readRelayContext?.(node, 'terminal', REMOTE_TRANSCRIPT_MAX_BYTES)) ?? ''
+    }
+    return pty ? await pty.captureSession(node.id) : ''
+  },
   opencodeExport: fetchOpencodeExport
 }
 

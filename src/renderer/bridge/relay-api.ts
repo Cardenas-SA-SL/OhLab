@@ -37,6 +37,7 @@ import {
   buildRealApi,
   buildFilesApi,
   buildAgentApi,
+  buildAgentCollaborationApi,
   buildCanvasApi,
   buildPresenceApi,
   buildClaudeApi,
@@ -90,6 +91,7 @@ export function buildRelayApi(connectionId: string, transport?: FrameTransport):
     githubIssues: github.githubIssues,
     githubControl: local.githubControl,
     ...buildAgentApi(client), // onAgentStatus / onSubagentActivity — the host's agent hooks
+    ...buildAgentCollaborationApi(client),
     ...buildCanvasApi(client), // canvas sync against the host's reflector
     ...buildPresenceApi(client), // the host's presence hub
     // `cliCaps` is REAL over the relay so the --permission-mode auto version gate probes the HOST's
@@ -156,9 +158,8 @@ export function buildRelayApi(connectionId: string, transport?: FrameTransport):
     // Browser control never rides the relay either (no CDP off the desktop) — inert no-ops.
     onBrowserControlResolve: stub.onBrowserControlResolve,
     sendBrowserControlResolveResult: stub.sendBrowserControlResolveResult,
-    // Messaging rides the same decision: the browser client is never a sender (constraint 5 of
-    // the messaging plan — the phone drives canvas control over relay→IPC, not /control/*).
-    agentMessage: stub.agentMessage
+    // agentMessage and contextLink.remoteRead are real above. The host sender-checks both against
+    // the authenticated relay peer's one granted project.
   } satisfies NodeTerminalApi
 
   return {

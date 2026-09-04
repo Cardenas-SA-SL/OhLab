@@ -118,6 +118,7 @@ interface ProjectsState {
    * `ctrl-<source>-<target>` — two ids, one relationship each. No-op for an unknown project.
    */
   appendCanvasLinks(projectId: string, links: { bridges?: BridgeLink[]; ropes?: BridgeLink[] }): void
+  removeCanvasBridge(projectId: string, bridgeId: string): void
   /**
    * Applies ONE peer canvas mutation to a project's serialized nodes — the path for a project
    * that is loaded but NOT active (React Flow only holds the active project's nodes). Returns
@@ -492,6 +493,17 @@ export const useProjects = create<ProjectsState>((set, get) => ({
           : p
       )
     }))
+  },
+
+  removeCanvasBridge(projectId, bridgeId) {
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === projectId
+          ? { ...p, bridges: (p.bridges ?? []).filter((bridge) => bridge.id !== bridgeId) }
+          : p
+      )
+    }))
+    markWorkspaceDirty()
   },
 
   applyNodeMutation(projectId, mutation) {

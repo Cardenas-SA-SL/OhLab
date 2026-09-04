@@ -685,8 +685,7 @@ describe('open-project + --project docs land with the dispatch (issue #338, spec
     for (const [name, body] of bodies) {
       expect(body, name).toContain('one project per repository')
       expect(body, name).toContain('open-project --cwd <repo>')
-      // v1 has no cross-project links; the workaround is named.
-      expect(body, name).toMatch(/reader agent inside that project/)
+      expect(body, name).toMatch(/context link may cross into an online relay member/)
     }
   })
 })

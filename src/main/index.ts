@@ -64,7 +64,6 @@ import { appendBoardLogVia, registerBoardLogHandlers, type BoardLogRoute } from 
 import {
   createDeliveryQueue,
   deliverFromControl,
-  isDeliverRequest,
   messagingEnabledVia,
   onMessagingAgentEvent,
   setDeliveryQueue,
@@ -165,7 +164,8 @@ import {
   sessionNameSweepEntries,
   nodeState,
   nodeSessionName,
-  workingNodes
+  workingNodes,
+  mirrorEntry
 } from '../core/agent-status-mirror'
 import { paneOwnerProject } from '../core/agents/pane-ownership'
 import { createPushNotify, createLiveUpdatePush } from '../core/push-notify'
@@ -220,7 +220,7 @@ import { planRemoteWorkspacePoll } from './remote-workspace-poll'
 import { sessionName } from '../core/tmux-naming'
 import { posixQuote, type SshConnection } from '../shared/ssh'
 import { buildHandoff, type HandoffRemote } from './handoff'
-import { initContextLink, setNodeTranscript } from '../core/context-link'
+import { initContextLink, readContextNodeForRelay, setNodeTranscript } from '../core/context-link'
 import { transcriptPathOf } from '../core/context-link-core'
 import { initCanvasControl, installCanvasSkillInto } from './canvas-control'
 import { DRY_RUN_VERBS, dryRunRequested, dryRunRefusal } from '../shared/control-verbs'
@@ -268,6 +268,11 @@ import {
 } from './remote/host-service'
 import { initStandingHost } from './remote/standing-host'
 import { killRelayHostsByPeerKey } from './remote/relay-host'
+import {
+  handleRelayAgentMessage,
+  handleRelayContextRead,
+  type RelayCollaborationHostDeps
+} from './remote/agent-collaboration-host'
 import { initRelayHost } from './remote/relay-host-service'
 import { initHubClient, type MainHubClient } from './hub-client'
 import { createRevoker } from './remote/revocation'
@@ -289,7 +294,7 @@ import {
 } from './media-protocol'
 import { initPlatform, platform } from '../core/platform'
 import { electronPlatform } from './platform-electron'
-import { wirePeerRegistry } from './peer-registry'
+import { isRelayPeer, relayPeerScope, wirePeerRegistry } from './peer-registry'
 import { WEBGL_CONTEXT_CAP_DESKTOP } from '../shared/webgl'
 
 // Dev-only: NT_MULTI lets a SECOND instance run (host + client testing on one machine) with an
@@ -1724,12 +1729,36 @@ app.whenReady().then(async () => {
   // hibernated leg's renderer→main wake is an explicitly-recorded residual (see the PR body).
   messagingDeps.queue = createDeliveryQueue(messagingDeps)
   setDeliveryQueue(messagingDeps.queue)
-  ipcMain.handle(IPC.agentMessageDeliver, async (_e, raw: unknown) => {
-    if (!isDeliverRequest(raw))
-      return { ok: false, error: 'malformed agent-message request. Do not retry.' }
-    const { reply } = await deliverFromControl(raw, messagingDeps)
-    return reply
-  })
+  const relayCollaborationDeps: RelayCollaborationHostDeps = {
+    isRelayPeer,
+    peerScope: relayPeerScope,
+    nodeInProject: (projectId, nodeId) => {
+      const node = workspaceStore
+        .persistedCanvases()
+        .find((p) => p.id === projectId)
+        ?.nodes.find((n) => n.id === nodeId)
+      if (!node || node.kind === 'sticky') return undefined
+      const live = mirrorEntry(nodeId)
+      return {
+        id: node.id,
+        agentId: node.agentId ?? live?.agentId,
+        sessionId: live?.sessionId,
+        accountId: node.accountId
+      }
+    },
+    readContext: readContextNodeForRelay,
+    deliver: async (request) => (await deliverFromControl(request, messagingDeps)).reply
+  }
+  corePlatform.handleWithSender(IPC.agentMessageDeliver, (senderId, raw: unknown) =>
+    handleRelayAgentMessage(senderId, raw, relayCollaborationDeps)
+  )
+
+  // Exact RPC name: `context-link:remote-read`. A relay peer may read only transcript bytes or a
+  // tmux capture for a node in the single project recorded on its authenticated peer session.
+  // The request contains no path or command; both are resolved on this host.
+  corePlatform.handleWithSender(IPC.contextLinkRemoteRead, (senderId, raw: unknown) =>
+    handleRelayContextRead(senderId, raw, relayCollaborationDeps)
+  )
 
   ipcMain.handle(IPC.dialogSelectFolder, async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
@@ -3389,6 +3418,17 @@ app.whenReady().then(async () => {
   // node's transcript be read at all: it lives on the host, behind the project's ControlMaster.
   // These three deps are the whole of what `src/core` cannot answer for itself. Fail-open
   // throughout — a failed remote read renders as "no transcript yet", never as an error.
+  const relayContextPending = new Map<
+    string,
+    (result: { ok: true; text: string } | { ok: false; reason: 'forbidden' | 'unavailable' }) => void
+  >()
+  ipcMain.on(IPC.contextLinkRelayResult, (_e, payload: {
+    requestId?: string
+    result?: { ok: true; text: string } | { ok: false; reason: 'forbidden' | 'unavailable' }
+  } = {}) => {
+    if (!payload.requestId || !payload.result) return
+    relayContextPending.get(payload.requestId)?.(payload.result)
+  })
   initContextLink(ptyManager, {
     isRemoteNode: (nodeId) => !!ptyManager.sshRemoteForNode(nodeId),
     readRemoteFile: async (nodeId, filePath, maxBytes) => {
@@ -3409,7 +3449,26 @@ app.whenReady().then(async () => {
       } catch {
         return null
       }
-    }
+    },
+    readRelayContext: (node, kind, maxBytes) => new Promise<string | null>((resolve) => {
+      if (!node.remote?.online) return resolve(null)
+      const requestId = randomUUID()
+      const finish = (text: string | null): void => {
+        relayContextPending.delete(requestId)
+        clearTimeout(timer)
+        resolve(text)
+      }
+      relayContextPending.set(requestId, (result) => finish(result.ok ? result.text : null))
+      const timer = setTimeout(() => finish(null), 15_000)
+      sendToMain(IPC.contextLinkRelayResolve, {
+        requestId,
+        sessionId: node.remote.sessionId,
+        projectId: node.remote.remoteProjectId,
+        nodeId: node.id,
+        kind,
+        maxBytes
+      })
+    })
   }, {
     // The desktop app is the surface Context Link's discovery was designed for, so it installs
     // the skill + instruction blocks. Stated rather than defaulted: the flag is required so no
