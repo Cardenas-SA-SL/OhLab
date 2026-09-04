@@ -15,7 +15,7 @@
 import type { InboxEvent, NodeStateChange, NodeNowChange } from './agent-status-mirror'
 import type { PushGrant } from './push-grants'
 
-const DEFAULT_API_BASE = 'https://api.nodeterm.dev'
+const DEFAULT_API_BASE = ''
 // Batch actionable events landing close together into one POST (≤10 events/call per the contract).
 const DEFAULT_BATCH_WINDOW_MS = 2000
 // Per-node throttle — mirrors the local-notification throttle (5s/node): a chatty node can't
@@ -220,7 +220,7 @@ export interface PushNotifyDeps {
    *  production this is `agent-status-mirror.isEventUnresolved`. Absent ⇒ all held events flush
    *  unfiltered. */
   isEventUnresolved?: (nodeId: string, eventId: string) => boolean
-  /** Override base URL. Defaults to `env.NODETERM_API_BASE || 'https://api.nodeterm.dev'`. */
+  /** Override base URL. With no explicit API base, remote push delivery is disabled. */
   apiBase?: string
   /** Injectable env (DNT guards + local-dev base). Defaults to `process.env`. */
   env?: Record<string, string | undefined>
@@ -263,6 +263,7 @@ export function createPushNotify(deps: PushNotifyDeps): PushNotifyHandle {
   // Same build + DO_NOT_TRACK gate as check.ts: dev never hits the prod API unless a local server
   // is targeted explicitly.
   function allowed(): boolean {
+    if (!apiBase) return false
     if (env.DO_NOT_TRACK || env.NODETERM_TELEMETRY_DISABLED) return false
     if (!deps.isPackaged() && !env.NODETERM_API_BASE) return false
     return true
@@ -550,6 +551,7 @@ export function createLiveUpdatePush(deps: LiveUpdateDeps): LiveUpdateHandle {
   let coalesceTimer: ReturnType<typeof setTimeout> | null = null
 
   function allowed(): boolean {
+    if (!apiBase) return false
     if (env.DO_NOT_TRACK || env.NODETERM_TELEMETRY_DISABLED) return false
     if (!deps.isPackaged() && !env.NODETERM_API_BASE) return false
     return true

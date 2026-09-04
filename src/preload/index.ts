@@ -60,6 +60,7 @@ const subscribePeerPendingCleared = subscribe<[{ id: string | null; pub?: string
 const subscribeRelayPeerPending = subscribe<[RelayPeerPending]>(IPC.relayHostPeerPending)
 const subscribeRelayHostOpen = subscribe<[{ id: string; email?: string }]>(IPC.relayHostOpen)
 const subscribeRelayHostClosed = subscribe<[{ id: string }]>(IPC.relayHostClosed)
+const subscribeHubEvent = subscribe<[import('../shared/types').HubEvent]>(IPC.hubEvent)
 
 // Project setup/archive (SDD: 2026-08-19-project-settings-trust): global (not per-project) main →
 // renderer prompts, fanned out the same way as the relay events above.
@@ -451,6 +452,18 @@ const api: NodeTerminalApi = {
       return () => ipcRenderer.removeListener(IPC.licenseChanged, handler)
     }
   },
+  hub: {
+    status: () => ipcRenderer.invoke(IPC.hubStatus),
+    connect: () => ipcRenderer.invoke(IPC.hubConnect),
+    listProjects: () => ipcRenderer.invoke(IPC.hubProjectsList),
+    createProject: (name, projectId) => ipcRenderer.invoke(IPC.hubProjectsCreate, name, projectId),
+    joinProject: (code) => ipcRenderer.invoke(IPC.hubProjectsJoin, code),
+    approveMember: (projectId, accountId) => ipcRenderer.invoke(IPC.hubProjectsApprove, projectId, accountId),
+    removeMember: (projectId, accountId) => ipcRenderer.invoke(IPC.hubProjectsRemove, projectId, accountId),
+    connectMember: (projectId, accountId) => ipcRenderer.invoke(IPC.hubProjectsConnect, projectId, accountId),
+    regenerateInvite: (projectId) => ipcRenderer.invoke(IPC.hubInviteRegenerate, projectId),
+    onEvent: subscribeHubEvent
+  },
   announcements: {
     fetch: () => ipcRenderer.invoke(IPC.announcementsFetch)
   },
@@ -597,7 +610,7 @@ const api: NodeTerminalApi = {
     onClosed: subscribeRelayHostClosed
   },
   relayClient: {
-    connect: (offer) => ipcRenderer.invoke(IPC.relayClientConnect, offer),
+    connect: (offer, options) => ipcRenderer.invoke(IPC.relayClientConnect, offer, options),
     onSas: (connectionId, listener) => {
       const channel = IPC.relayClientSas(connectionId)
       const handler = (_e: unknown, sas: string | null) => listener(sas)

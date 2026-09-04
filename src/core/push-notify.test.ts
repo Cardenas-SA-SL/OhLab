@@ -82,6 +82,7 @@ function baseDeps(over: Partial<PushNotifyDeps> = {}): PushNotifyDeps {
     isPackaged: () => true,
     getNodeTitle: () => undefined,
     env: {},
+    apiBase: 'https://api.test',
     fetchImpl: fetchMock as unknown as typeof fetch,
     now: () => clock,
     batchWindowMs: 2000,
@@ -230,7 +231,7 @@ describe('createPushNotify', () => {
     )
     await vi.advanceTimersByTimeAsync(2000)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('https://api.nodeterm.dev/v1/push/notify')
+    expect(url).toBe('https://api.test/v1/push/notify')
     expect(init.method).toBe('POST')
     const body = bodyOf()
     expect(body.hostDeviceId).toBe('host-device-1')
@@ -254,7 +255,7 @@ describe('createPushNotify', () => {
   it('honors NODETERM_API_BASE override', async () => {
     const em = makeEmitter()
     const h = createPushNotify(
-      baseDeps({ subscribe: em.subscribe, env: { NODETERM_API_BASE: 'http://localhost:9999' } })
+      baseDeps({ subscribe: em.subscribe, env: { NODETERM_API_BASE: 'http://localhost:9999' }, apiBase: undefined })
     )
     em.emit(iev({ nodeId: 'a' }))
     await vi.advanceTimersByTimeAsync(2000)
@@ -495,7 +496,7 @@ describe('createPushNotify', () => {
       const calls = fetchMock.mock.calls
       expect(calls.map((c) => c[1].headers.authorization)).toEqual(['Bearer tok-A', 'Bearer tok-B'])
       for (const c of calls) {
-        expect(c[0]).toBe('https://api.nodeterm.dev/v1/push/notify')
+        expect(c[0]).toBe('https://api.test/v1/push/notify')
         const body = JSON.parse(c[1].body)
         expect(body.hostLabel).toBe('niova')
         expect(body).not.toHaveProperty('hostDeviceId')
@@ -823,6 +824,7 @@ describe('createLiveUpdatePush', () => {
       isPackaged: () => true,
       getNodeTitle: () => undefined,
       env: {},
+      apiBase: 'https://api.test',
       fetchImpl: fetchMock as unknown as typeof fetch,
       now: () => clock,
       batchWindowMs: 1000,
@@ -860,7 +862,7 @@ describe('createLiveUpdatePush', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('https://api.nodeterm.dev/v1/push/live-update')
+    expect(url).toBe('https://api.test/v1/push/live-update')
     expect(init.method).toBe('POST')
     expect(liveBodyOf().updates[0]).toMatchObject({ nodeId: 'a', event: 'start', state: 'working' })
     h.stop()
@@ -1040,7 +1042,7 @@ describe('createLiveUpdatePush', () => {
   })
 
   it('honors NODETERM_API_BASE override', async () => {
-    const { h, st } = wire({ env: { NODETERM_API_BASE: 'http://localhost:9999' } })
+    const { h, st } = wire({ env: { NODETERM_API_BASE: 'http://localhost:9999' }, apiBase: undefined })
     st.emit({ nodeId: 'a', event: 'start', state: 'working', ts: 1 })
     await vi.advanceTimersByTimeAsync(1000)
     expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:9999/v1/push/live-update')
@@ -1400,7 +1402,7 @@ describe('createLiveUpdatePush', () => {
       const calls = fetchMock.mock.calls
       expect(calls.map((c) => c[1].headers.authorization)).toEqual(['Bearer tok-A', 'Bearer tok-B'])
       for (const c of calls) {
-        expect(c[0]).toBe('https://api.nodeterm.dev/v1/push/live-update')
+        expect(c[0]).toBe('https://api.test/v1/push/live-update')
         const body = JSON.parse(c[1].body)
         expect(body.hostLabel).toBe('niova')
         expect(body).not.toHaveProperty('hostDeviceId')
@@ -1556,6 +1558,7 @@ describe('push payload ts is Unix MILLISECONDS (the mirror is the source)', () =
       mobileLiveActivities: () => true,
       isPackaged: () => true,
       env: {},
+      apiBase: 'https://api.test',
       fetchImpl: fetchMock as unknown as typeof fetch,
       now: () => clock,
       batchWindowMs: 1000
@@ -1578,6 +1581,7 @@ describe('push payload ts is Unix MILLISECONDS (the mirror is the source)', () =
       mobileLiveActivities: () => true,
       isPackaged: () => true,
       env: {},
+      apiBase: 'https://api.test',
       fetchImpl: fetchMock as unknown as typeof fetch,
       now: () => clock,
       batchWindowMs: 1000,

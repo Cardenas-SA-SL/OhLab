@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dictationMode, isAtRecordingCap, isProGateError, type DictationTarget } from './DictationOverlay'
+import { dictationMode, isAtRecordingCap, type DictationTarget } from './DictationOverlay'
 
 const terminalTarget: DictationTarget = { kind: 'terminal', nodeId: 'n1', title: 'shell' }
 
@@ -38,22 +38,5 @@ describe('isAtRecordingCap', () => {
 
   it('is true past the cap', () => {
     expect(isAtRecordingCap(200_000)).toBe(true)
-  })
-})
-
-// SpeechService.transcribeNow throws `The ${info.id} model requires nodeterm Pro — the tiny
-// model is free.` for a Pro-gated model on a free account — DictationOverlay matches that shape
-// to show a "See nodeterm Pro" action beside the inline error, so pin the substring match here.
-describe('isProGateError', () => {
-  it('matches the Pro-gate error thrown by SpeechService', () => {
-    expect(isProGateError('The base model requires OhLab Pro — the tiny model is free.')).toBe(
-      true
-    )
-  })
-
-  it('does not match an unrelated transcribe error', () => {
-    expect(isProGateError('Transcription failed.')).toBe(false)
-    expect(isProGateError('No speech detected.')).toBe(false)
-    expect(isProGateError('Download the base model in Settings → Speech first.')).toBe(false)
   })
 })

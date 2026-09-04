@@ -36,11 +36,10 @@ describe('SpeechService', () => {
     await expect(svc.transcribe(pcm, { model: 'tiny', language: 'auto' })).resolves.toBe('hello world')
   })
 
-  it('rejects a Pro model without premium — core-side gate', async () => {
+  it('allows every bundled model without a paid entitlement', async () => {
     const svc = new SpeechService({ models, isPremium: () => false, engineFactory: factory() })
-    await expect(svc.transcribe(pcm, { model: 'base', language: 'auto' }))
-      .rejects.toThrow(/requires OhLab Pro/)
-    expect(loads).toHaveLength(0) // never even loads the model
+    await expect(svc.transcribe(pcm, { model: 'base', language: 'auto' })).resolves.toBe('hello world')
+    expect(loads).toHaveLength(1)
   })
 
   it('allows Pro models with premium', async () => {

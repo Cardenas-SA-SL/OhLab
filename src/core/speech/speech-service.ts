@@ -93,9 +93,6 @@ export class SpeechService {
   private async transcribeNow(pcm: Float32Array, opts: { model: string; language: string }): Promise<string> {
     const info = whisperModel(opts.model)
     if (!info) throw new Error(`Unknown whisper model: ${opts.model}`)
-    if (info.pro && !this.isPremium()) {
-      throw new Error(`The ${info.id} model requires OhLab Pro — the tiny model is free.`)
-    }
     if (!(await this.models.has(info.id))) {
       throw new Error(`Download the ${info.id} model in Settings → Speech first.`)
     }

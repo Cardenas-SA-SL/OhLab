@@ -193,7 +193,6 @@ import { SetupConsentDialog } from '../components/SetupConsentDialog'
 import { ConsentNotice } from '../remote/ConsentNotice'
 import { peerApprovalView } from '@shared/remote/approval'
 import { promptDialog } from '../components/promptDialog'
-import { UpgradeDialog } from '../components/UpgradeDialog'
 import { RemotePicker } from '../components/RemotePicker'
 import { WorktreeDialog } from '../components/WorktreeDialog'
 import { SpawnTeamDialog } from '../components/SpawnTeamDialog'
@@ -353,7 +352,6 @@ import { useLaunchDelivery } from '../state/launchDelivery'
 import { useBrowserLease, drivingNodeIds } from '../state/browserLease'
 import { useTerminalFocus } from '../state/terminalFocus'
 import { useCodexIdentity, codexFallbackText } from '../state/codexIdentity'
-import { useTeamAccessEvents } from '../state/teamAccess'
 import { useAgentNodes } from '../state/agentNodes'
 import { SubagentNode } from '../nodes/SubagentNode'
 import { LoopNode } from '../nodes/LoopNode'
@@ -461,7 +459,6 @@ import { useSessionNaming } from '../state/sessionNaming'
 import { useSshServers } from '../state/sshServers'
 import { useSshConn } from '../state/sshConn'
 import { useSystemAccount } from '../state/systemAccount'
-import { useEntitlement } from '../state/entitlement'
 import type { SshServer } from '@shared/ssh'
 import { sshHostKey } from '@shared/ssh'
 import type {
@@ -2197,10 +2194,7 @@ export function Canvas() {
   // 1) Load the whole workspace once and hydrate the projects store.
   useEffect(() => {
     let cancelled = false
-    // Pull the current license status: the main process broadcasts it on launch, but that
-    // broadcast races renderer load and is dropped if it fires first — without this pull a
-    // Pro user can start (and stay) gated as free until the next restart.
-    void useEntitlement.getState().hydrate()
+    // Pull persisted settings once; the launch broadcast can race renderer startup.
     useSettings
       .getState()
       .hydrate()
@@ -2275,7 +2269,6 @@ export function Canvas() {
     // switch back to a connected project is a no-op. Remote tmux is unaffected by the master.
     if (project.ssh) {
       const ssh = project.ssh
-      // SSH remote projects are free (Core). Only phone/relay remote access is Pro-gated.
       window.nodeTerminal.sshProject
         .connect(project.id, ssh.server, ssh.remoteCwd)
         .then(async (info) => {
@@ -2869,10 +2862,6 @@ export function Canvas() {
       unCleared()
     }
   }, [setPendingPeer])
-
-  // Team Access seat table (docs/…/team-access, Task 3): a SEPARATE relay-host subscription set from
-  // the SAS-approval effect above — one feeds the dialog, this one feeds the live/pending seats store.
-  useTeamAccessEvents()
 
   // ---- canvas sync (team) ----
   // Emitting side: diff each settled node snapshot against the last one we published and cast the
@@ -13595,11 +13584,6 @@ export function Canvas() {
           target={dictationTarget}
           stopSignal={dictationStopSignal}
           onClose={() => setDictationOpen(false)}
-          onOpenLicense={() => {
-            setDictationOpen(false)
-            setSettingsSection('license')
-            setSettingsOpen(true)
-          }}
         />
       )}
 
@@ -13773,7 +13757,6 @@ export function Canvas() {
         />
       )}
 
-      <UpgradeDialog />
 
       {remotePicker && (
         <RemotePicker

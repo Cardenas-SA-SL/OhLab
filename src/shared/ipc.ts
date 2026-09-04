@@ -529,10 +529,8 @@ export const IPC = {
   // the host human answers with `relayHostConfirm` (id). `relayHostOpen` / `relayHostClosed` fire
   // main → renderer when a bridged peer becomes a live client / drops (payload `{ id }`).
   relayHostStart: 'relay:host:start',
-  // Team Access (multi-seat): `relayHostInvite` ADDS a seat (invoke, `{ projectId?, email? }` →
-  // `{ offer }`, cap-checked → rejects `E_SEATS_FULL`); `relayHostRevoke` (send, `{ id }`) cuts one
-  // bridged peer's live session. `relayHostPeerPending`/`relayHostOpen` now also carry the seat
-  // `email` label. Host-side cap/revoke are UX/host enforcement, not a server-guaranteed limit (v2).
+  // Team Access: `relayHostInvite` adds a connection (invoke, `{ projectId?, email? }`), while
+  // `relayHostRevoke` cuts one bridged peer. Pending/open events also carry the display label.
   relayHostInvite: 'relay:host:invite',
   relayHostRevoke: 'relay:host:revoke',
   relayHostStop: 'relay:host:stop',
@@ -547,6 +545,17 @@ export const IPC = {
   // host approves. `relayClientSend` casts an outbound rpc frame (JSON) at the host;
   // `relayClientFrame` delivers an inbound one. `relayClientClosed` fires when the socket drops.
   relayClientConnect: 'relay:client:connect',
+  // Self-hosted OhLab Hub directory and session broker.
+  hubStatus: 'hub:status',
+  hubConnect: 'hub:connect',
+  hubProjectsList: 'hub:projects:list',
+  hubProjectsCreate: 'hub:projects:create',
+  hubProjectsJoin: 'hub:projects:join',
+  hubProjectsApprove: 'hub:projects:approve',
+  hubProjectsRemove: 'hub:projects:remove',
+  hubProjectsConnect: 'hub:projects:connect',
+  hubInviteRegenerate: 'hub:invite:regenerate',
+  hubEvent: 'hub:event',
   relayClientConfirm: 'relay:client:confirm',
   relayClientSend: 'relay:client:send',
   relayClientDisconnect: 'relay:client:disconnect',

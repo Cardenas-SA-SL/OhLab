@@ -34,15 +34,6 @@ export interface DictationOverlayProps {
    *  recording, CANCEL/close otherwise). */
   stopSignal: number
   onClose: () => void
-  /** Routes to Settings → License (same section SpeechSection's own Pro upsells use) — invoked
-   *  from the "See nodeterm Pro" action shown beside a Pro-model transcribe error. */
-  onOpenLicense: () => void
-}
-
-/** A Pro-gated model was picked but the account isn't premium — see SpeechService.transcribeNow,
- *  which throws exactly this shape. Matched by substring since the model id is interpolated in. */
-export function isProGateError(message: string): boolean {
-  return message.includes('requires OhLab Pro')
 }
 
 type Phase = 'idle' | 'recording' | 'transcribing'
@@ -91,7 +82,7 @@ export function isAtRecordingCap(elapsedMs: number): boolean {
 /** How long the "no target selected" / "no model" warning pill stays up before it auto-dismisses. */
 const NO_TARGET_DISMISS_MS = 2500
 
-export function DictationOverlay({ target, stopSignal, onClose, onOpenLicense }: DictationOverlayProps) {
+export function DictationOverlay({ target, stopSignal, onClose }: DictationOverlayProps) {
   const { api } = useSession()
   // The off state only exists for the local Whisper engine — cloud brings its own model. Read once
   // per mount (the overlay is a fresh mount per shortcut press, like `target`).
@@ -279,11 +270,6 @@ export function DictationOverlay({ target, stopSignal, onClose, onOpenLicense }:
   const errorBlock = error && (
     <div className="dictation__error">
       <span>{error}</span>
-      {isProGateError(error) && (
-        <button type="button" className="dictation__error-action" onClick={onOpenLicense}>
-          See OhLab Pro
-        </button>
-      )}
       <button type="button" className="dictation__close" title="Dismiss" onClick={handleClose}>
         ×
       </button>

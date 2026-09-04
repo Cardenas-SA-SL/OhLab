@@ -77,7 +77,7 @@ function makeHost(): void {
       send: (channel: string, ...args: unknown[]) => sentToWin.push({ channel, args })
     }
   }
-  initRemoteHost(win as never, {} as never)
+  initRemoteHost(win as never, {} as never, async () => '', {}, () => 'https://api.test')
 }
 
 /** Run `remote:host:start` (mints a token, connects the relay session). */

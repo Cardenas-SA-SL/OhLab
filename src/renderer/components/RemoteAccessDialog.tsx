@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useDialogStack } from './dialog-stack'
-import { useEntitlement } from '../state/entitlement'
 import { useProjects } from '../state/projects'
 import { hostShareOptions } from '../lib/relayHostShare'
 import { thisMachine } from '../lib/machineName'
@@ -14,14 +13,12 @@ import { Select } from '@renderer/ui/Select'
  * Remote access dialog — a self-contained popup reachable from the project (tab) caret menu, so
  * remote access isn't buried in Settings. Mirrors the Settings RemoteSection flow over the NEW
  * relay tunnel (`relayHost` / `relayClient`):
- *  - Host "Allow remote access" (Pro): start → show the single-use pairing offer + copy/stop.
- *  - Non-Pro: hosting is gated — show the upgrade popup (Upgrade → Stripe checkout).
+ *  - Host "Allow remote access": start and show the single-use pairing offer with copy/stop.
  *  - Client "Connect to a host" (free): paste an offer → Canvas runs the SAS-compare + open-tab flow.
  * It deliberately does NOT import RemoteSection (which the Settings redesign owns).
  */
 export function RemoteAccessDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
-  const isPremium = useEntitlement((s) => s.isPremium)
-  const upgrade = useEntitlement((s) => s.upgrade)
+  const isPremium = true
   const projects = useProjects((s) => s.projects)
   const activeProjectId = useProjects((s) => s.activeProjectId)
   const [hostOffer, setHostOffer] = useState('')
@@ -96,7 +93,7 @@ export function RemoteAccessDialog({ onClose }: { onClose: () => void }): React.
         </div>
         <p className="remote-dialog__desc">
           Open terminals that run on another machine you own — end-to-end encrypted over the relay.
-          Hosting (sharing this machine) is Pro; connecting to a host is free.
+          Configure your self-hosted Hub in Settings &gt; Team before sharing or connecting.
         </p>
 
         <h4 className="remote-dialog__head4">Allow remote access</h4>
@@ -150,10 +147,8 @@ export function RemoteAccessDialog({ onClose }: { onClose: () => void }): React.
         ) : (
           <div className="remote-dialog__block">
             <p className="remote-dialog__hint">
-              Sharing this machine requires OhLab Pro. Connecting to a host you were given a code
-              for is free.
+              Configure an OhLab Hub in Settings &gt; Team first.
             </p>
-            <Button onClick={() => void upgrade()}>Upgrade to Pro — $10/mo</Button>
           </div>
         )}
 

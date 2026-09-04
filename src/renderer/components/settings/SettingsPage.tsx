@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useEntitlement } from '../../state/entitlement'
 import { useProjects } from '../../state/projects'
 import { SettingsSearchContext } from './context'
 import { SettingsSidebar } from './SettingsSidebar'
@@ -23,7 +22,6 @@ import { CustomAgentsSection } from './sections/CustomAgentsSection'
 import { NotificationsSection } from './sections/NotificationsSection'
 import { CommitSection } from './sections/CommitSection'
 import { TmuxSection } from './sections/TmuxSection'
-import { LicenseSection } from './sections/LicenseSection'
 import { PresenceIdentitySection } from './sections/PresenceIdentitySection'
 import { RemoteSection } from './sections/RemoteSection'
 import { TeamAccessSection } from './sections/TeamAccessSection'
@@ -49,8 +47,6 @@ export function SettingsPage({
    *  leave it alone: they must not throw away a query or a section the user chose in the dialog. */
   retargetNonce?: number
 }): React.JSX.Element {
-  const hydrate = useEntitlement((s) => s.hydrate)
-
   // ONE list feeds both the nav rows and the panes below, so a "Projects" row can never point at a
   // section that is not rendered (or vice versa). Memoized: `projects.filter(...)` inside a zustand
   // selector would return a fresh array on every store snapshot and re-render the whole page.
@@ -73,10 +69,6 @@ export function SettingsPage({
     )
     return group ? [group] : []
   }, [openProjects])
-
-  useEffect(() => {
-    void hydrate()
-  }, [hydrate])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -116,7 +108,6 @@ export function SettingsPage({
             <CommitSection isActive={active === 'commit'} />
             <TmuxSection isActive={active === 'tmux'} />
             <GitHubIssuesSection isActive={active === 'github-issues'} />
-            <LicenseSection isActive={active === 'license'} />
             <PresenceIdentitySection isActive={active === 'presence'} />
             <RemoteSection isActive={active === 'remote'} onClose={onClose} />
             <TeamAccessSection isActive={active === 'team-access'} onClose={onClose} />

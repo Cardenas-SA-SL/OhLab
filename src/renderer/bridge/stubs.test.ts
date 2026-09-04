@@ -59,6 +59,15 @@ describe('bridge stubs', () => {
     }).not.toThrow()
   })
 
+  it('Hub directory operations degrade explicitly in the browser shell', async () => {
+    const s = buildStubApi()
+    await expect(s.hub.status()).resolves.toEqual({ state: 'disabled' })
+    await expect(s.hub.connect()).rejects.toMatchObject({ code: E_UNSUPPORTED })
+    await expect(s.hub.createProject('Demo', 'p1')).rejects.toMatchObject({ code: E_UNSUPPORTED })
+    const off = s.hub.onEvent(() => {})
+    expect(() => off()).not.toThrow()
+  })
+
   it('boot-path promise members resolve benignly', async () => {
     const s = buildStubApi()
     await expect(s.announcements.fetch()).resolves.toEqual([])

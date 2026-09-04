@@ -36,6 +36,21 @@ import './index'
 const api = h.exposed.nodeTerminal as NodeTerminalApi
 
 describe('preload sshProject passphrase wiring', () => {
+  it('routes Hub project and membership calls through their exact IPC channels', async () => {
+    await api.hub.status()
+    await api.hub.connect()
+    await api.hub.createProject('Demo', 'local-project')
+    await api.hub.approveMember('p1', 'a2')
+    await api.hub.connectMember('p1', 'a2')
+    await api.relayClient.connect('offer', { autoConfirm: true })
+    expect(h.invoke).toHaveBeenCalledWith(IPC.hubStatus)
+    expect(h.invoke).toHaveBeenCalledWith(IPC.hubConnect)
+    expect(h.invoke).toHaveBeenCalledWith(IPC.hubProjectsCreate, 'Demo', 'local-project')
+    expect(h.invoke).toHaveBeenCalledWith(IPC.hubProjectsApprove, 'p1', 'a2')
+    expect(h.invoke).toHaveBeenCalledWith(IPC.hubProjectsConnect, 'p1', 'a2')
+    expect(h.invoke).toHaveBeenCalledWith(IPC.relayClientConnect, 'offer', { autoConfirm: true })
+  })
+
   it('routes foreground process termination through request IPC', async () => {
     await api.pty.terminateForeground('node-1', 'claude')
     expect(h.invoke).toHaveBeenCalledWith(IPC.ptyTerminateForeground, 'node-1', 'claude')

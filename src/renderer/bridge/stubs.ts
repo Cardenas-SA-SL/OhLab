@@ -242,6 +242,18 @@ export function buildStubApi(): Omit<
       releaseOthers: U('license.releaseOthers'),
       onChange: noopUnsub
     },
+    hub: {
+      status: () => Promise.resolve({ state: 'disabled' as const }),
+      connect: U('hub.connect'),
+      listProjects: U('hub.listProjects'),
+      createProject: U('hub.createProject'),
+      joinProject: U('hub.joinProject'),
+      approveMember: U('hub.approveMember'),
+      removeMember: U('hub.removeMember'),
+      connectMember: U('hub.connectMember'),
+      regenerateInvite: U('hub.regenerateInvite'),
+      onEvent: noopUnsub
+    },
     contextLink: {
       setLinks: pnoop,
       info: U('contextLink.info')

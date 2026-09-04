@@ -114,31 +114,29 @@ describe('PhoneSection revoke feedback', () => {
     expect(text).not.toMatch(/7 days/i)
   })
 
-  it('says WHEN the phone actually loses Pro on a clean revoke — removal is not instant', async () => {
+  it('confirms both local and Hub removal', async () => {
     stubBridge({ local: true, server: 'ok' })
     mount()
     await act(async () => undefined)
 
     const text = await revokeFlow()
-    expect(text).toMatch(/within 7 days/i)
+    expect(text).toMatch(/from this machine and the Hub/i)
     // A receipt, not a warning: nothing here asks the user to do anything.
     expect(text).not.toMatch(/try again/i)
     expect(text).not.toMatch(/Couldn’t/i)
   })
 
-  it('warns that the phone kept its Pro when the server leg failed', async () => {
+  it('warns when the Hub registration could not be removed', async () => {
     stubBridge({ local: true, server: 'failed' })
     mount()
     await act(async () => undefined)
 
     const text = await revokeFlow()
-    expect(text).toMatch(/Pro access/i)
+    expect(text).toMatch(/Hub registration/i)
     // 'failed' also covers a 403 ("not your row") and a 401, which no amount of waiting fixes —
     // so the copy must not promise that being back online is the fix.
     expect(text).not.toMatch(/back online/i)
-    // And the retry it does offer must disclose its cost: pairing the phone again RESTORES its Pro.
-    expect(text).toMatch(/pairing restores its Pro/i)
-    expect(text).toMatch(/get in touch/i)
+    expect(text).toMatch(/Pair it again and retry/i)
   })
 
   it('warns about the local removal when that is the leg that failed', async () => {
@@ -164,7 +162,7 @@ describe('PhoneSection revoke feedback', () => {
 
     const text = await revokeFlow()
     expect(text).toContain('No devices paired yet')
-    expect(text).toMatch(/Pro access/i)
+    expect(text).toMatch(/Hub registration/i)
   })
 
   it('reports BOTH legs when both fail', async () => {
@@ -174,7 +172,7 @@ describe('PhoneSection revoke feedback', () => {
 
     const text = await revokeFlow()
     expect(text).toMatch(/Couldn’t remove/i)
-    expect(text).toMatch(/Pro access/i)
+    expect(text).toMatch(/Hub registration/i)
     // The device is still on this machine, so the "Removed … from this machine" clause must not
     // appear beside the failure that says it was not removed.
     expect(text).not.toMatch(/Removed “/)

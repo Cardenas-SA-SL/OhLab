@@ -1,7 +1,7 @@
 // Host service — serve local PTYs over the relay (main process).
 //
-// On "host mode" the app: (1) gates on a valid Pro entitlement, (2) mints a single-use
-// pairing token from our API with the stored entitlement, (3) connects to the relay as the
+// In host mode the app mints a single-use pairing token from the configured Hub and connects
+// to its relay as the host. The peer then joins with the same opaque token.
 // HOST (so it becomes the pending host the client later joins to trigger the bridge), and
 // (4) returns the pairing OFFER string for the user to hand to a client.
 //
@@ -21,11 +21,11 @@
 //
 // This file is glue over already-tested units (relay-socket, framing, pairing, pty-manager).
 // The pure RPC/frame -> pty-manager mapping lives in `createHostHandlers` so it is unit-
-// testable with fakes; `initRemoteHost` wires it to IPC, the license gate, and the API call.
+// testable with fakes; `initRemoteHost` wires it to IPC and the Hub API call.
 
 import { randomUUID } from 'crypto'
 import path from 'path'
-import { app, ipcMain, type BrowserWindow } from 'electron'
+import { ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc'
 import { REF_MAX_LEN } from '../../shared/presence'
 import type { CanvasMutation, CanvasState, DirEntry, PtyCreateOptions } from '../../shared/types'
@@ -33,7 +33,6 @@ import type { AgentId } from '../../shared/agents/config'
 import { PtyManager, type DetachedSinks } from '../../core/pty-manager'
 import * as fsOps from '../../core/fs-ops'
 import { TITLE_MAX, type RemoteNodeInput } from '../../core/project-node-append'
-import { getStoredEntitlement, isPremium } from '../../core/license'
 import { publicKeyToB64, type KeyPair } from './e2ee'
 import { loadOrCreateHostKeyPair, HostKeyLockedError } from './host-identity'
 import { OP, type Frame } from './framing'
@@ -42,12 +41,14 @@ import { sanitizeClientMutation } from './canvas-sync'
 import { connectRelay, type RelaySocket, type RpcRequest } from './relay-socket'
 import { initHostCanvasHub, currentCanvas, subscribeCanvas } from './host-canvas-hub'
 import { createPhonePresence, type PhonePresence } from './phone-presence'
+import { HUB_REQUIRED_ERROR, hubApiBase, hubRelayUrl } from '../../core/hub/url'
 
-// Default relay endpoint; `NODETERM_RELAY_URL` overrides it (mirrors license.ts's API_BASE /
-// CHECKOUT_URL env-override pattern — used both as the dev gate and for local testing).
-export const RELAY_URL = process.env.NODETERM_RELAY_URL || 'wss://relay.nodeterm.dev'
+// Explicit endpoint overrides are retained for integration tests.
+export const RELAY_URL = process.env.NODETERM_RELAY_URL || ''
+export const API_BASE = process.env.NODETERM_API_BASE || ''
 
-export const API_BASE = process.env.NODETERM_API_BASE || 'https://api.nodeterm.dev'
+export const relayUrlFor = (hubUrl: string): string => hubRelayUrl(hubUrl)
+export const apiBaseFor = (hubUrl: string): string => hubApiBase(hubUrl)
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
@@ -817,18 +818,18 @@ interface PairTokenResponse {
   exp: number
 }
 
-// Mint a single-use pairing token from our API, proving entitlement with the stored token.
-// Exported so the NEW interactive relay host (relay-host-service.ts) mints its offer token the same
-// way (same `POST /v1/pair/token`, same entitlement proof) instead of duplicating the call.
-export async function mintPairingToken(entitlement: string): Promise<PairTokenResponse> {
+// Mint a single-use pairing token from the configured Hub.
+export async function mintPairingToken(hubUrl = ''): Promise<PairTokenResponse> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 8000)
   let res: Response
   try {
-    res = await fetch(`${API_BASE}/v1/pair/token`, {
+    const apiBase = apiBaseFor(hubUrl)
+    if (!apiBase) throw new Error(HUB_REQUIRED_ERROR)
+    res = await fetch(`${apiBase}/v1/pair/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entitlement }),
+      body: JSON.stringify({}),
       signal: ctrl.signal
     })
   } catch {
@@ -856,12 +857,9 @@ export async function mintPairingToken(entitlement: string): Promise<PairTokenRe
 // advertising the SAME host identity through their existing import.
 export { loadOrCreateHostKeyPair as loadOrCreateKeyPair, HostKeyLockedError }
 
-// --- dev gate ----------------------------------------------------------------
-
-// Never hit the real relay/API from an unpackaged build unless a relay is explicitly targeted
-// (mirrors license.ts's `allowed()` gate). Packaged builds are always allowed.
-export function relayAllowed(): boolean {
-  return app.isPackaged || !!process.env.NODETERM_RELAY_URL
+// --- Hub configuration -------------------------------------------------------
+export function relayAllowed(hubUrl = ''): boolean {
+  return Boolean(process.env.NODETERM_RELAY_URL || hubUrl.trim())
 }
 
 // --- shared host session (interactive host + standing phone host) ------------
@@ -1058,7 +1056,7 @@ export function connectHostSession(opts: HostSessionOptions): HostSession {
 // --- IPC wiring --------------------------------------------------------------
 
 /**
- * Wire the host-mode IPC. `remote:host:start` gates on Pro, mints a pairing token, connects to
+ * Wire the host-mode IPC. `remote:host:start` requires a configured Hub, mints a pairing token, connects to
  * the relay as host, and returns the offer string. `remote:host:stop` closes the relay socket
  * (which kills the served PTYs and drops the client's access).
  */
@@ -1084,7 +1082,8 @@ export function initRemoteHost(
   win: BrowserWindow,
   ptyManager: PtyManager,
   listProjects: () => Promise<string> = async () => '',
-  bridge: HostBridgeDeps = {}
+  bridge: HostBridgeDeps = {},
+  getHubUrl: () => string = () => ''
 ): void {
   initHostCanvasHub()
   let session: HostSession | null = null
@@ -1114,29 +1113,22 @@ export function initRemoteHost(
   }
 
   ipcMain.handle(IPC.remoteHostStart, async (): Promise<{ offer: string }> => {
-    if (!isPremium()) {
-      throw new Error('Remote access requires OhLab Pro.')
-    }
-    if (!relayAllowed()) {
-      throw new Error('Remote access is unavailable in development builds (set NODETERM_RELAY_URL).')
-    }
-    const entitlement = getStoredEntitlement()
-    if (!entitlement) {
-      throw new Error('No entitlement found — please re-activate OhLab Pro.')
-    }
+    const hubUrl = getHubUrl()
+    if (!relayAllowed(hubUrl)) throw new Error(HUB_REQUIRED_ERROR)
 
     // Already hosting → tear the old session down before starting a fresh one.
     endSession()
 
     const keys = await loadOrCreateHostKeyPair()
-    const { pairingToken } = await mintPairingToken(entitlement)
+    const { pairingToken } = await mintPairingToken(hubUrl)
+    const relayUrl = relayUrlFor(hubUrl)
 
     // This session's presence slot, captured by its own callbacks (never read through `presence`,
     // which by then may belong to a newer session).
     const phone = createPhonePresence()
     presence = phone
     session = connectHostSession({
-      url: RELAY_URL,
+      url: relayUrl,
       token: pairingToken,
       ourKeys: keys,
       pty: ptyManager,
@@ -1174,7 +1166,7 @@ export function initRemoteHost(
 
     return {
       offer: encodeOffer({
-        relayEndpoint: RELAY_URL,
+        relayEndpoint: relayUrl,
         pairingToken,
         hostPublicKeyB64: publicKeyToB64(keys.publicKey)
       })

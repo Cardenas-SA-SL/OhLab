@@ -5,11 +5,10 @@
 // shares the same offer format and pairing-token mint, but everything a bridged peer does afterwards
 // flows through `connectRelayHost` (→ `platform.dispatch`/`cast`), not the legacy phone RPC vocabulary.
 //
-// TEAM ACCESS — a POOL, not one listener. A paying host shares this Mac with up to `seats` devices
-// (one seat per connected device). This module manages a POOL of independent `RelayHostSession`s;
+// TEAM ACCESS is a pool, not one listener. This module manages independent `RelayHostSession`s;
 // each seat still goes through the UNCHANGED per-session mutual-SAS + ConsentNotice gate in
-// relay-host.ts. `relay:host:invite` (and the legacy `relay:host:start`) ADD a seat (cap-checked, no
-// supersede); `relay:host:revoke` cuts ONE; `stop()` closes ALL.
+// relay-host.ts. `relay:host:invite` (and the legacy `relay:host:start`) add a connection without
+// superseding existing ones; `relay:host:revoke` cuts one and `stop()` closes all.
 //
 // SECURITY — nothing is served before MUTUAL approval. This file only FORWARDS the reviewed gate:
 //   - `onPeerPending` (the E2EE handshake completed, the SAS is known) → send `relay:host:peer-pending`
@@ -32,15 +31,10 @@ import type { RelayTransport } from './relay-socket'
 import { publicKeyToB64, type KeyPair } from './e2ee'
 import { encodeOffer } from './pairing'
 import { loadOrCreatePeerKeyPair } from './peer-identity'
-import { isPremium as licenseIsPremium, getStoredEntitlement, licensedSeats as licenseSeats } from '../../core/license'
-import { RELAY_URL, relayAllowed as hostRelayAllowed, mintPairingToken } from './host-service'
-import { canAcceptSeat } from './seat-cap'
+import { RELAY_URL, relayAllowed as hostRelayAllowed, mintPairingToken, relayUrlFor } from './host-service'
+import { HUB_REQUIRED_ERROR } from '../../core/hub/url'
 
-/** Thrown (as an Error message) when a new invite would exceed the licensed seat cap. The renderer
- *  maps it to "All seats in use — add a seat." Host-side/UX enforcement only (see below). */
-export const E_SEATS_FULL = 'E_SEATS_FULL'
-
-/** Injectable seams — production defaults hit the real license gate / API / OS keyring; tests pass
+/** Injectable seams. Tests pass
  *  an in-process transport, a fake mint, and a fixed keypair so nothing touches the network. */
 export interface RelayHostDeps {
   /** Relay wss URL (defaults to RELAY_URL). */
@@ -50,12 +44,9 @@ export interface RelayHostDeps {
   /** The long-lived peer identity this desktop presents (defaults to loadOrCreatePeerKeyPair). */
   loadKeys?: () => Promise<KeyPair>
   /** Mint the single-use pairing token (defaults to the shared `mintPairingToken`). */
-  mintToken?: (entitlement: string) => Promise<{ pairingToken: string }>
-  isPremium?: () => boolean
+  mintToken?: () => Promise<{ pairingToken: string }>
   relayAllowed?: () => boolean
-  getEntitlement?: () => string | null
-  /** The licensed seat cap (Team Access). Defaults to the real `licensedSeats()` (core/license.ts). */
-  licensedSeats?: () => number
+  getHubUrl?: () => string
   /** TEST ONLY: override the wire-up (defaults to `connectRelayHost`). */
   connect?: typeof connectRelayHost
 }
@@ -74,7 +65,7 @@ export interface RelayHost {
 
 /**
  * Wire the interactive relay-host IPC. `relay:host:invite` (and legacy `relay:host:start`) gate on
- * Pro + a free seat, mint a pairing token, open a NEW relay host listener via `connectRelayHost`, and
+ * a configured Hub, mint a pairing token, open a new relay host listener via `connectRelayHost`, and
  * return the offer to hand to a peer — ADDING it to the pool (no supersede). `relay:host:confirm`
  * approves a pending peer; `relay:host:revoke` cuts one; `relay:host:stop` tears the whole pool down.
  */
@@ -83,18 +74,14 @@ export function initRelayHost(
   platform: ElectronPlatform,
   deps: RelayHostDeps = {}
 ): RelayHost {
-  const url = deps.url ?? RELAY_URL
   const connect = deps.connect ?? connectRelayHost
   const loadKeys = deps.loadKeys ?? loadOrCreatePeerKeyPair
-  const mintToken = deps.mintToken ?? mintPairingToken
-  const isPremium = deps.isPremium ?? licenseIsPremium
-  const relayAllowed = deps.relayAllowed ?? hostRelayAllowed
-  const getEntitlement = deps.getEntitlement ?? getStoredEntitlement
-  const licensedSeats = deps.licensedSeats ?? licenseSeats
+  const getHubUrl = deps.getHubUrl ?? (() => '')
+  const mintToken = deps.mintToken ?? (() => mintPairingToken(getHubUrl()))
+  const relayAllowed = deps.relayAllowed ?? (() => hostRelayAllowed(getHubUrl()))
 
-  // The POOL, keyed by renderer id (Team Access). One entry per SEAT — inserted SYNCHRONOUSLY when the
-  // seat is minted (reserve-before-await; see addSeat) and removed on close/revoke/stop. `byId.size` is
-  // the reserved+pending+live seat count the cap compares against `licensedSeats()`. `session` is
+  // The pool is keyed by renderer id. One entry is inserted synchronously when the
+  // invitation is minted and removed on close, revoke, or stop. `session` is
   // `null` while the seat is reserved but its listener has not been wired yet (the brief window across
   // the token mint), then the live `RelayHostSession`; `email` is the invite label (display only) that
   // rides this seat's peer-pending/open events. The renderer id is the SAME token from mint through
@@ -108,34 +95,17 @@ export function initRelayHost(
   }
 
   /**
-   * Mint ONE pairing + open ONE relay host listener, ADDING it to the pool (no supersede). Cap-checked
-   * against the licensed seats. The seat is RESERVED synchronously (with its revocable id) before any
+   * Mint one pairing and open one relay host listener, adding it to the pool. The entry is reserved
+   * synchronously with its revocable id before any
    * await, then filled in once the listener is wired. Returns the offer to hand to the invited device
    * plus the seat's renderer `id`.
    */
   async function addSeat({ projectId, email }: AddSeatOptions): Promise<{ offer: string; id: string }> {
-    if (!isPremium()) {
-      throw new Error('Remote access requires OhLab Pro.')
-    }
     if (!relayAllowed()) {
-      throw new Error('Remote access is unavailable in development builds (set NODETERM_RELAY_URL).')
+      throw new Error(HUB_REQUIRED_ERROR)
     }
-    const entitlement = getEntitlement()
-    if (!entitlement) {
-      throw new Error('No entitlement found — please re-activate OhLab Pro.')
-    }
-
-    // SEAT CAP + RESERVATION — atomic (no await between reading the count and reserving). The count is
-    // minted (reserved + pending + live) seats. This is HOST-SIDE / UX enforcement, NOT a
-    // server-guaranteed limit: a host that patched it out only cheats itself (it is paying for the
-    // seats). Real, un-bypassable enforcement is v2, server-side (the relay refuses the (seats+1)th
-    // bridge per account). Do NOT close others here — Team Access is ADDITIVE.
-    if (!canAcceptSeat(byId.size, licensedSeats())) {
-      throw new Error(E_SEATS_FULL)
-    }
-    // Reserve the seat SYNCHRONOUSLY — with a revocable id — before any await, so two concurrent
-    // invites can't both pass the cap across the token-mint latency (Finding 1), and so a
-    // pending-never-connected seat is revocable from the moment it's minted (Finding 2). `session` is
+    // Reserve the entry synchronously before any await so a pending connection is revocable from
+    // the moment it is minted. `session` is
     // filled in once `connect()` wires the listener below.
     const rendererId = randomUUID()
     byId.set(rendererId, { session: null, email })
@@ -144,7 +114,8 @@ export function initRelayHost(
       // A locked keyring surfaces here as a rejected invite (PeerKeyLockedError / E_PEER_KEY_LOCKED):
       // the identity on disk is intact and must not be rotated — the renderer tells the human to unlock.
       const keys = await loadKeys()
-      const { pairingToken } = await mintToken(entitlement)
+      const { pairingToken } = await mintToken()
+      const url = (deps.url ?? RELAY_URL) || (deps.mintToken ? 'wss://relay.test' : relayUrlFor(getHubUrl()))
 
       const session = connect({
         url,
@@ -199,7 +170,7 @@ export function initRelayHost(
     }
   }
 
-  // Legacy entry point (RemoteAccessDialog / RemoteSection). Now ADDITIVE + cap-checked (no supersede)
+  // Legacy entry point (RemoteAccessDialog / RemoteSection). It is additive and does not supersede.
   // — with cap 1 this is bit-for-bit today's single-peer behavior (a 2nd start is refused until the
   // first drops), and with cap N it adds a seat. Returns `{ offer, id }`; the legacy dialogs
   // destructure `{ offer }` and ignore `id` (additive, non-breaking).
@@ -233,7 +204,7 @@ export function initRelayHost(
     // peer key yet) — freeing the reservation is all that's owed. A live peer is cut by IDENTITY, the
     // same primitive index.ts's 4c revoker uses (killRelayHostsByPeerKey, relay-host.ts): it closes
     // every live session holding that key, the right "remove this device" semantic. Host-side revoke +
-    // the seat cap are UX/host enforcement, NOT a server-guaranteed limit (v2 = server-side). On the
+    // host bookkeeping is local. On the
     // desktop relay path a pin never auto-admits (isPinned is phone-only), so cutting the socket
     // already forces a fresh SAS+consent re-pair — no separate unpin is needed.
     const peerKeyB64 = entry.session?.peerKeyB64()

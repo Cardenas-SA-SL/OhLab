@@ -51,13 +51,12 @@ const execFileAsync = promisify(execFile)
  */
 export interface PairingRelayDeps {
   getSettings(): Settings
-  getEntitlement(): string | null
   loadHostKeyPair(): Promise<KeyPair>
   /** The relay WebSocket endpoint advertised to the phone. */
-  relayEndpoint: string
+  relayEndpoint: string | (() => string)
   /** The API base for the /v1/relay/device mint. */
-  apiBase: string
-  /** Dev gate: never hit the prod relay/API from an unpackaged build (mirrors host-service). */
+  apiBase: string | (() => string)
+  /** Whether a Hub URL is configured. */
   relayAllowed(): boolean
 }
 
@@ -71,14 +70,10 @@ interface RelayDeviceResponse {
 async function mintRelayDevice(
   apiBase: string,
   body: {
-    entitlement: string | null
     deviceId: string
     hostPublicKeyB64: string
     label?: string
-    /** The phone's previous device token, relayed from the pair request: the backend's C2
-     *  proof-of-possession demands it for FREE-tier re-registration — without it every free
-     *  re-pair 403'd into a silent LAN-only pairing (the desktop can never hold this token
-     *  itself; only the phone can supply it). */
+    /** The phone's previous device token, relayed from the pair request. */
     priorDeviceToken?: string
   }
 ): Promise<RelayDeviceResponse | null> {
@@ -88,20 +83,7 @@ async function mintRelayDevice(
     const res = await fetch(`${apiBase}/v1/relay/device`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(
-        body.entitlement
-          ? // hostDeviceId rides the ENTITLED mint too: without it the row lands with
-            // hostDev=null and the backend's same-desktop C2 allowance can never match a
-            // later free re-pair from this same machine (decoded live from a reauth log).
-            { ...body, hostDeviceId: getDeviceId() }
-          : {
-              deviceId: body.deviceId,
-              hostDeviceId: getDeviceId(),
-              hostPublicKeyB64: body.hostPublicKeyB64,
-              label: body.label,
-              priorDeviceToken: body.priorDeviceToken
-            }
-      ),
+      body: JSON.stringify({ ...body, hostDeviceId: getDeviceId() }),
       signal: ctrl.signal
     })
     if (!res.ok) return null
@@ -119,37 +101,22 @@ async function mintRelayDevice(
 const REVOKE_TIMEOUT_MS = 8000
 
 /**
- * Take a paired phone's Pro entitlement back. Until this existed, Remove was purely local — the
- * peer key was unpinned and the socket cut, while the server kept minting Pro for that phone
- * forever.
- *
- * Three outcomes, because two cannot tell the truth here:
- *  - 'ok'      the route answered 204. It is deliberately idempotent and reveals nothing about
- *              WHICH of its four cases applied (revoked it / unknown device / the row carries a
- *              'free:'/'apple:' id so there was nothing of ours on it / already revoked) — all
- *              four mean the phone holds no entitlement of ours, which is what we asked for.
- *  - 'failed'  we asked and were refused (403 = someone else's row, 401 = the token did not
- *              verify) or could not reach the server. The caller must NOT report a clean removal.
- *  - 'skipped' we did not ask, and that is a normal state: a free-tier desktop holds no
- *              entitlement to sign the request with (and has no Pro of ours on that phone to
- *              reclaim), or there is no device (and so no row) to name at all.
- *
- * `relayDeviceId` is phone-supplied, unvalidated text, so it rides the JSON body — never a URL.
+ * Revoke a Hub relay device registration. `relayDeviceId` is phone-supplied, unvalidated text,
+ * so it rides the JSON body and never a URL.
  */
 export async function revokeRelayDevice(
   apiBase: string,
   relayDeviceId: string,
-  entitlement: string | null
+  _legacyAuth?: string | null
 ): Promise<DeviceRevokeServerOutcome> {
-  // Authorization for anything that moves a license is the signed entitlement, never a deviceId.
-  if (!entitlement || !relayDeviceId || !apiBase) return 'skipped'
+  if (!relayDeviceId || !apiBase) return 'skipped'
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), REVOKE_TIMEOUT_MS)
   try {
     const res = await fetch(`${apiBase}/v1/relay/device/revoke`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceId: relayDeviceId, entitlement }),
+      body: JSON.stringify({ deviceId: relayDeviceId }),
       signal: ctrl.signal
     })
     return res.ok ? 'ok' : 'failed'
@@ -167,10 +134,9 @@ export async function revokeRelayDevice(
  */
 async function buildRelayContext(
   deps: PairingRelayDeps | undefined
-): Promise<{ block: RelayPairingBlock; entitlement: string | null } | null> {
+): Promise<{ block: RelayPairingBlock } | null> {
   if (!deps || !deps.relayAllowed()) return null
   if (!deps.getSettings().phoneAccessEnabled) return null
-  const entitlement = deps.getEntitlement() // null on free tier → mint by deviceId
   try {
     const keys = await deps.loadHostKeyPair()
     const hostPublicKeyB64 = publicKeyToB64(keys.publicKey)
@@ -178,9 +144,8 @@ async function buildRelayContext(
       block: {
         hostId: hostIdFromPublicKeyB64(hostPublicKeyB64),
         hostPublicKeyB64,
-        relayEndpoint: deps.relayEndpoint
-      },
-      entitlement
+        relayEndpoint: typeof deps.relayEndpoint === 'function' ? deps.relayEndpoint() : deps.relayEndpoint
+      }
     }
   } catch {
     return null
@@ -201,8 +166,8 @@ export interface PairingStartResult {
   payload: string
   /** True when 127.0.0.1:22 accepted a connection — sshd is (probably) running. */
   sshOpen: boolean
-  /** What the QR on screen will mint: 'ok' = carries a relay block, 'dev' = unpackaged build
-   *  (relayAllowed() off — the QR is LAN-only regardless of the toggle), 'off' = toggle off.
+  /** What the QR on screen will mint: 'ok' carries a relay block, 'dev' means no Hub is configured,
+   * and 'off' means the phone-access toggle is off.
    *  Known at start, so the UI can warn BESIDE the QR instead of after the pairing. */
   relayPlan: 'ok' | 'dev' | 'off'
 }
@@ -212,9 +177,7 @@ export type PairingDone = {
   ok: boolean
   /** Only on ok=true: did the pairing come with a relay leg? 'off' = toggle disabled,
    *  'failed' = enabled but the mint failed (the SILENT LAN-only degrade that cost a
-   *  field debugging session — surface it, never swallow it), 'dev' = unpackaged build,
-   *  where relayAllowed() disables the relay regardless of the toggle — a self-builder
-   *  running `npm run dev` would otherwise read 'off' while staring at an ON toggle. */
+   *  field debugging session, which must be surfaced), and 'dev' means no Hub is configured. */
   relay?: 'ok' | 'off' | 'failed' | 'dev'
 }
 
@@ -226,8 +189,8 @@ export interface PairingService {
   /** All paired devices (token stripped) from ~/.nodeterm/agent.json. */
   listDevices(): Promise<PublicDevice[]>
   /**
-   * Revoke a device: drop its agent.json entry, delete its authorized_keys line, AND take its Pro
-   * entitlement back on the relay backend. The two legs are reported separately — see
+   * Revoke a device: drop its agent.json entry, delete its authorized_keys line, and remove its
+   * relay registration from the Hub. The two legs are reported separately; see
    * `DeviceRevokeResult`; this never throws, because a failure the caller cannot see is exactly
    * how the server leg went missing in the first place.
    */
@@ -638,12 +601,11 @@ export function createPairingService(relayDeps?: PairingRelayDeps): PairingServi
             relayDeviceId: phoneDeviceId
           })
         })
-        // Provision relay access for the phone when enabled + Pro. Any failure ⇒ LAN-only: we
+        // Provision relay access for the phone when enabled. Any failure means LAN-only: we
         // never fail the pairing over a relay hiccup (the phone still got its SSH key installed).
         let relayFields: { relay?: RelayPairingBlock; relayDeviceToken?: string } = {}
         if (relayCtx) {
-          const minted = await mintRelayDevice(relayDeps!.apiBase, {
-            entitlement: relayCtx.entitlement,
+          const minted = await mintRelayDevice(typeof relayDeps!.apiBase === 'function' ? relayDeps!.apiBase() : relayDeps!.apiBase, {
             deviceId: phoneDeviceId,
             hostPublicKeyB64: relayCtx.block.hostPublicKeyB64,
             label: name,
@@ -716,8 +678,8 @@ export function createPairingService(relayDeps?: PairingRelayDeps): PairingServi
   // is still live, so the owner believes it revoked and has no way left to retry.
   //
   // The relay device id is read BEFORE either write and kept even when the local leg fails: the
-  // entitlement is what authorizes the server leg, not the local write's success, and a phone the
-  // user asked to remove should stop being minted Pro either way.
+    // The Hub leg is independent of the local write, so a phone the user asked to remove should
+    // lose its relay registration either way.
   const revokeDevice = async (id: string): Promise<DeviceRevokeResult> => {
     const { local, relayId, found } = await serialize(async () => {
       const entry = readDevices(await readAgentJson()).find((d) => d.id === id)
@@ -759,9 +721,8 @@ export function createPairingService(relayDeps?: PairingRelayDeps): PairingServi
     // an unreachable backend. No local state depends on the answer.
     const server = found
       ? await revokeRelayDevice(
-          relayDeps?.apiBase ?? '',
-          relayId ?? id,
-          relayDeps?.getEntitlement() ?? null
+          typeof relayDeps?.apiBase === 'function' ? relayDeps.apiBase() : relayDeps?.apiBase ?? '',
+          relayId ?? id
         )
       : 'skipped'
     return { local, server }

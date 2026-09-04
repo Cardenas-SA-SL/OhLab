@@ -22,13 +22,12 @@ import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc'
 import type { CanvasMutation, Settings } from '../../shared/types'
 import { PtyManager } from '../../core/pty-manager'
-import { getStoredEntitlement } from '../../core/license'
 import { getDeviceId } from '../../core/device-id'
 import { createPhonePresence, type PhonePresence } from './phone-presence'
 import { publicKeyToB64, type KeyPair } from './e2ee'
 import {
-  API_BASE,
-  RELAY_URL,
+  apiBaseFor,
+  relayUrlFor,
   connectHostSession,
   loadOrCreateKeyPair,
   relayAllowed,
@@ -56,24 +55,19 @@ interface HostTokenResponse {
 }
 
 /**
- * Mint a standing host token from the API. Pro proves entitlement; the free tier sends
- * its deviceId instead (backend admits it against the server-side free-tier policy —
- * until that ships, the mint fails and free hosting simply stays down, i.e. today's
- * behavior). Returns null on any failure.
+ * Mint a standing host token from the configured Hub. Returns null on any failure.
  */
 async function mintHostToken(
-  entitlement: string | null,
-  hostPublicKeyB64: string
+  hostPublicKeyB64: string,
+  hubUrl: string
 ): Promise<HostTokenResponse | null> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 8000)
   try {
-    const res = await fetch(`${API_BASE}/v1/relay/host-token`, {
+    const res = await fetch(`${apiBaseFor(hubUrl)}/v1/relay/host-token`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(
-        entitlement ? { entitlement, hostPublicKeyB64 } : { deviceId: getDeviceId(), hostPublicKeyB64 }
-      ),
+      body: JSON.stringify({ hostPublicKeyB64 }),
       signal: ctrl.signal
     })
     if (!res.ok) return null
@@ -291,7 +285,6 @@ export function initStandingHost(
     if (!running || opening || pendingCount() >= TARGET_PENDING) return
     opening = true
     try {
-      const entitlement = getStoredEntitlement() // null on free tier → mint by deviceId
       // The host key is the identity every paired phone PINNED. If the OS keyring is locked we
       // cannot READ it (host-identity refuses to regenerate over it — that would rotate the
       // identity and force every phone to re-approve). There is nothing to advertise, so stop:
@@ -308,7 +301,8 @@ export function initStandingHost(
         scheduleReconnect() // transient disk error: back off and try again
         return
       }
-      const token = await mintHostToken(entitlement, publicKeyToB64(keys.publicKey))
+      const hubUrl = getSettings().hubUrl
+      const token = await mintHostToken(publicKeyToB64(keys.publicKey), hubUrl)
       if (!running) return
       if (!token) {
         scheduleReconnect()
@@ -325,7 +319,7 @@ export function initStandingHost(
         refreshTimer: null
       }
       pooled.session = connectHostSession({
-        url: RELAY_URL,
+        url: relayUrlFor(hubUrl),
         token: token.pairingToken,
         ourKeys: keys,
         pty: ptyManager,
@@ -364,7 +358,7 @@ export function initStandingHost(
         v: 1,
         hostId: hostIdFromPublicKeyB64(pub),
         hostPublicKeyB64: pub,
-        relayEndpoint: RELAY_URL,
+        relayEndpoint: relayUrlFor(hubUrl),
         hostDeviceId: getDeviceId()
       })
     } finally {
@@ -394,7 +388,7 @@ export function initStandingHost(
   }
 
   function reconcile(): void {
-    const want = enabled && relayAllowed()
+    const want = enabled && relayAllowed(getSettings().hubUrl)
     if (want && !running) start()
     else if (!want && running) stop()
   }
@@ -441,8 +435,7 @@ export function initStandingHost(
 // MANUAL SMOKE TEST (documented here, NOT automated — the live round-trip needs the deployed or a
 // local relay + the iOS client, like test/remote/relay-e2e.test.ts's block):
 //
-//   Prereqs: a Pro-entitled desktop build (or NODETERM_RELAY_URL + NODETERM_API_BASE pointing at a
-//   local relay/API), the nodeterm iOS app, and a phone already paired over the LAN.
+//   Prereqs: a configured OhLab Hub, the nodeterm iOS app, and a phone paired over the LAN.
 //     1. Desktop: Settings → Phone → toggle "Remote access from your phone" ON. Main mints a
 //        host-token (POST /v1/relay/host-token) and registers as role:'host' under hostId =
 //        base64url(sha256(hostPublicKey)).slice(0,22).

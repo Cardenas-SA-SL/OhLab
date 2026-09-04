@@ -3,6 +3,11 @@ import { DEFAULT_SETTINGS } from './types'
 import { DEFAULT_WORKTREE_PATH_TEMPLATE } from './worktree'
 
 describe('DEFAULT_SETTINGS', () => {
+  it('starts with Hub connectivity disabled and lets Team use the presence name', () => {
+    expect(DEFAULT_SETTINGS.hubUrl).toBe('')
+    expect(DEFAULT_SETTINGS.hubAccountName).toBe('')
+  })
+
   it('enables git auto-fetch by default', () => {
     expect(DEFAULT_SETTINGS.gitAutoFetch).toBe(true)
   })

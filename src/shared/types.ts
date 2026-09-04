@@ -1567,6 +1567,10 @@ export interface Settings {
    *  (end-to-end encrypted). Default on — the host only admits SAS-approved, pinned devices, so
    *  an un-paired install just keeps an idle listener. Toggle in Settings → Phone. */
   phoneAccessEnabled: boolean
+  /** Base HTTP(S) URL of the team's self-hosted OhLab Hub. Empty disables Hub features. */
+  hubUrl: string
+  /** Name published to the Hub directory. Empty falls back to the local presence name. */
+  hubAccountName: string
   /** Send APNs push notifications to relay-paired phones when an agent needs approval, asks a
    *  question, or finishes a turn (spec: apns-push). Default on — it only fires for users who
    *  have paired a phone. Toggle in Settings → Notifications. */
@@ -1735,6 +1739,8 @@ export const DEFAULT_SETTINGS: Settings = {
   telemetryEnabled: true,
   debugLogPanel: false,
   phoneAccessEnabled: true,
+  hubUrl: '',
+  hubAccountName: '',
   mobilePushEnabled: true,
   mobilePushNeedsYou: true,
   mobilePushDone: true,
@@ -2801,11 +2807,58 @@ export interface LicenseApi {
   releaseOthers(): Promise<LicenseDetail>
 }
 
+export type HubConnectionState = 'disabled' | 'connecting' | 'connected' | 'error'
+
+export interface HubStatus {
+  state: HubConnectionState
+  accountId?: string
+  accountName?: string
+  error?: string
+}
+
+export interface HubProjectMember {
+  accountId: string
+  name: string
+  publicKeyB64: string
+  role: 'owner' | 'member'
+  status: 'pending' | 'approved'
+  joinedAt: number
+  online: boolean
+}
+
+export interface HubProject {
+  projectId: string
+  name: string
+  ownerAccountId: string
+  inviteCode: string
+  createdAt: number
+  members?: HubProjectMember[]
+}
+
+export type HubEvent =
+  | { type: 'member-joined' | 'member-approved'; projectId: string; accountId: string }
+  | { type: 'member-online' | 'member-offline'; accountId: string }
+  | { type: 'session-request'; projectId: string; fromAccountId: string }
+  | { type: 'status'; status: HubStatus }
+
+export interface HubApi {
+  status(): Promise<HubStatus>
+  connect(): Promise<HubStatus>
+  listProjects(): Promise<HubProject[]>
+  createProject(name: string, projectId?: string): Promise<HubProject>
+  joinProject(inviteCode: string): Promise<HubProject>
+  approveMember(projectId: string, accountId: string): Promise<HubProject>
+  removeMember(projectId: string, accountId: string): Promise<HubProject>
+  connectMember(projectId: string, toAccountId: string): Promise<{ offer: string }>
+  regenerateInvite(projectId: string): Promise<HubProject>
+  onEvent(listener: (event: HubEvent) => void): () => void
+}
+
 export interface RemoteHostApi {
   /**
    * Enter host mode: mint a pairing token, connect to the relay as the host, and return the
-   * pairing offer string (`nodeterm://pair?code=…`) to hand to a client. Rejects if the device
-   * is not entitled to Pro (or in a dev build without NODETERM_RELAY_URL).
+   * pairing offer string (`nodeterm://pair?code=…`) to hand to a client. Rejects when no Hub URL
+   * is configured.
    */
   start(): Promise<{ offer: string }>
   /** Leave host mode: close the relay connection (ends served PTYs, drops client access). */
@@ -2870,16 +2923,14 @@ export interface RelayPeerPending {
 export interface RelayHostApi {
   /**
    * Enter host mode over the relay: connect and return a pairing offer string to hand to a client.
-   * Rejects if the device is not entitled (or a dev build without the relay URL). `projectId` is the
+   * Rejects if no Hub URL is configured. `projectId` is the
    * single project this hosting session shares with the peer; omit for the legacy whole-workspace view.
    */
   start(projectId?: string): Promise<{ offer: string; id: string }>
   /**
-   * Team Access: ADD a seat — mint a fresh pairing offer for one more device (no supersede), tagged
-   * with the optional invitee `email` (display label only). Rejects `E_SEATS_FULL` when the licensed
-   * seat cap is reached, and with the Pro / dev-build errors `start` uses. `projectId` scopes the
-   * shared project as in `start`. Resolves with the offer AND the seat's `id` — the settings UI uses
-   * it to show the pending row immediately and to `revoke` a seat whose peer never connects.
+   * Team Access: mint a fresh pairing offer for one more device, tagged with an optional display
+   * label. `projectId` scopes the shared project as in `start`. The returned id can revoke a
+   * connection whose peer never finishes connecting.
    */
   invite(opts?: { projectId?: string; email?: string }): Promise<{ offer: string; id: string }>
   /** Leave host mode: close every bridged peer in the pool. */
@@ -2914,7 +2965,7 @@ export interface RelayClientApi {
    * Connect to a host by its pairing offer string. Gates on entitlement (rejects otherwise, and in
    * dev builds without the relay URL). Resolves with a `connectionId` to address the methods below.
    */
-  connect(offer: string): Promise<string>
+  connect(offer: string, options?: { autoConfirm?: boolean }): Promise<string>
   /**
    * Listen for the channel SAS once the handshake completes, so the client human can compare it
    * with the code shown on the host before approving. Returns an unsubscribe function.
@@ -3090,6 +3141,7 @@ export interface NodeTerminalApi {
   updates: UpdateApi
   announcements: AnnouncementsApi
   license: LicenseApi
+  hub: HubApi
   contextLink: ContextLinkApi
   boardLog: BoardLogApi
   logs: LogApi

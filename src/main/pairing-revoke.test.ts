@@ -75,10 +75,9 @@ const agentJson = (): { devices?: DeviceEntry[] } => JSON.parse(readFileSync(AGE
 const deviceIds = (): string[] => (agentJson().devices ?? []).map((d) => d.id)
 const authKeys = (): string => readFileSync(AUTH_KEYS, 'utf8')
 
-/** Relay deps carrying an entitlement, i.e. a Pro desktop that CAN authorize a revoke. */
-const relayDeps = (entitlement: string | null): PairingRelayDeps => ({
+/** Relay deps targeting the configured Hub. */
+const relayDeps = (_legacyAuth: string | null): PairingRelayDeps => ({
   getSettings: () => ({ phoneAccessEnabled: true }) as unknown as Settings,
-  getEntitlement: () => entitlement,
   loadHostKeyPair: async () => {
     throw new Error('not used by revoke')
   },
@@ -102,7 +101,7 @@ afterAll(() => {
 })
 
 describe('revokeRelayDevice', () => {
-  it('posts the phone id with the host entitlement and reports ok on 204', async () => {
+  it('posts the phone id without license proof and reports ok on 204', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -115,7 +114,7 @@ describe('revokeRelayDevice', () => {
     // The deviceId is phone-supplied, unvalidated text: it rides the JSON BODY, never a URL.
     expect(String(url)).toBe('https://api.x/v1/relay/device/revoke')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body)).toEqual({ deviceId: 'phone-1', entitlement: 'TOKEN' })
+    expect(JSON.parse(init.body)).toEqual({ deviceId: 'phone-1' })
   })
 
   // 403 is the route's only real refusal ("that row is someone else's"), 401 a token that did not
@@ -150,13 +149,11 @@ describe('revokeRelayDevice', () => {
     expect(await pending).toBe('failed')
   })
 
-  // 'skipped' means "we did not ask, and that is fine" — a free-tier desktop holds no entitlement
-  // to sign the request with, and has no Pro of ours on that phone to reclaim.
-  it('skips — without calling the server — when there is no entitlement to sign with', async () => {
-    const fetchMock = vi.fn()
+  it('does not require legacy license proof', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
-    expect(await revokeRelayDevice('https://api.x', 'phone-1', null)).toBe('skipped')
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(await revokeRelayDevice('https://api.x', 'phone-1', null)).toBe('ok')
+    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'phone-1' })
   })
 
   it('skips when there is no relay device id to name', async () => {
@@ -187,7 +184,7 @@ describe('createPairingService().revokeDevice', () => {
     expect(await service.revokeDevice('dev-a')).toEqual({ local: true, server: 'ok' })
 
     // 'dev-a' is OUR id; the backend keys its row on the id the phone sent.
-    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'phone-relay-1', entitlement: 'TOKEN' })
+    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'phone-relay-1' })
     expect(deviceIds()).toEqual([])
     expect(authKeys()).toBe(`${KEY_OTHER}\n`)
   })
@@ -204,17 +201,17 @@ describe('createPairingService().revokeDevice', () => {
     const service = createPairingService(relayDeps('TOKEN'))
 
     expect(await service.revokeDevice('dev-a')).toEqual({ local: true, server: 'ok' })
-    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'dev-a', entitlement: 'TOKEN' })
+    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'dev-a' })
     expect(deviceIds()).toEqual([])
   })
 
-  it('skips the server on a free-tier desktop, and still removes the device locally', async () => {
-    const fetchMock = vi.fn()
+  it('uses the Hub without license state and still removes the device locally', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
     const service = createPairingService(relayDeps(null))
 
-    expect(await service.revokeDevice('dev-a')).toEqual({ local: true, server: 'skipped' })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(await service.revokeDevice('dev-a')).toEqual({ local: true, server: 'ok' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(deviceIds()).toEqual([])
   })
 
@@ -236,10 +233,7 @@ describe('createPairingService().revokeDevice', () => {
     expect(authKeys()).toBe(`${KEY_OTHER}\n`)
   })
 
-  // A half-finished revoke must never render as a clean one (the discipline remote/revocation.ts
-  // states in its header), and the Pro is still worth reclaiming when the local files would not
-  // budge — the entitlement is what authorizes the server leg, not the local write's success.
-  it('reports local:false when the registry write fails, and still reclaims the Pro', async () => {
+  it('reports local:false when the registry write fails, and still revokes at the Hub', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
     const service = createPairingService(relayDeps('TOKEN'))
@@ -250,7 +244,7 @@ describe('createPairingService().revokeDevice', () => {
     })
 
     expect(await service.revokeDevice('dev-a')).toEqual({ local: false, server: 'ok' })
-    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'phone-relay-1', entitlement: 'TOKEN' })
+    expect(fetchBody(fetchMock)).toEqual({ deviceId: 'phone-relay-1' })
   })
 
   // The fallback above is licensed by there BEING a device — an id that names no pairing names no

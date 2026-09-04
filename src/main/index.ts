@@ -263,12 +263,13 @@ import {
   initRemoteHost,
   loadOrCreateKeyPair,
   relayAllowed,
-  API_BASE as RELAY_API_BASE,
-  RELAY_URL
+  apiBaseFor,
+  relayUrlFor
 } from './remote/host-service'
 import { initStandingHost } from './remote/standing-host'
 import { killRelayHostsByPeerKey } from './remote/relay-host'
 import { initRelayHost } from './remote/relay-host-service'
+import { initHubClient, type MainHubClient } from './hub-client'
 import { createRevoker } from './remote/revocation'
 import { loadApprovedDevices, saveApprovedDevices } from './remote/approved-devices'
 import { publicKeyToB64 } from './remote/e2ee'
@@ -334,6 +335,7 @@ function isSafeExternalUrl(url: unknown): url is string {
 }
 
 const settingsStore = new SettingsStore()
+let mainHubClient: MainHubClient | null = null
 // ⌘M / ⌘W are registry commands (`node.toggleMarkdown` / `node.close`), so what the window
 // intercepts follows the user's settings. Resolved LAZILY (first keystroke, long after
 // `settingsStore.init()` in `whenReady`) rather than at module load, where `get()` would still be
@@ -365,6 +367,7 @@ settingsStore.onChange((s) => {
   // is belt-and-braces for the ordering between the two `onChange` subscribers — cheap, and not
   // something to leave to subscriber registration order.)
   syncMenuForStandDown()
+  void mainHubClient?.sync()
 })
 // TWO bits the RENDERER owns and main only mirrors. Both are module-level `let`s read through a
 // closure, exactly like `interceptBindings` above: the window is created later and can be recreated
@@ -1284,7 +1287,7 @@ app.whenReady().then(async () => {
     models: whisperModels,
     settings: () => settingsStore.get(),
     licenseToken: () => getStoredEntitlement(),
-    apiBase: RELAY_API_BASE
+    apiBase: apiBaseFor(settingsStore.get().hubUrl)
   })
   // Electron-only mic consent: not core-bound (systemPreferences is main-process-only), so it's
   // a raw ipcMain handler like the other Electron-only surfaces (dialogs, shell, media) rather
@@ -1526,11 +1529,10 @@ app.whenReady().then(async () => {
   // window over `pairing:done` so the settings section can show the paired/timeout state.
   const pairingService = createPairingService({
     getSettings: () => settingsStore.get(),
-    getEntitlement: getStoredEntitlement,
     loadHostKeyPair: loadOrCreateKeyPair,
-    relayEndpoint: RELAY_URL,
-    apiBase: RELAY_API_BASE,
-    relayAllowed
+    relayEndpoint: () => relayUrlFor(settingsStore.get().hubUrl),
+    apiBase: () => apiBaseFor(settingsStore.get().hubUrl),
+    relayAllowed: () => relayAllowed(settingsStore.get().hubUrl)
   })
   ipcMain.handle(IPC.pairingStart, () =>
     pairingService.start((result) => {
@@ -3590,12 +3592,20 @@ app.whenReady().then(async () => {
     if (typeof msg?.nodeId !== 'string' || !msg.nodeId) return
     setNodeHibernated(msg.nodeId, msg.on === true)
   })
-  initRemoteHost(win, ptyManager, listProjectsOutput, hostBridge)
+  initRemoteHost(win, ptyManager, listProjectsOutput, hostBridge, () => settingsStore.get().hubUrl)
   // NEW interactive relay host (Stage 4): a connecting peer desktop becomes a first-class
   // CorePlatform client of this desktop after mutual SAS approval. Runs BESIDE initRemoteHost (the
   // phone still uses the legacy flow). Inert until `relay:host:start` — a solo user pays nothing.
   // Revocation reaches its sessions via `killRelayHostsByPeerKey` (peerRevoker, above).
-  initRelayHost(win, corePlatform, {})
+  initRelayHost(win, corePlatform, { getHubUrl: () => settingsStore.get().hubUrl })
+  mainHubClient?.stop()
+  mainHubClient = initHubClient(win, corePlatform, () => settingsStore.get(), async (shared) => {
+    const workspace = await workspaceStore.load({ sideline: false })
+    return workspace.projects.find((project) => project.id === shared.projectId)?.id
+      ?? workspace.projects.find((project) => project.name === shared.name)?.id
+      ?? null
+  })
+  void mainHubClient.sync()
   // Standing (phone) relay host: keep a host connection registered so a paired phone can reach
   // this Mac from anywhere. Honors settings.phoneAccessEnabled internally.
   const standingHost = initStandingHost(win, ptyManager, () => settingsStore.get(), listProjectsOutput, hostBridge)
@@ -3612,11 +3622,15 @@ app.whenReady().then(async () => {
     const sendTo = (channel: string, ...args: unknown[]): void => {
       if (!win.isDestroyed()) win.webContents.send(channel, ...args)
     }
-    ipcMain.handle(IPC.relayClientConnect, async (_e, offerCode: string): Promise<string> => {
+    ipcMain.handle(IPC.relayClientConnect, async (
+      _e,
+      offerCode: string,
+      options: { autoConfirm?: boolean } = {}
+    ): Promise<string> => {
       // No Pro gate on the client: the paywall is the HOST minting the pairing token, so a valid offer
       // is the credential (the paywall is host-side). The dev/relay gate still applies.
-      if (!relayAllowed()) {
-        throw new Error('Remote access is unavailable in development builds (set NODETERM_RELAY_URL).')
+      if (!relayAllowed(settingsStore.get().hubUrl)) {
+        throw new Error('Set the OhLab Hub URL in Settings > Team')
       }
       const offer = decodeOffer(String(offerCode ?? ''))
       if (!offer) {
@@ -3633,7 +3647,10 @@ app.whenReady().then(async () => {
         hostKeyB64: offer.hostPublicKeyB64,
         ourKeys: keys,
         // The SAS is known — push it so this human can compare it before the host approves.
-        onSas: (s) => sendTo(IPC.relayClientSas(connectionId), s.sas()),
+        onSas: (s) => {
+          sendTo(IPC.relayClientSas(connectionId), s.sas())
+          if (options.autoConfirm === true) setImmediate(() => s.confirm())
+        },
         // Mutually approved — the frame pipe is live.
         onApproved: () => sendTo(IPC.relayClientApproved(connectionId)),
         // An inbound rpc frame from the host (res/ev) → the renderer's RpcClient.

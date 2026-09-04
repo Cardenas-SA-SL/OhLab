@@ -318,7 +318,6 @@ describe('pairing remembers the phone’s relay device id', () => {
   const hostKeys = genKeyPair()
   const relayDeps = (): PairingRelayDeps => ({
     getSettings: () => ({ phoneAccessEnabled: true }) as unknown as Settings,
-    getEntitlement: () => null,
     loadHostKeyPair: async () => hostKeys,
     relayEndpoint: 'wss://relay.example/ws',
     apiBase: 'https://api.example',

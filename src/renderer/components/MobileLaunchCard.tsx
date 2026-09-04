@@ -38,8 +38,7 @@ export function MobileLaunchCard({ onClose }: { onClose: () => void }): React.JS
         <p className="mlaunch__body">
           Attach to these same live sessions from your phone — watch an agent work, answer a
           &ldquo;needs you&rdquo;, type into any terminal from anywhere. OhLab stays free and
-          open source, developed in the open with the community; the app and its Pro features are
-          what fund that work. Your support means everything. ❤️
+          open source and developed in the open with the community. Your support means everything. ❤️
         </p>
         <div className="mlaunch__actions">
           <button

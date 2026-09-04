@@ -93,7 +93,7 @@ describe('buildPairingPayload', () => {
     const relay = {
       hostId: 'abcABC012_-def012ghij',
       hostPublicKeyB64: 'AAAAhostpub',
-      relayEndpoint: 'wss://relay.nodeterm.dev'
+      relayEndpoint: 'wss://hub.example/relay'
     }
     const json = buildPairingPayload({
       host: '192.168.1.5',
@@ -105,7 +105,7 @@ describe('buildPairingPayload', () => {
       relay
     })
     expect(json).toBe(
-      '{"v":1,"host":"192.168.1.5","port":22,"user":"enes","token":"tok","pairPort":5,"nodeterm":true,"name":"Mac","hostKey":"AAAAhostpub","relay":{"hostId":"abcABC012_-def012ghij","hostPublicKeyB64":"AAAAhostpub","relayEndpoint":"wss://relay.nodeterm.dev"}}'
+      '{"v":1,"host":"192.168.1.5","port":22,"user":"enes","token":"tok","pairPort":5,"nodeterm":true,"name":"Mac","hostKey":"AAAAhostpub","relay":{"hostId":"abcABC012_-def012ghij","hostPublicKeyB64":"AAAAhostpub","relayEndpoint":"wss://hub.example/relay"}}'
     )
     expect(JSON.parse(json)).toMatchObject({ hostKey: 'AAAAhostpub', relay })
   })
@@ -126,7 +126,7 @@ describe('buildPairingPayload', () => {
     const relay = {
       hostId: 'abcABC012_-def012ghij',
       hostPublicKeyB64: 'AAAA',
-      relayEndpoint: 'wss://relay.nodeterm.dev'
+      relayEndpoint: 'wss://hub.example/relay'
     }
     const json = buildPairingPayload({
       host: '192.168.1.5',
@@ -137,7 +137,7 @@ describe('buildPairingPayload', () => {
       relay
     })
     expect(json).toBe(
-      '{"v":1,"host":"192.168.1.5","port":22,"user":"enes","token":"tok","pairPort":5,"nodeterm":true,"name":"Mac","relay":{"hostId":"abcABC012_-def012ghij","hostPublicKeyB64":"AAAA","relayEndpoint":"wss://relay.nodeterm.dev"}}'
+      '{"v":1,"host":"192.168.1.5","port":22,"user":"enes","token":"tok","pairPort":5,"nodeterm":true,"name":"Mac","relay":{"hostId":"abcABC012_-def012ghij","hostPublicKeyB64":"AAAA","relayEndpoint":"wss://hub.example/relay"}}'
     )
     expect(JSON.parse(json).relay).toEqual(relay)
   })

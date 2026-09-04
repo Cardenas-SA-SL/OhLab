@@ -14,7 +14,6 @@ import {
 import { formatShortcut, isHoldChord } from '@shared/shortcut'
 import { dictationBinding } from '../../../lib/keybindingOverrides'
 import { useSettings } from '../../../state/settings'
-import { useEntitlement } from '../../../state/entitlement'
 import { SettingsSection } from '../SettingsSection'
 import { SearchableRow } from '../SearchableRow'
 import { FieldRow } from '../FieldRow'
@@ -45,7 +44,6 @@ const ROWS = {
       'base',
       'small',
       'large',
-      'pro',
       'none',
       'off',
       'disable',
@@ -89,8 +87,7 @@ export function SpeechSection({
   onNavigate
 }: {
   isActive: boolean
-  /** Switches the active settings tab — used to route a free user who clicks a PRO model's
-   *  select/download to the License section (the sales surface; there is no paywall dialog). */
+  /** Opens related settings such as keyboard shortcuts. */
   onNavigate: (id: SettingsSectionId) => void
 }): React.JSX.Element {
   const settings = useSettings((s) => s.settings)
@@ -99,7 +96,6 @@ export function SpeechSection({
   // downgrade mirror), and a string selector keeps an unrelated settings write from re-rendering
   // this section. `''` = the user disabled dictation's shortcut.
   const dictationChord = useSettings(() => dictationBinding())
-  const isPremium = useEntitlement((s) => s.isPremium)
 
   const [models, setModels] = useState<SpeechModelInfo[]>([])
   const [progress, setProgress] = useState<Record<string, number>>({})
@@ -151,18 +147,10 @@ export function SpeechSection({
   }
 
   const selectModel = (m: SpeechModelInfo): void => {
-    if (m.pro && !isPremium) {
-      onNavigate('license')
-      return
-    }
     update({ speech: { ...settings.speech, model: m.id } })
   }
 
   const downloadModel = async (m: SpeechModelInfo): Promise<void> => {
-    if (m.pro && !isPremium) {
-      onNavigate('license')
-      return
-    }
     setRowError((e) => ({ ...e, [m.id]: '' }))
     setBusy((b) => ({ ...b, [m.id]: true }))
     setProgress((p) => ({ ...p, [m.id]: 0 }))
@@ -285,7 +273,7 @@ export function SpeechSection({
               {models.map((m) => {
                 const pct = progress[m.id]
                 const downloading = busy[m.id] && pct !== undefined
-                const locked = m.pro && !isPremium
+                const largeModel = m.approxMB >= 1000
                 return (
                   <div
                     key={m.id}
@@ -306,12 +294,12 @@ export function SpeechSection({
                           </span>
                           <span
                             className={
-                              m.pro
+                              largeModel
                                 ? 'rounded-full bg-[color:var(--accent)]/15 px-2 py-0.5 text-[11px] font-medium text-[color:var(--accent)]'
                                 : 'rounded-full bg-fill-weak px-2 py-0.5 text-[11px] font-medium text-muted'
                             }
                           >
-                            {m.pro ? 'PRO' : 'FREE'}
+                            {largeModel ? 'LARGE' : 'COMPACT'}
                           </span>
                         </div>
                         <p className="text-[12px] text-muted">
@@ -334,8 +322,6 @@ export function SpeechSection({
                         >
                           Delete
                         </Button>
-                      ) : locked ? (
-                        <Button onClick={() => onNavigate('license')}>Unlock with Pro</Button>
                       ) : (
                         <Button disabled={busy[m.id]} onClick={() => void downloadModel(m)}>
                           {downloading ? `${pct}%` : 'Download'}

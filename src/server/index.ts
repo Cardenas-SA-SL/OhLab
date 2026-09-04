@@ -100,7 +100,7 @@ import { isPremium, getStoredEntitlement } from '../core/license'
 
 // Same env-override + default as src/core/check.ts / license.ts / src/main/telemetry.ts — each
 // shell derives it locally rather than sharing an import (src/server must not import src/main).
-const API_BASE = process.env.NODETERM_API_BASE || 'https://api.nodeterm.dev'
+const API_BASE = process.env.NODETERM_API_BASE || ''
 
 /**
  * App version fed to ServerPlatform (surfaced to the renderer as the desktop app's

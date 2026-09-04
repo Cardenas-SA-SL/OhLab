@@ -19,7 +19,6 @@ export type SettingsSectionId =
   | 'commit'
   | 'tmux'
   | 'github-issues'
-  | 'license'
   | 'presence'
   | 'remote'
   | 'team-access'
@@ -98,7 +97,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { id: 'presence', title: 'Your name' },
       { id: 'phone', title: 'Phone' },
       { id: 'remote', title: 'Remote access' },
-      { id: 'team-access', title: 'Team seats' },
+      { id: 'team-access', title: 'Team' },
       { id: 'ssh', title: 'Remote (SSH)' }
     ]
   },
@@ -106,7 +105,6 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     id: 'application',
     title: 'Application',
     sections: [
-      { id: 'license', title: 'License' },
       { id: 'updates', title: 'Updates' },
       { id: 'privacy', title: 'Privacy' },
       { id: 'debug', title: 'Debug' }

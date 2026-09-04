@@ -45,8 +45,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
   const [devices, setDevices] = useState<PairedDevice[]>([])
   const [pendingRevoke, setPendingRevoke] = useState<PairedDevice | null>(null)
   // What the last revoke has to say, and whether it is a WARNING or a receipt. A successful
-  // removal owes the user a sentence too (the phone keeps Pro for a few days), and printing that
-  // in the warning colour would read as a failure.
+  // removal owes the user a receipt too, and printing that in the warning colour would read as a failure.
   const [revokeNote, setRevokeNote] = useState<{ text: string; warn: boolean } | null>(null)
 
   const phoneAccessEnabled = useSettings((s) => s.settings.phoneAccessEnabled)
@@ -86,20 +85,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
     void refreshDevices()
   }, [refreshDevices])
 
-  // Removing local access and taking the phone's Pro back are DIFFERENT facts, and the second one
-  // used to be missing entirely — Remove unpinned the key here while the server kept minting Pro
-  // for that phone forever. So both legs are surfaced:
-  //  - 'skipped' says nothing. It means we had nothing of ours to revoke — a free-tier desktop
-  //    holds no entitlement to sign the request with, or the device was already gone from the
-  //    registry — and warning there would tell a free user their phone's Pro is stuck when it
-  //    never had any of ours. (A device paired before we recorded the phone's relay id does NOT
-  //    land here: it falls back to our own pairing id, which is the row's key in that case, so the
-  //    server leg really does run — see `revokeDevice` in main/pairing-service.ts.)
-  //  - 'ok' still owes a sentence: the phone keeps the entitlement it already holds until that
-  //    expires, so Pro does not stop the instant the row goes. Saying nothing produced exactly the
-  //    support mail this branch exists to end ("I removed it and it still has Pro").
-  //  - 'failed' warns — and does not prescribe waiting. It collapses a 403 (not our row), a 401,
-  //    a 5xx and an unreachable server, and only the last of those clears by itself.
+  // Surface local removal and Hub registration removal independently so a partial failure is clear.
   const revokeDevice = async (device: PairedDevice): Promise<void> => {
     setPendingRevoke(null)
     setRevokeNote(null)
@@ -112,24 +98,16 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
         notes.push(`Couldn’t remove “${device.name}” from this machine — try again.`)
       }
       if (result.server === 'failed') {
-        // Deliberately not "pair it and remove it again": that used to be the whole advice, and it
-        // is wrong twice over — a 403 will never clear however long you wait, and pairing RESTORES
-        // the phone's Pro (the mint upserts its row) before the second removal tries again. It is
-        // offered as what it is — a retry that costs something — with support as the reliable path.
         notes.push(
           (result.local ? `Removed “${device.name}” from this machine, but its` : 'Its') +
-            ' Pro access couldn’t be revoked — we were refused or couldn’t reach the server — so' +
-            ' that phone may keep Pro. Pairing it again and removing it retries the revoke, though' +
-            ' pairing restores its Pro in the meantime. Get in touch if it keeps failing.'
+            ' Hub registration could not be revoked. Pair it again and retry removal when the Hub is reachable.'
         )
       }
       if (notes.length) {
         setRevokeNote({ text: notes.join(' '), warn: true })
       } else if (result.server === 'ok') {
-        // Not instant, and we say so. The phone holds a signed entitlement minted for up to seven
-        // days; revoking the row stops the NEXT one, it cannot reach into the phone.
         setRevokeNote({
-          text: `Removed “${device.name}”. Its Pro ends when the pass it already holds expires — within 7 days.`,
+          text: `Removed “${device.name}” from this machine and the Hub.`,
           warn: false
         })
       }
@@ -234,9 +212,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
                   <p className="text-sm text-muted">Waiting for your phone… (10 min)</p>
                   {relayPlan === 'dev' ? (
                     <p className="text-sm" style={{ color: '#ff9f0a' }}>
-                      Dev build: the relay is off regardless of the toggle, so this code pairs
-                      LAN-only. Run a packaged build — or set NODETERM_RELAY_URL — for remote
-                      access.
+                      Set the OhLab Hub URL in Settings &gt; Team. This code pairs LAN-only until then.
                     </p>
                   ) : !phoneAccessEnabled ? (
                     <p className="text-sm" style={{ color: '#ff9f0a' }}>
@@ -277,9 +253,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
                 </p>
               ) : relayResult === 'dev' ? (
                 <p className="text-sm text-muted">
-                  LAN-only pairing — this is an unpackaged (dev) build, where the relay is
-                  disabled regardless of the toggle. Set NODETERM_RELAY_URL to test remote
-                  access, or use a packaged build.
+                  LAN-only pairing. Set the OhLab Hub URL in Settings &gt; Team for remote access.
                 </p>
               ) : null}
               <Button onClick={reset}>Pair another phone</Button>
@@ -332,10 +306,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
 
       {pendingRevoke ? (
         <ConfirmDialog
-          // Both legs, and the timing of the one that is not instant. "If" rather than a flat
-          // claim: a free-tier desktop has no Pro of ours on that phone to take back, and this
-          // dialog cannot tell — the server leg reports that only after the fact ('skipped').
-          message={`Revoke “${pendingRevoke.name}”? Its key is removed from this machine and it will no longer be able to connect. If its Pro comes from ${thisMachine()}’s license, that is revoked too — the phone loses Pro within 7 days.`}
+          message={`Revoke “${pendingRevoke.name}”? Its key and Hub registration are removed and it will no longer be able to connect to ${thisMachine()}.`}
           confirmLabel="Revoke"
           onConfirm={() => void revokeDevice(pendingRevoke)}
           onCancel={() => setPendingRevoke(null)}

@@ -106,7 +106,7 @@ export function PresenceIdentitySection({ isActive }: { isActive: boolean }): Re
           </div>
           <p className="text-sm text-muted">
             If you never pick a name you appear to others as “Someone”. This is separate from your
-            login or license — it only labels you during live collaboration.
+            login or password. It only labels you during live collaboration.
           </p>
         </div>
       </SearchableRow>

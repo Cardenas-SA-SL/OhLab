@@ -13,7 +13,6 @@ import {
 } from '../../lib/keybindingOverrides'
 import { IOS_APP_STORE_URL } from '../../lib/links'
 import { useSettings } from '../../state/settings'
-import { useEntitlement } from '../../state/entitlement'
 import { Switch } from '@renderer/ui/Switch'
 import { AgentIcon } from '../../lib/agentIcons'
 import {
@@ -69,7 +68,6 @@ const STEP_COUNT = STEPS.length
 export function OnboardingFlow({ onClose }: { onClose: () => void }) {
   const settings = useSettings((s) => s.settings)
   const update = useSettings((s) => s.update)
-  const isPremium = useEntitlement((s) => s.isPremium)
   const [step, setStep] = useState(0)
 
   // ---- dictation models (loaded once; selection + download mirror Settings → Speech) ----
@@ -100,10 +98,6 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
   }, [refreshModels])
 
   const pickModel = (m: SpeechModelInfo): void => {
-    if (m.pro && !isPremium) {
-      setModelHint('Pro model — unlock later in Settings → License. Tiny is free and works offline.')
-      return
-    }
     setModelHint('')
     update({ speech: { ...settings.speech, model: m.id } })
     if (!m.downloaded && progress[m.id] === undefined) {
@@ -317,13 +311,12 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
                     return (
                       <button
                         key={m.id}
-                        className={`onb-model ${selected ? 'is-selected' : ''} ${m.pro && !isPremium ? 'is-locked' : ''}`}
+                        className={`onb-model ${selected ? 'is-selected' : ''}`}
                         onClick={() => pickModel(m)}
                       >
                         <span className="onb-model__radio" />
                         <span className="onb-model__name">{modelLabel(m.id)}</span>
                         <span className="onb-model__size">{formatSize(m.sizeMB ?? m.approxMB)}</span>
-                        {m.pro && <span className="onb-pro">PRO</span>}
                         {m.downloaded && (
                           <span className="onb-model__ok">
                             <OnbCheck />

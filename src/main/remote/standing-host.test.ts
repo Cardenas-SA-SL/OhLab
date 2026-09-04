@@ -50,6 +50,8 @@ let keyError: Error | null = null
 vi.mock('./host-service', () => ({
   API_BASE: 'https://api.test',
   RELAY_URL: 'wss://relay.test',
+  apiBaseFor: () => 'https://api.test',
+  relayUrlFor: () => 'wss://relay.test',
   relayAllowed: () => true,
   loadOrCreateKeyPair: async () => {
     if (keyError) throw keyError
@@ -93,7 +95,7 @@ function makeHost() {
       send: (channel: string, ...args: unknown[]) => sentToWin.push({ channel, args })
     }
   }
-  return initStandingHost(win as never, {} as never, () => ({ phoneAccessEnabled: true }) as never)
+  return initStandingHost(win as never, {} as never, () => ({ phoneAccessEnabled: true, hubUrl: 'https://api.test' }) as never)
 }
 
 /** The pending-approval id the host just surfaced to the human (SAS dialog). */

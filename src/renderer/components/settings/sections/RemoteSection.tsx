@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useEntitlement } from '../../../state/entitlement'
 import { useProjects } from '../../../state/projects'
 import { hostShareOptions } from '../../../lib/relayHostShare'
 import { thisMachine } from '../../../lib/machineName'
@@ -27,7 +26,7 @@ export function RemoteSection({
   isActive: boolean
   onClose: () => void
 }): React.JSX.Element {
-  const isPremium = useEntitlement((s) => s.isPremium)
+  const isPremium = true
   const projects = useProjects((s) => s.projects)
   const activeProjectId = useProjects((s) => s.activeProjectId)
   const [hostOffer, setHostOffer] = useState('')
@@ -82,7 +81,7 @@ export function RemoteSection({
     <SettingsSection
       id="remote"
       title="Remote access"
-      description="Open terminals that run on another machine you own — end-to-end encrypted over the relay. Hosting (sharing this machine) is Pro; connecting to a host is free."
+      description="Open terminals on another machine through your self-hosted OhLab Hub, end-to-end encrypted."
       isActive={isActive}
       searchEntries={ENTRIES}
     >
@@ -145,8 +144,7 @@ export function RemoteSection({
             )
           ) : (
             <p className="text-sm text-muted">
-              Hosting this machine requires OhLab Pro — upgrade above. Connecting to a host you
-              were given a code for is free.
+              Configure an OhLab Hub in Settings &gt; Team first.
             </p>
           )}
         </div>

@@ -15,7 +15,7 @@
  * escape and the file stays text. There is no legitimate reason for the raw byte to sit in source.
  */
 import { execFileSync } from 'child_process'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 
@@ -35,7 +35,10 @@ describe('source hygiene', () => {
     // A guard that silently scanned nothing would pass forever. Pin that we actually looked.
     expect(files.length).toBeGreaterThan(100)
 
-    const offenders = files.filter((f) => readFileSync(join(repoRoot, f)).includes(0x00))
+    const offenders = files.filter((f) => {
+      const absolute = join(repoRoot, f)
+      return existsSync(absolute) && readFileSync(absolute).includes(0x00)
+    })
     expect(offenders).toEqual([])
   })
 })
