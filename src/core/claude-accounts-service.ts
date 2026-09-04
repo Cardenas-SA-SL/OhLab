@@ -213,7 +213,7 @@ export function registerClaudeAccountsIpc(deps: ClaudeAccountsDeps = {}): void {
     // account ids, and the second one would be removable-without-delete while the first still
     // `rm -rf`s the same directory.
     if (managedRoot && (configDir === managedRoot || configDir.startsWith(managedRoot + path.sep))) {
-      throw new Error('That is a nodeterm-managed account directory — add it with Add account.')
+      throw new Error('That is an OhLab-managed account directory — add it with Add account.')
     }
     // Duplicate by NORMALIZED path, not by the string typed: `~/.claude-2/` and `/home/u/.claude-2`
     // are the same dir, and two rows for one dir would show two chips for one identity.

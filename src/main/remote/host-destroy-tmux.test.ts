@@ -14,7 +14,7 @@
 //
 // WHERE IT BINDS (issue #629). It must use the socket NAME `PtyManager` binds, `TMUX_SOCKET` — that
 // is not a choice, the manager hardcodes it and this suite exists to watch the manager's own kill
-// land. Until the run-wide sandbox existed, that name resolved to `/tmp/tmux-<uid>/node-terminal`:
+// land. Until the run-wide sandbox existed, that name resolved to `/tmp/tmux-<uid>/ohlab`:
 // the server holding every terminal on the developer's machine, since this repo is developed from
 // inside nodeterm. So the suite created sessions on the user's live server and drove a real
 // `PtyManager` at it. `test/setup/tmux-sandbox.ts` now re-points `TMUX_TMPDIR` for the whole run,

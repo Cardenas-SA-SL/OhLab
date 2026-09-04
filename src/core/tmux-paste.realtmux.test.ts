@@ -35,7 +35,7 @@ import { makeTmuxTmpdir } from './tmux-test-socket'
 const ESC = '\x1b'
 const START = `${ESC}[200~`
 const END = `${ESC}[201~`
-/** A private socket — never `TMUX_SOCKET`/`nodeterm-rmt`, which carry live user sessions. */
+/** A private socket — never `TMUX_SOCKET`/`ohlab-rmt`, which carry live user sessions. */
 const SOCKET = `nt-paste-test-${process.pid}`
 const CONN = { host: 'h.example.com', user: 'deploy', port: 2222, identityFile: '/k/id' }
 
@@ -80,7 +80,7 @@ beforeAll(() => {
   work = makeTmuxTmpdir('ntpb-', SOCKET)
   binDir = path.join(work, 'bin')
   fs.mkdirSync(binDir)
-  // The SSH path's shim. `remoteTmuxPasteArgs` hard-codes `-L nodeterm-rmt`, which on a real host
+  // The SSH path's shim. `remoteTmuxPasteArgs` hard-codes `-L ohlab-rmt`, which on a real host
   // is the socket a remote nodeterm owns; here the first two arguments are dropped and the real
   // tmux is re-invoked on the test's private socket. `exec` keeps stdin, which is the whole point
   // of the path being tested.

@@ -79,7 +79,7 @@ describe('handleContextLinkRequest — authorization', () => {
 
   it('answers an empty node id without touching anything', async () => {
     expect(await handleContextLinkRequest({ verb: 'list', nodeId: '', args: {} })).toContain(
-      'Not a nodeterm session'
+      'Not an OhLab session'
     )
   })
 

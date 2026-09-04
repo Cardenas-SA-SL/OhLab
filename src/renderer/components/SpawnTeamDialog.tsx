@@ -13,7 +13,7 @@ interface SpawnTeamDialogProps {
 
 /**
  * "Spawn a team…" (issue #78): the user types a task, and ONE conductor agent node is opened
- * pre-prompted with it — the conductor's own manage-nodeterm-canvas skill does the role split
+ * pre-prompted with it — the conductor's own manage-ohlab-canvas skill does the role split
  * and the fan-out, so no model plumbing lives in the app. Reuses the `.confirm*` shell like
  * InputDialog; the input is a textarea (Enter inserts a newline — tasks are prose), so submit
  * is ⌘/Ctrl+Enter or the button.

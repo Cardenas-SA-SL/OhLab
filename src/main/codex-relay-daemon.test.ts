@@ -922,12 +922,12 @@ describe('readHookEndpointEnv + hookEndpointOptions', () => {
         `NODETERM_HOOK_PORT=${posixQuote('54321')}\n` +
           `NODETERM_HOOK_TOKEN=${posixQuote('tok-abc')}\n` +
           `NODETERM_HOOK_VERSION=${posixQuote('2')}\n` +
-          `NODETERM_NODE_TOKEN_DIR=${posixQuote('/Users/x/Library/Application Support/node-terminal/node-tokens')}\n`
+          `NODETERM_NODE_TOKEN_DIR=${posixQuote('/Users/x/Library/Application Support/ohlab/node-tokens')}\n`
       )
       const env = readHookEndpointEnv(f)
       expect(env.NODETERM_HOOK_TOKEN).toBe('tok-abc')
       expect(env.NODETERM_NODE_TOKEN_DIR).toBe(
-        '/Users/x/Library/Application Support/node-terminal/node-tokens'
+        '/Users/x/Library/Application Support/ohlab/node-tokens'
       )
       expect(hookEndpointOptions(env, '/codex-thread/authorize')).toEqual({
         hostname: '127.0.0.1',

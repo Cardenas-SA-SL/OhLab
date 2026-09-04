@@ -25,19 +25,19 @@ export function MobileLaunchCard({ onClose }: { onClose: () => void }): React.JS
       <div
         className="mlaunch"
         role="dialog"
-        aria-label="nodeterm mobile is on the App Store"
+        aria-label="The mobile companion is on the App Store"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mlaunch__title">
           Your terminal, <span>everywhere</span>
         </h2>
-        <p className="mlaunch__sub">nodeterm mobile is now on the App Store 🎉</p>
+        <p className="mlaunch__sub">The mobile companion is now on the App Store 🎉</p>
         <div className="mlaunch__scene">
           <ScenePhone />
         </div>
         <p className="mlaunch__body">
           Attach to these same live sessions from your phone — watch an agent work, answer a
-          &ldquo;needs you&rdquo;, type into any terminal from anywhere. nodeterm stays free and
+          &ldquo;needs you&rdquo;, type into any terminal from anywhere. OhLab stays free and
           open source, developed in the open with the community; the app and its Pro features are
           what fund that work. Your support means everything. ❤️
         </p>

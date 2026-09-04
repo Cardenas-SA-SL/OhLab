@@ -4606,7 +4606,7 @@ export function Canvas() {
   )
 
   // "Spawn a team…" (issue #78): the dialog collects the task; this opens ONE conductor node
-  // pre-prompted with it. The conductor's own manage-nodeterm-canvas skill does the role split
+  // pre-prompted with it. The conductor's own manage-ohlab-canvas skill does the role split
   // and the fan-out — the app ships no model, so the entry point deliberately adds no plumbing.
   const [spawnTeamDialog, setSpawnTeamDialog] = useState<{ at?: { x: number; y: number } } | null>(
     null
@@ -13251,7 +13251,7 @@ export function Canvas() {
                 { type: 'separator' },
                 {
                   type: 'label',
-                  label: `nodeterm${appVersion ? ` v${appVersion}` : ''} · ${describeOs(navigator.userAgent)}`
+                  label: `OhLab${appVersion ? ` v${appVersion}` : ''} · ${describeOs(navigator.userAgent)}`
                 }
               ]
             })

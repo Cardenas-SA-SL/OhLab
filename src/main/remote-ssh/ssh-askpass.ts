@@ -106,7 +106,7 @@ export function classifyPrompt(prompt: string): { passphrase: boolean; keyPath?:
  *  the socket exists, the bind-then-chmod-0600 window is actually closed, not just narrated.
  *  The bearer token stays as a second factor. */
 function askpassSockPath(): string {
-  return path.join(os.homedir(), '.nodeterm', 'askpass', `${instanceSockId()}.sock`)
+  return path.join(os.homedir(), '.ohlab', 'askpass', `${instanceSockId()}.sock`)
 }
 
 /**

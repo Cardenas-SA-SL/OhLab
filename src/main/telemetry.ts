@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto'
 import { app } from 'electron'
 import type { Settings } from '../shared/types'
 
-const API_BASE = process.env.NODETERM_API_BASE || 'https://api.nodeterm.dev'
+const API_BASE = process.env.NODETERM_API_BASE
 const DAY_MS = 24 * 60 * 60 * 1000
 const MIN_INTERVAL_MS = 6 * 60 * 60 * 1000 // client-side burst cap: never ping more often
 
@@ -17,6 +17,9 @@ const MIN_INTERVAL_MS = 6 * 60 * 60 * 1000 // client-side burst cap: never ping 
 // server by setting NODETERM_API_BASE explicitly.
 function telemetryAllowed(getSettings: () => Settings): boolean {
   if (process.env.DO_NOT_TRACK || process.env.NODETERM_TELEMETRY_DISABLED) return false
+  // OhLab has no first-party telemetry backend yet. Never send fork analytics to the upstream
+  // service; developers can still exercise this path against an explicitly configured endpoint.
+  if (!API_BASE) return false
   if (!app.isPackaged && !process.env.NODETERM_API_BASE) return false
   return getSettings().telemetryEnabled
 }
@@ -37,7 +40,7 @@ function getOrCreateDeviceId(): string {
 
 let lastSent = 0
 async function ping(getSettings: () => Settings, deviceId: string): Promise<void> {
-  if (!telemetryAllowed(getSettings)) return
+  if (!telemetryAllowed(getSettings) || !API_BASE) return
   const now = Date.now()
   if (now - lastSent < MIN_INTERVAL_MS) return // burst cap
   lastSent = now

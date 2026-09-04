@@ -145,7 +145,7 @@ export function RemoteSection({
             )
           ) : (
             <p className="text-sm text-muted">
-              Hosting this machine requires nodeterm Pro — upgrade above. Connecting to a host you
+              Hosting this machine requires OhLab Pro — upgrade above. Connecting to a host you
               were given a code for is free.
             </p>
           )}

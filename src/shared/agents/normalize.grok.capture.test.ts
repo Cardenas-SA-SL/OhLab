@@ -3,7 +3,7 @@
 // FIXTURE PROVENANCE: `__fixtures__/grok/hook-payloads.json` was captured live from grok 1.0.13
 // (build 5e9a58528b76) on 2026-09-01, from a logged-in account, by a temporary capture hook
 // installed as its OWN file in `$GROK_HOME/hooks/` (grok merges every file in that directory, so
-// nothing of ours touched `nodeterm-status.json`). Paths, session ids and tool-call ids are
+// nothing of ours touched `ohlab-status.json`). Paths, session ids and tool-call ids are
 // redacted; KEYS AND SHAPES ARE UNCHANGED.
 //
 // Why this file exists at all: every earlier grok test asserted against payloads WE wrote from the

@@ -61,7 +61,7 @@ function makeClient(over: Partial<{ onOutput: (d: string) => void; onExit: () =>
   const exits: number[] = []
   const client = new ControlModeClient({
     tmuxBin: '/opt/homebrew/bin/tmux',
-    socket: 'node-terminal',
+    socket: 'ohlab',
     sessionName: 'nt-term-1',
     onOutput: over.onOutput ?? ((d) => out.push(d)),
     onExit: over.onExit ?? (() => exits.push(1)),
@@ -83,7 +83,7 @@ describe('ControlModeClient.start', () => {
     expect(spawner.calls).toEqual([
       {
         bin: '/opt/homebrew/bin/tmux',
-        args: ['-L', 'node-terminal', '-C', 'attach-session', '-t', 'nt-term-1']
+        args: ['-L', 'ohlab', '-C', 'attach-session', '-t', 'nt-term-1']
       }
     ])
   })
@@ -256,7 +256,7 @@ describe('ControlModeClient with the real child_process spawner', () => {
     const exited = new Promise<void>((r) => (resolveExit = r))
     const client = new ControlModeClient({
       tmuxBin: '/nonexistent/tmux-does-not-exist',
-      socket: 'node-terminal',
+      socket: 'ohlab',
       sessionName: 'nt-term-1',
       onOutput: () => {},
       onExit: () => resolveExit()

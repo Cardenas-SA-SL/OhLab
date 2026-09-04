@@ -257,12 +257,12 @@ describe('claudeAccounts.link', () => {
     ).rejects.toThrow(/system Claude config dir/)
   })
 
-  it('refuses a nodeterm-managed account dir (one dir must not have two account ids)', async () => {
+  it('refuses an OhLab-managed account dir (one dir must not have two account ids)', async () => {
     const managed = accountConfigDir(userDataDir, 'abc')
     mkdirSync(managed, { recursive: true })
-    await expect(call(IPC.claudeAccountsLink, managed)).rejects.toThrow(/nodeterm-managed/)
+    await expect(call(IPC.claudeAccountsLink, managed)).rejects.toThrow(/OhLab-managed/)
     await expect(call(IPC.claudeAccountsLink, path.join(userDataDir, 'claude-accounts'))).rejects.toThrow(
-      /nodeterm-managed/
+      /OhLab-managed/
     )
   })
 

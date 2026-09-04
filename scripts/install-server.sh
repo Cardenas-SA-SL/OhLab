@@ -2,7 +2,7 @@
 #
 # nodeterm headless notification host — one-line installer / updater.
 #
-#   curl -fsSL https://raw.githubusercontent.com/eneskirca/nodeterm/main/scripts/install-server.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Cardenas-SA-SL/OhLab/main/scripts/install-server.sh | bash
 #
 # Installs (or updates) the nodeterm Server Edition on this Linux host and runs it in HEADLESS
 # mode (NODETERM_HEADLESS=1): it boots every core service — the loopback hook server, agent-status
@@ -20,7 +20,7 @@ set -euo pipefail
 HOME="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
 export HOME
 
-REPO_URL="${NODETERM_REPO_URL:-https://github.com/eneskirca/nodeterm}"
+REPO_URL="${NODETERM_REPO_URL:-https://github.com/Cardenas-SA-SL/OhLab}"
 APP_DIR="${NODETERM_APP_DIR:-$HOME/.nodeterm-server-app}"
 # Where the running server keeps its state (auth, sessions, workspace, scrollback). Matches the
 # server's own default (src/server/config.ts) so the install-meta.json we write below lands where

@@ -22,7 +22,7 @@ import path from 'path'
 import { homedir } from 'os'
 import { isSafeRemoteHome } from '../remote-safety'
 
-export const GROK_HOOK_FILE = 'nodeterm-status.json'
+export const GROK_HOOK_FILE = 'ohlab-status.json'
 export const GROK_SUMMARY_FILE = 'summary.json'
 export const GROK_SIGNALS_FILE = 'signals.json'
 /** The ACP event stream. Named here for completeness and read by NOTHING — see `grok-session.ts`

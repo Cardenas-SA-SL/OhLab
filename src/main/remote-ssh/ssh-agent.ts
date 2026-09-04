@@ -96,7 +96,7 @@ function defaultDataDirKey(): string {
  *  (`NT_MULTI=1`, ./dev-test.sh, a dev build next to the installed app) binds its own socket
  *  instead of unlinking the first one's and silently leaving that app agentless when it quits. */
 export function agentSockPath(dataDirKey = defaultDataDirKey()): string {
-  return path.join(os.homedir(), '.nodeterm', `agent-${instanceSockId(dataDirKey)}.sock`)
+  return path.join(os.homedir(), '.ohlab', `agent-${instanceSockId(dataDirKey)}.sock`)
 }
 
 /** The per-instance hash shared by every socket this app run binds under ~/.nodeterm (the agent

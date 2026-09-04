@@ -217,18 +217,18 @@ describe('quoteRemotePath', () => {
 describe('remoteTmuxCommand', () => {
   it('builds attach-or-create on the remote socket with a quoted cwd', () => {
     expect(remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '/srv/app' })).toBe(
-      `tmux -L nodeterm-rmt new-session -A -s 'nt-x' -c '/srv/app'`
+      `tmux -L ohlab-rmt new-session -A -s 'nt-x' -c '/srv/app'`
     )
   })
   it('tilde-expands a home-relative cwd (leaves ~/ unquoted)', () => {
     expect(remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '~/project' })).toBe(
-      `tmux -L nodeterm-rmt new-session -A -s 'nt-x' -c ~/'project'`
+      `tmux -L ohlab-rmt new-session -A -s 'nt-x' -c ~/'project'`
     )
   })
   it('appends a quoted program + args when given', () => {
     expect(
       remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '/a', program: 'ssh', programArgs: ['-A', 'h'] })
-    ).toBe(`tmux -L nodeterm-rmt new-session -A -s 'nt-x' -c '/a' 'ssh' '-A' 'h'`)
+    ).toBe(`tmux -L ohlab-rmt new-session -A -s 'nt-x' -c '/a' 'ssh' '-A' 'h'`)
   })
 })
 
@@ -312,11 +312,11 @@ describe('remoteTmuxConf', () => {
 
 describe('remoteTmuxCommand confPath', () => {
   it('adds -f <confPath> before new-session when given', () => {
-    const cmd = remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '~/app', socket: 'nodeterm-rmt', confPath: '/home/u/.nodeterm/tmux.conf' })
+    const cmd = remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '~/app', socket: 'ohlab-rmt', confPath: '/home/u/.nodeterm/tmux.conf' })
     expect(cmd).toContain(`-f '/home/u/.nodeterm/tmux.conf' new-session`)
   })
   it('omits -f when no confPath', () => {
-    const cmd = remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '~/app', socket: 'nodeterm-rmt' })
+    const cmd = remoteTmuxCommand({ sessionId: 'nt-x', remoteCwd: '~/app', socket: 'ohlab-rmt' })
     expect(cmd).not.toContain('-f ')
   })
 })

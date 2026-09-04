@@ -200,7 +200,7 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
         <div className="onb-cover">
           <div className="onb-cover__brand">
             <OnbBrandMark />
-            <span className="onb-cover__name">nodeterm</span>
+            <span className="onb-cover__name">OhLab</span>
           </div>
           <p className="onb-cover__tagline">A canvas of terminals — spatial, not stacked.</p>
           <div className="onb-cover__props">
@@ -397,7 +397,7 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
               <>
                 <h2>Know when an agent needs you</h2>
                 <p>
-                  nodeterm can notify you when an agent finishes — or gets stuck waiting on an
+                  OhLab can notify you when an agent finishes — or gets stuck waiting on an
                   approval — while you're somewhere else. Change any time in Settings →
                   Notifications.
                 </p>
@@ -414,7 +414,7 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
               <>
                 <h2>Long runs survive your lunch break</h2>
                 <p>
-                  While an agent is working, nodeterm keeps this machine from idle-sleeping —
+                  While an agent is working, OhLab keeps this machine from idle-sleeping —
                   and lets go the moment it finishes.
                 </p>
                 <p>
@@ -437,13 +437,13 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
               <>
                 <h2>Your agents, inside the notch</h2>
                 <p>
-                  On a MacBook, nodeterm can grow the notch into a small black capsule: a walking
+                  On a MacBook, OhLab can grow the notch into a small black capsule: a walking
                   mascot for every agent that's working, a red dot when one needs you, and a green
                   blob when one has finished and you haven't looked yet.
                 </p>
                 <p>
                   Point at it and it opens a mini panel of your live sessions — hit <strong>Go</strong>{' '}
-                  and nodeterm comes forward with that node centred.
+                  and OhLab comes forward with that node centred.
                 </p>
                 <div className="onb-toggle-row">
                   <Switch
@@ -464,7 +464,7 @@ export function OnboardingFlow({ onClose }: { onClose: () => void }) {
               <>
                 <h2>Your sessions, in your pocket</h2>
                 <p>
-                  <strong>nodeterm mobile</strong> attaches to these same live tmux sessions from
+                  <strong>the mobile companion</strong> attaches to these same live tmux sessions from
                   your phone — watch an agent work, answer a "needs you", or type into any
                   terminal from anywhere.
                 </p>

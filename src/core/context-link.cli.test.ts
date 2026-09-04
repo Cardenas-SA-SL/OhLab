@@ -102,7 +102,7 @@ beforeAll(async () => {
       { id: 'note-1', title: 'Deploy notes', cwd: '', transcriptPath: '', tmux: '', note: 'use the staging key' }
     ],
     tmuxBin: null,
-    tmuxSocket: 'node-terminal'
+    tmuxSocket: 'ohlab'
   }
 
   // Fetchers standing in for the real ones (local fs / ssh / tmux): what is under test here is
@@ -179,7 +179,7 @@ describe('context-link CLI', () => {
   })
   it('is a no-op without NODETERM_NODE_ID', async () => {
     const out = await shimRun('', ['list'])
-    expect(out).toContain('Not a nodeterm session')
+    expect(out).toContain('Not an OhLab session')
   })
   it('list marks sticky notes', async () => {
     const out = await shimRun('node-A', ['list'])
@@ -484,15 +484,15 @@ describe('codex-sandbox self-diagnosis (issue #367)', () => {
   it('under the sandbox, a dead transport names the sandbox + escalated retry, not "unreachable"', async () => {
     const err = await deadRun({ CODEX_SANDBOX_NETWORK_DISABLED: '1' })
     expect(err.code).toBe(1)
-    expect(err.stderr).toContain("Codex's sandbox blocked this connection to nodeterm")
+    expect(err.stderr).toContain("Codex's sandbox blocked this connection to OhLab")
     expect(err.stderr).toContain('escalated permissions')
-    expect(err.stderr).not.toContain('Could not read linked context (nodeterm unreachable).')
+    expect(err.stderr).not.toContain('Could not read linked context (OhLab unreachable).')
   })
 
   // The mutation guard: drop the env-var branch and the case above reddens; invert it and this does.
   it('without the env var the original genuine-unreachable sentence stands', async () => {
     const err = await deadRun({})
-    expect(err.stderr).toContain('Could not read linked context (nodeterm unreachable).')
+    expect(err.stderr).toContain('Could not read linked context (OhLab unreachable).')
     expect(err.stderr).not.toContain("Codex's sandbox")
   })
 

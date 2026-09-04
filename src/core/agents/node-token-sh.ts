@@ -2,7 +2,7 @@
  * THE PER-NODE CAPABILITY, READ — one POSIX-sh resolver, every generated client.
  *
  * Four generated clients present this node's token: the managed hook script, the canvas-control
- * shim (`nodeterm.sh`), the context-link shim (`context.sh`) and the codex launcher. Three of them
+ * shim (`ohlab.sh`), the context-link shim (`context.sh`) and the codex launcher. Three of them
  * carried the SAME two lines by copy — read `$NODETERM_NODE_TOKEN_DIR/$NODETERM_NODE_ID`, or
  * nothing — and that copy is what issue #384 was:
  *
@@ -90,8 +90,10 @@ export const NODE_TOKEN_READ_SH = [
   '    "$(nt_token_dir_beside "$nt_ntep")" \\',
   '    "$HOME/.nodeterm/node-tokens" \\',
   '    "$HOME/.nodeterm-server/node-tokens" \\',
-  '    "$HOME/.config/node-terminal/node-tokens" \\',
-  '    "$HOME/Library/Application Support/node-terminal/node-tokens"; do',
+  '    "$HOME/.config/ohlab/node-tokens" \\',
+  '    "$HOME/.config/OhLab/node-tokens" \\',
+  '    "$HOME/Library/Application Support/ohlab/node-tokens" \\',
+  '    "$HOME/Library/Application Support/OhLab/node-tokens"; do',
   '    [ -n "$nt_ntd" ] || continue',
   '    nt_node_token=$(head -n 1 "$nt_ntd/$NODETERM_NODE_ID" 2>/dev/null) || nt_node_token=""',
   '    [ -n "$nt_node_token" ] && return 0',

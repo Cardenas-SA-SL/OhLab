@@ -8,7 +8,7 @@ import { claudeCliCaps } from '../../claude-cli'
 import { CLAUDE_HOOK_EVENTS } from '@shared/agents/hook-events'
 
 
-const SCRIPT_FILE_NAME = 'claude.sh'
+const SCRIPT_FILE_NAME = 'ohlab-claude.sh'
 
 function configPath(): string {
   return path.join(homedir(), '.claude', 'settings.json')

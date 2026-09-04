@@ -400,7 +400,7 @@ export function buildManagedScript(
     '      if [ "$nt_decision" = "allow" ]; then',
     '        printf \'%s\\n\' \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}\'',
     '      elif [ "$nt_decision" = "deny" ]; then',
-    '        printf \'%s\\n\' \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from nodeterm."}}}\'',
+    '        printf \'%s\\n\' \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Denied from OhLab."}}}\'',
     '      fi',
     '      exit 0',
     '    fi',

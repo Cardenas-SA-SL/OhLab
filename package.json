@@ -1,13 +1,12 @@
 {
-  "name": "node-terminal",
+  "name": "ohlab",
   "version": "0.3.4",
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
-  "description": "node-based terminal manager — multiple draggable, zoomable terminals on a single canvas.",
+  "description": "OhLab - coding agents on a canvas that talk to your teammates' agents across machines",
   "author": {
-    "name": "enes",
-    "email": "eneskirca@gmail.com"
+    "name": "OhLab contributors"
   },
   "license": "BUSL-1.1",
   "private": true,
@@ -35,8 +34,8 @@
     "postinstall": "node scripts/patch-node-pty.mjs && electron-rebuild -f -w node-pty,smart-whisper"
   },
   "build": {
-    "appId": "com.nodeterm.app",
-    "productName": "nodeterm",
+    "appId": "com.ohlab.app",
+    "productName": "OhLab",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -74,7 +73,7 @@
       ],
       "category": "Development",
       "icon": "build/icon.png",
-      "maintainer": "enes <eneskirca@gmail.com>"
+      "maintainer": "OhLab contributors <ohlab@users.noreply.github.com>"
     },
     "mac": {
       "category": "public.app-category.developer-tools",
@@ -95,7 +94,7 @@
         }
       ],
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "nodeterm uses the microphone so you can dictate into your terminals.",
+        "NSMicrophoneUsageDescription": "OhLab uses the microphone so you can dictate into your terminals.",
         "NSLocalNetworkUsageDescription": "Terminals and agents you run may connect to devices and servers on your local network."
       },
       "target": [
@@ -138,8 +137,9 @@
       "perMachine": false
     },
     "publish": {
-      "provider": "generic",
-      "url": "https://nodeterm.dev/updates"
+      "provider": "github",
+      "owner": "Cardenas-SA-SL",
+      "repo": "OhLab"
     }
   },
   "dependencies": {

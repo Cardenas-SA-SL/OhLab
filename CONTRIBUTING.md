@@ -1,4 +1,4 @@
-# Contributing to nodeterm
+# Contributing to OhLab
 
 Thanks for looking. This file is the short door: enough to get running, plus the house rules that
 actually get a pull request sent back. The long version — every subsystem and the reasoning behind

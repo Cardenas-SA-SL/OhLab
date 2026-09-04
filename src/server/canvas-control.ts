@@ -52,7 +52,7 @@ export interface ServerCanvasControlDeps {
   codexSharedIdentity?: () => Promise<boolean>
   /**
    * Whether to write this server's discovery surface into the machine's REAL agent configuration
-   * directories: `~/.claude/skills/manage-nodeterm-canvas/SKILL.md`, the marker block in
+   * directories: `~/.claude/skills/manage-ohlab-canvas/SKILL.md`, the marker block in
    * `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md`, and the same skill in every managed Claude
    * account dir. `true` = the server's `installHooks` gate said yes; `false` = leave them alone.
    *
@@ -85,11 +85,11 @@ function canvasControlDir(): string {
 }
 
 function shimPath(): string {
-  return path.join(canvasControlDir(), 'nodeterm.sh')
+  return path.join(canvasControlDir(), 'ohlab.sh')
 }
 
 function skillPathIn(configDir: string): string {
-  return path.join(configDir, 'skills', 'manage-nodeterm-canvas', 'SKILL.md')
+  return path.join(configDir, 'skills', 'manage-ohlab-canvas', 'SKILL.md')
 }
 
 function writeShim(): void {

@@ -338,7 +338,7 @@ export function GitHubIssuesSection({ isActive }: { isActive: boolean }): React.
                     ? `Ready as ${view?.auth.login ?? 'GitHub user'}`
                     : view?.project?.approved
                       ? 'Repository approved. Authentication is still needed.'
-                      : 'Approval is required before nodeterm reads the repository.'}
+                      : 'Approval is required before OhLab reads the repository.'}
                 </span>
                 {!view?.project?.approved && repository && (
                   <Button

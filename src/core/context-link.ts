@@ -246,7 +246,7 @@ export async function handleContextLinkRequest(req: {
   nodeId: string
   args: Record<string, string>
 }): Promise<string> {
-  if (!req.nodeId) return 'Not a nodeterm session — nothing to read.'
+  if (!req.nodeId) return 'Not an OhLab session — nothing to read.'
   if (!CONTEXT_LINK_VERBS.includes(req.verb as ContextLinkVerb)) {
     return 'Unknown command. Use: list | summary [--node X] [-n N] | transcript [--node X] | terminal [--node X]'
   }

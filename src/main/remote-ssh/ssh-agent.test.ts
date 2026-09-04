@@ -56,10 +56,10 @@ function fakeAgent(sockPath: string, bindDelayMs = 0) {
 
 describe('agentSockPath', () => {
   it('is short, under the home dir, and differs per app instance', () => {
-    const a = agentSockPath('/Users/u/Library/Application Support/node-terminal')
+    const a = agentSockPath('/Users/u/Library/Application Support/ohlab')
     const b = agentSockPath('/Users/u/dev/nodeterm-testdata')
     expect(a).not.toBe(b) // NT_MULTI: a second instance must not unlink the first one's socket
-    expect(a.startsWith(path.join(os.homedir(), '.nodeterm'))).toBe(true)
+    expect(a.startsWith(path.join(os.homedir(), '.ohlab'))).toBe(true)
     // A unix socket path is capped near 104 bytes; userData paths blow that, which is the whole
     // reason this lives in ~/.nodeterm rather than next to the app's data.
     expect(a.length).toBeLessThan(104)

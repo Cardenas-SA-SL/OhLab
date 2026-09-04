@@ -1,31 +1,20 @@
 <div align="center">
 
-<img src="docs/assets/nodeterm.png" alt="nodeterm" width="120" height="120" />
+<img src="docs/assets/social/avatar.png" alt="OhLab" width="120" height="120" />
 
-# nodeterm
+# OhLab
 
-**A node-based terminal manager — your terminals and agents on an infinite canvas.**
+OhLab is a fork of nodeterm that puts coding agents and real terminals on an infinite
+canvas. This repository is also where the cross-machine team hub is being built, so
+your agents can collaborate with your teammates' agents across machines.
 
-Multiple real terminals live as draggable nodes on a single pan/zoom canvas, and every
-project doubles as a **Trello-style board of live Claude Code sessions**. Built for
-people with ADHD and scattered workflows: a spatial layout instead of a stack of
-hidden tabs.
-
-[![Platform](https://img.shields.io/badge/platform-macOS%20(arm64%20%2B%20x64)%20·%20Linux%20(x64)%20·%20Windows%20(x64%2C%20beta)-black)](https://nodeterm.dev)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(arm64%20%2B%20x64)%20·%20Linux%20(x64)%20·%20Windows%20(x64%2C%20beta)-black)](https://github.com/Cardenas-SA-SL/OhLab)
 [![Built with Electron](https://img.shields.io/badge/built%20with-Electron-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![License](https://img.shields.io/badge/license-BUSL--1.1-blue)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/eneskirca/nodeterm?style=flat)](https://github.com/eneskirca/nodeterm/stargazers)
-[![Latest release](https://img.shields.io/github/v/release/eneskirca/nodeterm?include_prereleases&sort=semver)](https://github.com/eneskirca/nodeterm/releases)
-<!-- Installer downloads: .dmg + .AppImage + .deb + Setup .exe across every release, hand-written on purpose.
-     shields' github/downloads/…/total reads ~12× higher because electron-updater's own traffic
-     (latest-*.yml polls, mac .zip deltas, blockmaps) is counted as downloads there. Recount with:
-     gh api --paginate repos/eneskirca/nodeterm/releases --jq \
-       '[.[].assets[] | select(.name|test("\\.(dmg|AppImage|deb|exe)$")) | .download_count] | add' -->
-[![Downloads](https://img.shields.io/badge/downloads-1.2k-brightgreen)](https://github.com/eneskirca/nodeterm/releases)
+[![GitHub stars](https://img.shields.io/github/stars/Cardenas-SA-SL/OhLab?style=flat)](https://github.com/Cardenas-SA-SL/OhLab/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/Cardenas-SA-SL/OhLab?include_prereleases&sort=semver)](https://github.com/Cardenas-SA-SL/OhLab/releases)
 
-<a href="https://trendshift.io/repositories/103825?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-103825" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/103825" alt="eneskirca%2Fnodeterm | Trendshift" width="250" height="55"/></a>
-
-[Download](#-download) · [Docs](https://nodeterm.dev/docs) · [Features](#-features) · [Build from source](#-build-from-source) · [Architecture](#-architecture) · [License](#-license)
+[Install](#-install) · [Docs](https://github.com/Cardenas-SA-SL/OhLab/tree/main/docs) · [Features](#-features) · [Build from source](#-build-from-source) · [Architecture](#-architecture) · [License](#-license)
 
 </div>
 
@@ -33,15 +22,22 @@ hidden tabs.
 
 <div align="center">
   <a href="docs/assets/hero-tour.mp4">
-    <img src="docs/assets/hero-tour.webp" alt="nodeterm in 30 seconds — canvas, agents, kanban board, three surfaces" width="900" />
+    <img src="docs/assets/hero-tour.webp" alt="OhLab in 30 seconds — canvas, agents, kanban board, three surfaces" width="900" />
   </a>
   <br/>
   <sub>▶ <a href="docs/assets/hero-tour.mp4">Watch the 30-second tour with sound</a></sub>
 </div>
 
-## Why nodeterm
+## Attribution and license
 
-Stacked terminal tabs hide context — you lose track of what's running where. nodeterm
+OhLab is a fork of [nodeterm by Enes Kirca](https://github.com/eneskirca/nodeterm).
+It remains licensed under BUSL-1.1; under the upstream license terms, each release
+converts to the MIT License four years after its upstream publication date. See
+[LICENSE](./LICENSE) and [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
+
+## Why OhLab
+
+Stacked terminal tabs hide context — you lose track of what's running where. OhLab
 turns that into a **map**: every shell is a node you can place, group, label, and zoom
 into. Sessions are spatial and persistent, so your mental model stays intact across
 restarts. And because the app is built around a clean service seam, the same canvas runs
@@ -49,7 +45,7 @@ three ways — as the **desktop app for macOS, Linux and Windows (beta)**, as a 
 you reach from anywhere (Server Edition), and an **iOS companion** that attaches to the
 same live sessions.
 
-📚 **Full documentation lives at [nodeterm.dev/docs](https://nodeterm.dev/docs)** — get
+📚 **Full documentation lives in [the docs directory](https://github.com/Cardenas-SA-SL/OhLab/tree/main/docs)** — get
 started, concepts, agents, remote access, troubleshooting.
 
 ## ✨ Features
@@ -100,7 +96,7 @@ assign teammates. Toggle with `⌘⇧B`.
 
 ### Your sessions, anywhere
 
-**Pair your phone** with one QR — *scan with the nodeterm iOS app* — and the **same
+**Pair your phone** with one QR — *scan with the mobile companion* — and the **same
 live session continues in your pocket**, E2E encrypted **over the relay, not just your
 LAN**. The same canvas also runs self-hosted in any browser (Server Edition).
 
@@ -147,20 +143,20 @@ GitHub Copilot / opencode / Grok / custom) · 📝 **Sticky note** (link to an a
   [setup and security details](./docs/github-issues-kanban.md).
 - **AI commit messages & terminal names** — bring-your-own local agent CLI run read-only
   on the staged diff or captured output.
-- **Your sessions, in your pocket** — **nodeterm mobile** (iOS) attaches to the same live
+- **Your sessions, in your pocket** — the **mobile companion** (iOS) attaches to the same live
   tmux sessions: watch an agent work, answer a "needs you", or type into any terminal
   from your phone — plus push notifications and a mobile board view.
-- **Power & sleep** — while an agent is working, nodeterm keeps the machine from
+- **Power & sleep** — while an agent is working, OhLab keeps the machine from
   idle-sleeping, and lets go the moment it finishes (on by default; toggle in the setup
   tour or Settings → Behavior). No app can hold a machine awake through a closed lid —
   for overnight runs keep the laptop open and plugged in, or run the agents on a box
   that doesn't sleep via the [Server Edition](./docs/SERVER.md).
 - **Command palette** (⌘K), **file explorer** (⌘⇧E), **markdown view** (⌘M),
   **undo/redo**, and a native macOS dark UI.
-- **Auto-update & in-app announcements** — the app checks a self-hosted feed and
+- **Auto-update & in-app announcements** — the app checks GitHub-hosted feeds and
   surfaces a "Restart to update" banner and product news.
 
-### 🌍 Server Edition — nodeterm in your browser
+### 🌍 Server Edition — OhLab in your browser
 
 The same canvas runs headless on a Linux (or macOS) host and is used from any browser —
 so your terminals, editors, source control, board, and agents live on a server you reach
@@ -183,57 +179,23 @@ coverage for the agents running there — with **zero open ports** (the hook ser
 loopback-only and push goes out over HTTPS under a grant your phone drops over SSH).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eneskirca/nodeterm/main/scripts/install-server.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cardenas-SA-SL/OhLab/main/scripts/install-server.sh | bash
 ```
 
 One line installs, builds, and runs it as a systemd service (`NODETERM_HEADLESS=1`); re-run it
 to update. See the [headless notification host](./docs/SERVER.md#headless-notification-host)
 section for details.
 
-## 📦 Download
+## 📦 Install
 
-Grab the latest build from **[nodeterm.dev](https://nodeterm.dev)** — the download button
-detects your platform. Everything is also listed at
-[nodeterm.dev/releases](https://nodeterm.dev/releases):
-
-- **macOS** — `.dmg` for Apple Silicon and Intel (auto-updates), or **Homebrew**:
-
-  ```bash
-  brew tap nodeterm/tap
-  brew trust nodeterm/tap        # Homebrew ≥6 refuses to load an untrusted tap
-  brew install --cask nodeterm
-  ```
-
-  Both first lines are required. On its own, `brew install --cask nodeterm` only searches
-  `homebrew/cask` and reports the cask as not found; without the trust grant, Homebrew ≥6
-  fails rather than prompting. The cask tracks each promoted release, and the app updates
-  itself (electron-updater), so `brew upgrade` is rarely needed for it.
-- **Linux (x64)** — self-updating **AppImage**, or a `.deb` for Debian/Ubuntu
-  (`sudo apt install ./nodeterm-*.deb`; updates are manual for `.deb`).
-- **Windows (x64) — beta** — `nodeterm-Setup-<version>.exe` (per-user installer) or a
-  portable `-win.zip`. Early support, so know what you are getting: the installer is
-  **unsigned** (SmartScreen will ask — *More info → Run anyway*), **updates are manual**
-  for now (grab the next build from the same page), and **session continuity across
-  restarts is still landing** — Windows has no tmux, so the standalone session host that
-  replaces it is being packaged in [#579](https://github.com/eneskirca/nodeterm/pull/579).
-  Everything else — canvas, agents, kanban, hooks — is the same app. Please
-  [report what breaks](https://github.com/eneskirca/nodeterm/issues).
-- **iOS** — **nodeterm mobile** on the
-  [App Store](https://apps.apple.com/app/nodeterm/id6790581233).
-
-**Trying it out?** Removal is one script — it stops every process nodeterm started, reverts
-the status-hook/skill entries it merged into your agent CLIs' config (your own hooks and
-credentials are never touched), and deletes all of nodeterm's own state. Run it with
-`--dry-run` first to see the full list of what it found:
+Packaged builds are published on the [OhLab releases page](https://github.com/Cardenas-SA-SL/OhLab/releases).
+To install from source, clone this repository and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/eneskirca/nodeterm/main/scripts/uninstall.sh | bash -s -- --dry-run
-curl -fsSL https://raw.githubusercontent.com/eneskirca/nodeterm/main/scripts/uninstall.sh | bash -s -- --yes
+npm install
+npm run dev
+npm run dist
 ```
-
-The full inventory of what nodeterm writes where (and what the script keeps, like the
-`.nodeterm/` canvas folders inside your own repos) is documented in
-[docs/uninstall.md](docs/uninstall.md).
 
 ## 🛠 Build from source
 
@@ -302,8 +264,8 @@ under [`docs/`](./docs) for deeper notes.
 Issues and pull requests are welcome. **Start with [CONTRIBUTING.md](./CONTRIBUTING.md)** —
 setup, the process-boundary rules, and the house rules that come up in review.
 [CLAUDE.md](./CLAUDE.md) is the deep reference behind them (and is loaded automatically if
-you work with an AI coding agent). Questions or bug reports are also happy at
-[nodeterm.dev/support](https://nodeterm.dev/support) / support@nodeterm.dev. nodeterm is licensed under the
+you work with an AI coding agent). Questions and bug reports are welcome in
+[GitHub Issues](https://github.com/Cardenas-SA-SL/OhLab/issues). OhLab is licensed under the
 [Business Source License 1.1](https://mariadb.com/bsl11/) — you can use, modify,
 and redistribute it freely, including in production, except offering it as a
 competing product or service (see [License](#-license)).
@@ -317,12 +279,12 @@ the project, and that the project may continue to relicense future versions
 
 **[BUSL-1.1](./LICENSE)** ([Business Source License](https://mariadb.com/bsl11/)): you may
 copy, modify, redistribute, and — under the Additional Use Grant — make **production
-use** of nodeterm; the one thing you may not do is offer it (hosted, embedded, or as a
-standalone product/service) in a way that **competes** with nodeterm or with the
+use** of OhLab; the one thing you may not do is offer it (hosted, embedded, or as a
+standalone product/service) in a way that **competes** with the Licensed Work or the
 Licensor's products built on it. Each release automatically becomes plain **MIT** four
-years after it is published. See [`LICENSE`](./LICENSE) for the full terms and
+years after its upstream publication. See [`LICENSE`](./LICENSE) for the full terms and
 [`THIRD-PARTY-NOTICES.md`](./THIRD-PARTY-NOTICES.md) for the bundled open-source
 components. For a commercial license beyond the grant, contact eneskirca@gmail.com.
 
 > "Claude" and "Claude Code" are trademarks of Anthropic, and "Trello" is a trademark of
-> Atlassian; nodeterm is not affiliated with or endorsed by either.
+> Atlassian; OhLab is not affiliated with or endorsed by either.

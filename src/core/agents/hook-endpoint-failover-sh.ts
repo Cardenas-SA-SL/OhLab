@@ -7,7 +7,7 @@
  * one file on disk, and that file can go stale in ways the session cannot see:
  *
  *  - the app quit or crashed and the file still advertises its old random port (issue #445 — a
- *    `nodeterm.sh open-agent` from a live worktree session died with "endpoint unreachable"
+ *    `ohlab.sh open-agent` from a live worktree session died with "endpoint unreachable"
  *    while the reviewer launch it carried was silently dropped);
  *  - the path carries a project id that a cross-lineage adoption retired, so the file is never
  *    rewritten again while the session keeps posting into it (the managed script's stale-project
@@ -49,7 +49,7 @@
  * two copies of one diagnosis drift into two diagnoses.
  */
 export const STALE_ENDPOINT_HINT =
-  'The endpoint this session was handed appears stale (nodeterm may have quit or restarted since this terminal was created), and no live fallback endpoint answered. If nodeterm is running, retry once — it re-advertises the endpoint on start.'
+  'The endpoint this session was handed appears stale (OhLab may have quit or restarted since this terminal was created), and no live fallback endpoint answered. If OhLab is running, retry once — it re-advertises the endpoint on start.'
 
 export const HOOK_ENDPOINT_FALLBACK_SH = [
   '# --- Endpoint failover helpers (shared: managed hook script + both sh shims) ---------------',
@@ -76,8 +76,10 @@ export const HOOK_ENDPOINT_FALLBACK_SH = [
   '  nt_tried="$1"',
   '  for nt_c in \\',
   '    "$HOME/.nodeterm-server/hook-endpoint.env" \\',
-  '    "$HOME/.config/node-terminal/hook-endpoint.env" \\',
-  '    "$HOME/Library/Application Support/node-terminal/hook-endpoint.env"; do',
+  '    "$HOME/.config/ohlab/hook-endpoint.env" \\',
+  '    "$HOME/.config/OhLab/hook-endpoint.env" \\',
+  '    "$HOME/Library/Application Support/ohlab/hook-endpoint.env" \\',
+  '    "$HOME/Library/Application Support/OhLab/hook-endpoint.env"; do',
   '    [ "$nt_c" = "$nt_tried" ] && continue',
   '    [ -r "$nt_c" ] || continue',
   "    printf '%s\\n' \"$nt_c\"",

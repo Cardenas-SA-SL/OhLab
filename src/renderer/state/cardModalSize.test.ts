@@ -16,6 +16,22 @@ import {
   CARD_MODAL_SIZE_KEY
 } from './cardModalSize'
 
+const memory = new Map<string, string>()
+const memoryStorage: Storage = {
+  get length() {
+    return memory.size
+  },
+  clear: () => memory.clear(),
+  getItem: (key) => memory.get(key) ?? null,
+  key: (index) => [...memory.keys()][index] ?? null,
+  removeItem: (key) => {
+    memory.delete(key)
+  },
+  setItem: (key, value) => {
+    memory.set(key, String(value))
+  }
+}
+
 describe('clampAxis', () => {
   it('clamps into range', () => {
     expect(clampAxis(500, 480, 900)).toBe(500)
@@ -84,6 +100,12 @@ describe('parseCardModalSize', () => {
 
 describe('useCardModalSize store', () => {
   beforeEach(() => {
+    if (typeof globalThis.localStorage?.clear !== 'function') {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: memoryStorage
+      })
+    }
     localStorage.clear()
     useCardModalSize.setState({ width: null, height: null, maximized: false })
   })

@@ -1,6 +1,6 @@
 // Issue #629 — the invariant: **a test never touches the machine's live nodeterm tmux server.**
 //
-// This repo is developed from inside nodeterm, so `tmux -L node-terminal` and `-L nodeterm-rmt` are
+// This repo is developed from inside nodeterm, so `tmux -L ohlab` and `-L ohlab-rmt` are
 // not names in a fixture — on a contributor's machine they are the servers holding every terminal
 // they have open. A test that binds one shares a process with the user's entire canvas, and the
 // failure mode is not a red test: it is every pane printing `[server exited unexpectedly]`.
@@ -98,7 +98,7 @@ describe('the run cannot reach a live nodeterm tmux server', () => {
 const REAL_SOCKET_ALLOWED = new Map<string, string>([
   [
     'src/core/agents/pane-owner.test.ts',
-    'the production bytes hardcode `-L nodeterm-rmt`; re-spelling it would judge different bytes'
+    'the production bytes hardcode `-L ohlab-rmt`; re-spelling it would judge different bytes'
   ],
   [
     'src/main/remote/host-destroy-tmux.test.ts',
@@ -115,12 +115,12 @@ const REAL_SOCKET_ALLOWED = new Map<string, string>([
 /**
  * An exec of a real tmux whose argv begins `-L <a real nodeterm socket>`.
  *
- * Deliberately narrow: `['-L', 'node-terminal', …]` appears all over the suite as an EXPECTATION
+ * Deliberately narrow: `['-L', 'ohlab', …]` appears all over the suite as an EXPECTATION
  * against a faked `execFile`, and a scan that flagged those would be switched off within a week.
  * What it matches is the program-plus-argv adjacency, which only a real spawn has.
  */
 const REAL_SOCKET_EXEC =
-  /(?:execFile|execFileSync|spawn|spawnSync|run|runAsync)\s*\(\s*[^,()]*,\s*\[\s*'-L',\s*(?:TMUX_SOCKET|RMT_TMUX_SOCKET|'node-terminal'|'nodeterm-rmt')/
+  /(?:execFile|execFileSync|spawn|spawnSync|run|runAsync)\s*\(\s*[^,()]*,\s*\[\s*'-L',\s*(?:TMUX_SOCKET|RMT_TMUX_SOCKET|'ohlab'|'ohlab-rmt')/
 
 function testFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -145,9 +145,9 @@ describe('no unreviewed test hands a real socket name to a real tmux', () => {
     // The lesson from fs-atomic.guard.test.ts: a scan nobody proved can match anything reads
     // exactly like a scan with nothing to find.
     expect(REAL_SOCKET_EXEC.test("await run(TMUX!, ['-L', TMUX_SOCKET, 'has-session'])")).toBe(true)
-    expect(REAL_SOCKET_EXEC.test("execFileSync(bin, ['-L', 'nodeterm-rmt', 'ls'])")).toBe(true)
+    expect(REAL_SOCKET_EXEC.test("execFileSync(bin, ['-L', 'ohlab-rmt', 'ls'])")).toBe(true)
     expect(
-      REAL_SOCKET_EXEC.test("expect(kills).toEqual([['-L', 'node-terminal', 'kill-session']])")
+      REAL_SOCKET_EXEC.test("expect(kills).toEqual([['-L', 'ohlab', 'kill-session']])")
     ).toBe(false)
   })
 
@@ -176,7 +176,7 @@ describe('no unreviewed test hands a real socket name to a real tmux', () => {
   it('the socket names the scan spells are still the production ones', () => {
     // The regex carries the two names as literals so it can read a test that hardcodes them. If a
     // constant is ever renamed, this is what says the scan went blind.
-    expect(TMUX_SOCKET).toBe('node-terminal')
-    expect(RMT_TMUX_SOCKET).toBe('nodeterm-rmt')
+    expect(TMUX_SOCKET).toBe('ohlab')
+    expect(RMT_TMUX_SOCKET).toBe('ohlab-rmt')
   })
 })

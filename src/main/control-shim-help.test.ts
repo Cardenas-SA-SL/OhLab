@@ -50,6 +50,6 @@ describe('the control shim answers help locally', () => {
   it('points at the skill for per-verb flags rather than restating them', () => {
     // Flags are documented once, in the generated bodies. A second copy inside the shim is a second
     // thing to keep in sync, and the shim is the copy that goes stale on an SSH host until reconnect.
-    expect(run(['help'])).toContain('manage-nodeterm-canvas')
+    expect(run(['help'])).toContain('manage-ohlab-canvas')
   })
 })

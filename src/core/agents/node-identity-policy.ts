@@ -7,7 +7,7 @@
  * starts to. That is the dangerous half, because the population it governs is already running:
  * tmux sessions outlive the app, so on the day this ships there are live agent sessions holding a
  * launcher, a skill shim and an environment from before the token existed. Enforce on day one and
- * their next `manage-nodeterm-canvas` call stops working with no way for them to know why.
+ * their next `manage-ohlab-canvas` call stops working with no way for them to know why.
  *
  * So enforcement arrives in two moves, and both are here rather than scattered through the routes:
  *
@@ -112,7 +112,7 @@ export function isStrictInstant(now: Date): boolean {
  * `IDENTITY_UNMINTABLE_NOTE` exists to break, and it was being handed to a far larger population.
  */
 export const IDENTITY_RESTART_NOTE =
-  'NodeTerm could not confirm which node sent this command: this session is not presenting its ' +
+  'OhLab could not confirm which node sent this command: this session is not presenting its ' +
   'node identity, so it ran unverified. Close and reopen this node to pick one up (on an SSH ' +
   `project, reconnect the project first) — from ${STRICT_DATE} commands from a session without ` +
   'one are refused.'
@@ -125,7 +125,7 @@ export const IDENTITY_RESTART_NOTE =
  * it), and a sentence that says "since <date>" would be false for half of the cases it answers.
  */
 export const IDENTITY_REFUSED_NOTE =
-  'NodeTerm could not confirm which node sent this command, so it did not run: this session is ' +
+  'OhLab could not confirm which node sent this command, so it did not run: this session is ' +
   'not presenting its node identity. Close and reopen this node to pick one up — on an SSH ' +
   'project, reconnect the project first — or turn off Settings → Agents → "Require verified node ' +
   'identity for canvas control".'
@@ -160,7 +160,7 @@ const UNMINTABLE_CAUSE =
   'verified node identity for canvas control".'
 
 export const IDENTITY_UNMINTABLE_NOTE =
-  'NodeTerm could not confirm which node sent this command, so it did not run — and ' +
+  'OhLab could not confirm which node sent this command, so it did not run — and ' +
   UNMINTABLE_CAUSE
 
 /**
@@ -177,7 +177,7 @@ export const IDENTITY_UNMINTABLE_NOTE =
  * and it is the part that makes the advice urgent: on the cutoff this stops being a note.
  */
 export const IDENTITY_UNMINTABLE_WARN_NOTE =
-  'NodeTerm could not confirm which node sent this command, so it ran unverified — and ' +
+  'OhLab could not confirm which node sent this command, so it ran unverified — and ' +
   UNMINTABLE_CAUSE +
   ` From ${STRICT_DATE} commands from a session without an identity are refused.`
 

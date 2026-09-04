@@ -2,12 +2,12 @@
 // the tmux servers this machine is actually running nodeterm on.
 //
 // tmux resolves `-L <socket>` to `$TMUX_TMPDIR/tmux-<uid>/<socket>`, falling back to `/tmp` when
-// the variable is unset. A test that names `node-terminal` or `nodeterm-rmt` therefore lands on the
+// the variable is unset. A test that names `ohlab` or `ohlab-rmt` therefore lands on the
 // SHARED server carrying every live node on the machine — the developer's own canvas when the suite
 // is run from inside a nodeterm terminal, which is how this repo is normally developed.
 // `src/main/remote/host-destroy-tmux.test.ts` did exactly that by design (measured: it binds
-// `node-terminal`, creates sessions on it and drives a real `PtyManager` against it), and
-// `src/core/agents/pane-owner.test.ts` runs a real `tmux -L nodeterm-rmt` because the bytes it
+// `ohlab`, creates sessions on it and drives a real `PtyManager` against it), and
+// `src/core/agents/pane-owner.test.ts` runs a real `tmux -L ohlab-rmt` because the bytes it
 // judges hardcode that name.
 //
 // Neither was proven to be the killer in #629 — the reporter's evidence points at the tmux server
@@ -21,7 +21,7 @@
 //
 // WHAT IT DOES NOT DO: two suites naming the same socket inside the sandbox still share one tmux
 // server, so a `kill-server` there is still a shared-server kill — it has just been moved somewhere
-// harmless. Measured on CI the day this landed: the guard test's `kill-server` on `node-terminal`
+// harmless. Measured on CI the day this landed: the guard test's `kill-server` on `ohlab`
 // ended `host-destroy-tmux.test.ts`'s session mid-assertion. A suite kills its OWN sessions by
 // exact target (`-t =<name>`), or it owns a socket name nothing else uses.
 import { execFileSync } from 'child_process'

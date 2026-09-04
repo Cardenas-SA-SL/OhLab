@@ -29,7 +29,7 @@ describe('parseLenses', () => {
 })
 
 describe('verifyLensPrompt', () => {
-  const base = { targetTitle: 'Migration', targetId: 'term-7', shimPath: '/x/nodeterm.sh' }
+  const base = { targetTitle: 'Migration', targetId: 'term-7', shimPath: '/x/ohlab.sh' }
 
   it('names the lens, the target, and a known lens brief', () => {
     const p = verifyLensPrompt({ ...base, lens: 'security', agentId: 'claude' })
@@ -43,7 +43,7 @@ describe('verifyLensPrompt', () => {
       'get-linked-context skill'
     )
     const codex = verifyLensPrompt({ ...base, lens: 'tests', agentId: 'codex' })
-    expect(codex).toContain('/x/nodeterm.sh')
+    expect(codex).toContain('/x/ohlab.sh')
     expect(codex).not.toContain('get-linked-context skill')
   })
 
@@ -75,7 +75,7 @@ describe('verifyLensPrompt', () => {
 })
 
 describe('verifySynthesisPrompt', () => {
-  const base = { targetTitle: 'Migration', shimPath: '/x/nodeterm.sh' }
+  const base = { targetTitle: 'Migration', shimPath: '/x/ohlab.sh' }
 
   it('names every lens on the panel and the count', () => {
     const p = verifySynthesisPrompt({ ...base, lenses: ['correctness', 'security'] })

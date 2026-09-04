@@ -317,12 +317,12 @@ export function remoteCodexAppServerStartCommand(runtime: string, codexCli: stri
   const codex = posixQuote(codexCli)
   return (
     `${node} ${codex} app-server daemon start >/dev/null 2>&1 || { ` +
-    `nt_as_dir="$CODEX_HOME/app-server-control"; nt_as_sock="$nt_as_dir/app-server-control.sock"; nt_as_pid="$nt_as_dir/nodeterm-direct.pid"; nt_as_lock="$nt_as_dir/nodeterm-start.lock"; ` +
+    `nt_as_dir="$CODEX_HOME/app-server-control"; nt_as_sock="$nt_as_dir/app-server-control.sock"; nt_as_pid="$nt_as_dir/ohlab-direct.pid"; nt_as_lock="$nt_as_dir/ohlab-start.lock"; ` +
     `mkdir -p "$nt_as_dir" && chmod 700 "$nt_as_dir" || exit 70; ` +
     `nt_as_live=; if [ -S "$nt_as_sock" ] && [ -f "$nt_as_pid" ]; then nt_as_old_pid=$(cat "$nt_as_pid" 2>/dev/null || true); case "$nt_as_old_pid" in ''|*[!0-9]*) ;; *) kill -0 "$nt_as_old_pid" 2>/dev/null && nt_as_live=1 ;; esac; fi; ` +
     `if [ -z "$nt_as_live" ] && mkdir "$nt_as_lock" 2>/dev/null; then ` +
     `rm -f "$nt_as_sock" "$nt_as_pid"; ` +
-    `CODEX_HOME="$CODEX_HOME" nohup ${node} ${codex} app-server --listen "unix://$nt_as_sock" </dev/null >"$nt_as_dir/nodeterm-direct.log" 2>&1 & echo $! >"$nt_as_pid"; ` +
+    `CODEX_HOME="$CODEX_HOME" nohup ${node} ${codex} app-server --listen "unix://$nt_as_sock" </dev/null >"$nt_as_dir/ohlab-direct.log" 2>&1 & echo $! >"$nt_as_pid"; ` +
     `rmdir "$nt_as_lock"; fi; ` +
     `nt_as_i=0; while [ ! -S "$nt_as_sock" ] && [ "$nt_as_i" -lt 50 ]; do sleep 0.1; nt_as_i=$((nt_as_i + 1)); done; ` +
     `[ -S "$nt_as_sock" ]; ` +
@@ -875,7 +875,7 @@ export class SshProjectManager {
       !cancelled &&
       /permission denied/i.test(stderr ?? '') &&
       !(this.r.askpassAsked?.(master.pid?.()) ?? false)
-        ? ' nodeterm authenticates through its own ssh-agent, so a key held only in your system agent is not offered. Set IdentityAgent for this host in ~/.ssh/config (e.g. "IdentityAgent SSH_AUTH_SOCK" to use your login agent), or give this server an identity file.'
+        ? ' OhLab authenticates through its own ssh-agent, so a key held only in your system agent is not offered. Set IdentityAgent for this host in ~/.ssh/config (e.g. "IdentityAgent SSH_AUTH_SOCK" to use your login agent), or give this server an identity file.'
         : ''
     const message = cancelled
       ? 'SSH connection cancelled: this key needs its passphrase.'

@@ -84,10 +84,10 @@ export function TmuxBanner({ onInstall }: { onInstall: (command: string) => void
       : phase === 'ready'
         ? 'New terminals will survive restarts from now on. Terminals opened before the install stay on the plain shell.'
         : phase === 'failed'
-          ? 'The install hasn’t completed. Check the terminal node for errors, or install tmux with your package manager and restart nodeterm.'
+          ? 'The install hasn’t completed. Check the terminal node for errors, or install tmux with your package manager and restart OhLab.'
           : status.installCommand
             ? 'Terminals won’t survive restarts and the mobile app can’t attach until tmux is installed.'
-            : 'Terminals won’t survive restarts and the mobile app can’t attach. Install tmux with your package manager (e.g. brew install tmux), then restart nodeterm.'
+            : 'Terminals won’t survive restarts and the mobile companion can’t attach. Install tmux with your package manager (e.g. brew install tmux), then restart OhLab.'
 
   const showInstall = (phase === 'missing' || phase === 'failed') && !!status.installCommand
   return (

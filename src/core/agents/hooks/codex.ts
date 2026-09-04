@@ -71,7 +71,7 @@ export const CODEX_EVENT_LABEL: Record<(typeof CODEX_EVENTS)[number], CodexEvent
   Stop: 'stop'
 }
 
-const SCRIPT_FILE_NAME = 'codex.sh'
+const SCRIPT_FILE_NAME = 'ohlab-codex.sh'
 
 // hooks.json shape Codex expects: { hooks: { <EventName>: HookDefinition[] } }
 // where each HookDefinition has a `hooks` array of command handlers.

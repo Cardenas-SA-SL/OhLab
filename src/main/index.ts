@@ -623,9 +623,9 @@ function confirmQuit(parentWin: BrowserWindow | null): Promise<boolean> {
     buttons: ['Cancel', 'Quit'],
     defaultId: 0,
     cancelId: 0,
-    title: 'Quit nodeterm?',
-    message: 'Quit nodeterm?',
-    detail: 'Terminal sessions keep running in the background and will still be here next time you open nodeterm.'
+    title: 'Quit OhLab?',
+    message: 'Quit OhLab?',
+    detail: 'Terminal sessions keep running in the background and will still be here next time you open OhLab.'
   }
   const p =
     parentWin && !parentWin.isDestroyed() ? dialog.showMessageBox(parentWin, opts) : dialog.showMessageBox(opts)
@@ -763,7 +763,7 @@ function buildAppMenu(win: BrowserWindow): void {
   const template: Electron.MenuItemConstructorOptions[] = isMac
     ? [
         {
-          label: app.name,
+          label: 'OhLab',
           submenu: [
             { role: 'about' },
             { type: 'separator' },
@@ -937,7 +937,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#1e1e1e',
     // NT_MULTI instances are throwaway dev sandboxes: label the window so a second instance is
     // never mistaken for the real one (the dock already shows the Electron icon in dev).
-    title: NT_MULTI ? 'node-terminal (test instance)' : 'node-terminal',
+    title: NT_MULTI ? 'OhLab (test instance)' : 'OhLab',
     icon: linuxIcon,
     // Integrate the macOS traffic lights into our top bar (modern Mac app look). Both options are
     // macOS-only in Electron, and the renderer's tab bar reserves its 86px of left padding for
@@ -1148,6 +1148,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(async () => {
+  app.setAboutPanelOptions({ applicationName: 'OhLab' })
   if (!gotSingleInstanceLock) return // losing second instance — quitting; don't touch tmux
 
   // Harden every <webview> guest (WebNode runs its page in its own webContents, so the main

@@ -37,8 +37,8 @@ export function sessionHostPaths(userDataDir: string): SessionHostPaths {
   const fp = fingerprint(userDataDir)
   const endpoint =
     process.platform === 'win32'
-      ? `\\\\.\\pipe\\nodeterm-session-host-${fp}`
-      : path.join(os.tmpdir(), `nodeterm-session-host-${fp}.sock`)
+      ? `\\\\.\\pipe\\ohlab-session-host-${fp}`
+      : path.join(os.tmpdir(), `ohlab-session-host-${fp}.sock`)
   return {
     endpoint,
     statePath: path.join(userDataDir, 'session-host.json'),

@@ -18,7 +18,7 @@ let tmp = ''
 beforeAll(async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nt-oc-live-'))
   // Spaced userDataDir — the "Application Support" shape the quoting exists for.
-  tmp = path.join(root, 'App Support', 'node-terminal')
+  tmp = path.join(root, 'App Support', 'ohlab')
   fs.mkdirSync(tmp, { recursive: true })
   resetPlatformForTests()
   initPlatform(fakePlatform({ userDataDir: tmp }))
@@ -43,7 +43,7 @@ describe('opencode plugin against the real endpoint-file writer', () => {
     const file = path.join(tmp, 'plugin-live.mjs')
     fs.writeFileSync(file, buildOpencodePlugin())
     const mod = await import(/* @vite-ignore */ `file://${file}`)
-    const hooks = await mod.NodetermStatus()
+    const hooks = await mod.OhLabStatus()
     await hooks.event({ event: { type: 'session.idle', properties: { sessionID: 'ses_live' } } })
 
     // The listener fires only for an ACCEPTED post — a quote-mangled token is 401'd before it.

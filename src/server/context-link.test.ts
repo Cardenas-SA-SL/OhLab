@@ -205,7 +205,7 @@ describe('initServerContextLink', () => {
     expect(registered).toBe(true)
     expect(existsSync(join(home, '.claude', 'skills', 'get-linked-context', 'SKILL.md'))).toBe(true)
     expect(readFileSync(join(home, '.codex', 'AGENTS.md'), 'utf8')).toContain(
-      'nodeterm:get-linked-context'
+      'ohlab:get-linked-context'
     )
     await link.stop()
   })

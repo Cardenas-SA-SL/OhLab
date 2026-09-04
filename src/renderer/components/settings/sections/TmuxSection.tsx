@@ -71,7 +71,7 @@ export function TmuxSection({ isActive }: { isActive: boolean }): React.JSX.Elem
             'Claude Code agent teams re-apply a hardcoded 70/30 tmux split on every teammate spawn, squeezing the pane you type into. ' +
             'When on, guarded tmux hooks keep the lead pane at the chosen % of the node width (40–90), locally and on SSH hosts (at next connect). ' +
             'Side effect: a manual 50/50 split in a plain terminal is nudged to the same width. ' +
-            'Turning it off leaves a running tmux server’s hooks in place until that server exits (close all terminals, or tmux -L node-terminal kill-server).'
+            'Turning it off leaves a running tmux server’s hooks in place until that server exits (close all terminals, or tmux -L ohlab kill-server).'
           }
           control={
             <div className="flex items-center gap-2">

@@ -567,7 +567,7 @@ export function worktreeRemoveMessage(p: WorktreeRemovePrompt): string {
       // never escalate to -D), so "its branch is deleted" was a promise the op could not keep.
       'Remove this worktree? Its directory is deleted, and its branch too — unless the branch ' +
       'still has unmerged commits, in which case it is kept.'
-    : 'This worktree was not created by nodeterm.\n\nUnbind detaches this group and leaves the ' +
+    : 'This worktree was not created by OhLab.\n\nUnbind detaches this group and leaves the ' +
       'worktree untouched on disk.'
   const optIn =
     p.deleteFromDisk && !p.canDelete

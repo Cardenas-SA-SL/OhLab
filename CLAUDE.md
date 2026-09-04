@@ -1,3 +1,6 @@
+This repository is OhLab, a fork of nodeterm.
+The engineering notes below retain and refer to the upstream code names.
+
 # CLAUDE.md
 
 This is the deep-reference for working in this repo: the invariants, why each exists, and the

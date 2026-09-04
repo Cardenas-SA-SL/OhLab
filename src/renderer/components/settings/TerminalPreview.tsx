@@ -18,7 +18,7 @@ const PREVIEW_ROWS = 9
  * are what a bad letter-spacing tears apart) and a resting cursor.
  */
 const SAMPLE = [
-  '\x1b[32m➜\x1b[0m  \x1b[36mnodeterm\x1b[0m \x1b[33mgit:(\x1b[31mmain\x1b[33m)\x1b[0m npm test',
+  '\x1b[32m➜\x1b[0m  \x1b[36mohlab\x1b[0m \x1b[33mgit:(\x1b[31mmain\x1b[33m)\x1b[0m npm test',
   '\x1b[90m┌────────────────────────────────┐\x1b[0m',
   '\x1b[90m│\x1b[0m \x1b[32m✓\x1b[0m terminal-config  \x1b[90m117 passed\x1b[0m \x1b[90m│\x1b[0m',
   '\x1b[90m│\x1b[0m \x1b[31m✗\x1b[0m workspace-files  \x1b[90m  1 failed\x1b[0m \x1b[90m│\x1b[0m',

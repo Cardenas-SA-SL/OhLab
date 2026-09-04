@@ -5,7 +5,7 @@
 import { mkdirSync, writeFileSync } from 'fs'
 import sharp from 'sharp'
 
-// The app icon (black terminal window + our purple mark), in 1024 user-space, as a
+// The app icon (black terminal window + connected-node flask), in 1024 user-space, as a
 // reusable group placed at (x,y) scaled into a `size`×`size` box.
 function iconGroup(x, y, size) {
   const s = size / 1024
@@ -15,12 +15,13 @@ function iconGroup(x, y, size) {
     <g fill="#50505a">
       <circle cx="186" cy="190" r="15"/><circle cx="232" cy="190" r="15"/><circle cx="278" cy="190" r="15"/>
     </g>
-    <g transform="translate(512 528) scale(12) translate(-26.5 -24)" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M13 12 L31 24 L13 36" fill="none" stroke="url(#mark)" stroke-width="5"/>
-      <circle cx="13" cy="12" r="3.6" fill="#a38dff"/>
-      <circle cx="13" cy="36" r="3.6" fill="#a38dff"/>
-      <circle cx="31" cy="24" r="3.6" fill="#ffffff"/>
-      <rect x="33.5" y="32.5" width="10.5" height="5" rx="2.5" fill="#a38dff"/>
+    <g transform="translate(512 535) scale(11) translate(-32 -30)" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M24 8 V20 L11 43 Q7 50 15 53 L32 57 L49 53 Q57 50 53 43 L40 20 V8" fill="none" stroke="url(#mark)" stroke-width="4.5"/>
+      <path d="M15 40 Q32 34 49 40 L54 48 Q54 52 48 54 L32 57 L16 54 Q10 52 10 48 Z" fill="url(#mark)" opacity="0.88"/>
+      <path d="M24 18 H40" fill="none" stroke="#d9ffff" stroke-opacity="0.75" stroke-width="3"/>
+      <circle cx="24" cy="8" r="3.8" fill="#7a4bd0"/>
+      <circle cx="40" cy="8" r="3.8" fill="#22c1c3"/>
+      <circle cx="32" cy="57" r="3.8" fill="#ffffff"/>
     </g>
   </g>`
 }
@@ -30,7 +31,7 @@ const DEFS = `<defs>
     <stop offset="0" stop-color="#2a2a30"/><stop offset="1" stop-color="#0b0b0e"/>
   </linearGradient>
   <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#a38dff"/><stop offset="1" stop-color="#7a4bd0"/>
+    <stop offset="0" stop-color="#7a4bd0"/><stop offset="1" stop-color="#22c1c3"/>
   </linearGradient>
   <linearGradient id="word" x1="0" y1="0" x2="1" y2="1">
     <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cbb8ff"/>
@@ -57,9 +58,9 @@ const assets = {
   'og.png': { w: 1200, h: 630, svg: (w, h) => `
     ${bg(w, h)}
     ${iconGroup(96, 175, 280)}
-    <text x="430" y="300" font-family="${FONT}" font-size="92" font-weight="800" fill="url(#word)" letter-spacing="-3">nodeterm</text>
-    <text x="434" y="360" font-family="${FONT}" font-size="33" fill="#9a9aa2">Your terminals on an infinite canvas.</text>
-    <text x="434" y="408" font-family="${FONT}" font-size="24" fill="#6a6a72">node-based terminal manager · macOS · free</text>` },
+    <text x="430" y="300" font-family="${FONT}" font-size="92" font-weight="800" fill="url(#word)" letter-spacing="-3">OhLab</text>
+    <text x="434" y="360" font-family="${FONT}" font-size="33" fill="#9a9aa2">Coding agents on a shared canvas.</text>
+    <text x="434" y="408" font-family="${FONT}" font-size="24" fill="#6a6a72">Electron · macOS · Linux · Windows</text>` },
 
   // Square avatar — icon centered with margin so circle crops stay clean.
   'avatar.png': { w: 1024, h: 1024, svg: (w, h) => `
@@ -71,8 +72,8 @@ const assets = {
   'banner.png': { w: 1500, h: 500, svg: (w, h) => `
     ${bg(w, h)}
     ${iconGroup(150, 100, 300)}
-    <text x="520" y="235" font-family="${FONT}" font-size="104" font-weight="800" fill="url(#word)" letter-spacing="-4">nodeterm</text>
-    <text x="524" y="300" font-family="${FONT}" font-size="38" fill="#9a9aa2">Your terminals on an infinite canvas.</text>` }
+    <text x="520" y="235" font-family="${FONT}" font-size="104" font-weight="800" fill="url(#word)" letter-spacing="-4">OhLab</text>
+    <text x="524" y="300" font-family="${FONT}" font-size="38" fill="#9a9aa2">Coding agents on a shared canvas.</text>` }
 }
 
 const outDir = 'docs/assets/social'

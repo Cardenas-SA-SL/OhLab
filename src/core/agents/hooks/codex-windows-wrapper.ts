@@ -48,7 +48,7 @@ export const WINDOWS_SH_CANDIDATES = [
 ] as const
 
 /** The wrapper's file name, beside the managed script it runs. */
-export const CODEX_WINDOWS_WRAPPER_FILE = 'codex-hook.cmd'
+export const CODEX_WINDOWS_WRAPPER_FILE = 'ohlab-codex-hook.cmd'
 
 /**
  * The batch wrapper's content.
@@ -72,9 +72,9 @@ export function buildCodexWindowsWrapper(): string {
   )
   const lines = [
     '@echo off',
-    'rem Managed by nodeterm (agent-hooks). Regenerated on every app launch; edits are lost.',
+    'rem Managed by OhLab (agent-hooks). Regenerated on every app launch; edits are lost.',
     'setlocal EnableExtensions',
-    'set "NT_SCRIPT=%~dp0codex.sh"',
+    'set "NT_SCRIPT=%~dp0ohlab-codex.sh"',
     'if not exist "%NT_SCRIPT%" goto :nt_drain',
     'set "NT_SH="',
     ...probe,

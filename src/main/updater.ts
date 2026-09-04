@@ -107,7 +107,7 @@ export function initUpdater(onBeforeRestart?: () => void): void {
     if (!getMainWindow()?.isFocused() && Notification.isSupported()) {
       const n = new Notification({
         title: 'Update ready',
-        body: `nodeterm ${info.version} is ready to install.`
+        body: `OhLab ${info.version} is ready to install.`
       })
       n.on('click', () => {
         // Resolve again on click — the window may have been closed or recreated since.

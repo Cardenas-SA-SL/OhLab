@@ -150,7 +150,7 @@ export function RemoteAccessDialog({ onClose }: { onClose: () => void }): React.
         ) : (
           <div className="remote-dialog__block">
             <p className="remote-dialog__hint">
-              Sharing this machine requires nodeterm Pro. Connecting to a host you were given a code
+              Sharing this machine requires OhLab Pro. Connecting to a host you were given a code
               for is free.
             </p>
             <Button onClick={() => void upgrade()}>Upgrade to Pro — $10/mo</Button>

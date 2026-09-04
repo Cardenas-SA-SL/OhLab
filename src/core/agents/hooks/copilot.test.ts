@@ -32,7 +32,7 @@ describe('copilot hook installer', () => {
       await import('./copilot')
     installCopilotHooks()
     expect(copilotHookConfigPath()).toBe(
-      path.join(home, '.copilot', 'hooks', 'nodeterm-status.json')
+      path.join(home, '.copilot', 'hooks', 'ohlab-status.json')
     )
     const cfg = JSON.parse(readFileSync(copilotHookConfigPath(), 'utf8'))
     expect(Object.keys(cfg.hooks).sort()).toEqual(
@@ -42,7 +42,7 @@ describe('copilot hook installer', () => {
       {
         type: 'command',
         bash: expect.stringContaining(
-          path.join(home, '.nodeterm', 'agent-hooks', 'copilot.sh')
+          path.join(home, '.nodeterm', 'agent-hooks', 'ohlab-copilot.sh')
         ),
         timeoutSec: 5
       }
@@ -54,7 +54,7 @@ describe('copilot hook installer', () => {
     )
     expect(
       readFileSync(
-        path.join(home, '.nodeterm', 'agent-hooks', 'copilot.sh'),
+        path.join(home, '.nodeterm', 'agent-hooks', 'ohlab-copilot.sh'),
         'utf8'
       )
     ).toContain('/hook/copilot')
@@ -67,7 +67,7 @@ describe('copilot hook installer', () => {
     installCopilotHooks()
     installCopilotHooks()
     expect(copilotHookConfigPath()).toBe(
-      path.join(home, 'custom-copilot', 'hooks', 'nodeterm-status.json')
+      path.join(home, 'custom-copilot', 'hooks', 'ohlab-status.json')
     )
     const cfg = JSON.parse(readFileSync(copilotHookConfigPath(), 'utf8'))
     for (const entries of Object.values(cfg.hooks) as unknown[][])

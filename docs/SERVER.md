@@ -1,4 +1,4 @@
-# nodeterm Server Edition (Phase 2)
+# OhLab Server Edition (Phase 2)
 
 Run nodeterm's canvas in a browser, backed by a headless Node server on your own
 machine or box. The server serves the **same** built renderer the desktop app uses

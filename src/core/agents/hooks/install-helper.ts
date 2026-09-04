@@ -203,7 +203,7 @@ export function mergeManagedHook(
   command: string,
   events: readonly ManagedHookEvent[]
 ): HookSettings {
-  const isOurs = managedCommandMatcher(managedMarkerFor(command), true)
+  const isOurs = managedCommandMatcher(managedMarkerFor(command), false)
   const next: HookSettings = { ...config, hooks: { ...(config.hooks ?? {}) } }
   const definitionsAt = (ev: string): HookDef[] => (Array.isArray(next.hooks![ev]) ? next.hooks![ev] : [])
   for (const e of events) {

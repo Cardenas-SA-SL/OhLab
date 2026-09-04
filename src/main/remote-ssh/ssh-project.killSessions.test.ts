@@ -26,7 +26,7 @@ function managerWithConn(): { mgr: SshProjectManager; runs: string[][] } {
     runs.push(args)
     // tmux exits non-zero with "can't find session" on whichever socket does not hold it. The
     // contract is best-effort, so a rejection must not stop the sibling kill.
-    if (args.at(-1)?.includes('node-terminal')) throw new Error("can't find session")
+    if (args.at(-1)?.includes('ohlab')) throw new Error("can't find session")
     return { code: 0, stdout: '' }
   }
   const mgr = new SshProjectManager({ run } as never)
@@ -43,32 +43,32 @@ const commands = (runs: string[][]): string[] => runs.map((r) => r.at(-1)!).sort
 describe('SshProjectManager.killSessions', () => {
   it('kills the name on EVERY tmux socket when the caller opts in', async () => {
     // The session-memory sweep lists both sockets, so its rows can come off either. A kill aimed
-    // only at `nodeterm-rmt` left every row from a host's own nodeterm-server running, after a
+    // only at `ohlab-rmt` left every row from a host's own nodeterm-server running, after a
     // confirm that said otherwise.
     const { mgr, runs } = managerWithConn()
     await mgr.killSessions('p1', ['abc'], { everySocket: true })
     expect(commands(runs)).toEqual([
-      `${TP}tmux -L node-terminal kill-session -t =nt-abc`,
-      `${TP}tmux -L nodeterm-rmt kill-session -t =nt-abc`
+      `${TP}tmux -L ohlab kill-session -t =nt-abc`,
+      `${TP}tmux -L ohlab-rmt kill-session -t =nt-abc`
     ])
   })
 
   it('stays on the project s own socket by default', async () => {
-    // Project deletion knows its own nodes and they are all on `nodeterm-rmt`. `node-terminal` on
+    // Project deletion knows its own nodes and they are all on `ohlab-rmt`. `ohlab` on
     // that host belongs to a nodeterm running ON it, so a delete must not speculate there.
     const { mgr, runs } = managerWithConn()
     await mgr.killSessions('p1', ['abc'])
-    expect(commands(runs)).toEqual([`${TP}tmux -L nodeterm-rmt kill-session -t =nt-abc`])
+    expect(commands(runs)).toEqual([`${TP}tmux -L ohlab-rmt kill-session -t =nt-abc`])
   })
 
   it('demands a literal true — the flag comes off the wire', async () => {
     const { mgr, runs } = managerWithConn()
     await mgr.killSessions('p1', ['abc'], { everySocket: 'yes' as unknown as boolean })
-    expect(commands(runs)).toEqual([`${TP}tmux -L nodeterm-rmt kill-session -t =nt-abc`])
+    expect(commands(runs)).toEqual([`${TP}tmux -L ohlab-rmt kill-session -t =nt-abc`])
   })
 
   it('is best-effort: a socket that refuses does not spare the others', async () => {
-    // The `node-terminal` run above throws. `killSessions` must still resolve, and the sibling
+    // The `ohlab` run above throws. `killSessions` must still resolve, and the sibling
     // kill must still have gone out.
     const { mgr, runs } = managerWithConn()
     await expect(mgr.killSessions('p1', ['abc'], { everySocket: true })).resolves.toBeUndefined()
@@ -79,10 +79,10 @@ describe('SshProjectManager.killSessions', () => {
     const { mgr, runs } = managerWithConn()
     await mgr.killSessions('p1', ['a', 'b'], { everySocket: true })
     expect(commands(runs)).toEqual([
-      `${TP}tmux -L node-terminal kill-session -t =nt-a`,
-      `${TP}tmux -L node-terminal kill-session -t =nt-b`,
-      `${TP}tmux -L nodeterm-rmt kill-session -t =nt-a`,
-      `${TP}tmux -L nodeterm-rmt kill-session -t =nt-b`
+      `${TP}tmux -L ohlab kill-session -t =nt-a`,
+      `${TP}tmux -L ohlab kill-session -t =nt-b`,
+      `${TP}tmux -L ohlab-rmt kill-session -t =nt-a`,
+      `${TP}tmux -L ohlab-rmt kill-session -t =nt-b`
     ])
   })
 

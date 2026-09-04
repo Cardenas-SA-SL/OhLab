@@ -18,7 +18,7 @@ import { installHooksInto, removeHooksFrom } from './install-helper'
 import { CLAUDE_HOOK_EVENTS } from '@shared/agents/hook-events'
 
 const WIN_CMD =
-  "if [ -r 'C:\\Users\\u\\.nodeterm\\agent-hooks\\claude.sh' ]; then sh 'C:\\Users\\u\\.nodeterm\\agent-hooks\\claude.sh'; else cat >/dev/null 2>&1 || :; fi"
+  "if [ -r 'C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-claude.sh' ]; then sh 'C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-claude.sh'; else cat >/dev/null 2>&1 || :; fi"
 const FOREIGN = { hooks: [{ type: 'command', command: 'sh "C:\\tools\\agent-hooks\\other.sh"' }] }
 
 let dir = ''
@@ -27,7 +27,7 @@ const readConfig = () => JSON.parse(readFileSync(configPath(), 'utf8'))
 const install = () =>
   installHooksInto({
     agentId: 'claude',
-    scriptFileName: 'claude.sh',
+    scriptFileName: 'ohlab-claude.sh',
     configPath: configPath(),
     events: CLAUDE_HOOK_EVENTS
   })
@@ -77,7 +77,7 @@ describe('removeHooksFrom — uninstall also matched raw before the fix', () => 
       JSON.stringify({ hooks: { Stop: [FOREIGN, { hooks: [{ type: 'command', command: WIN_CMD }] }] } }),
       'utf8'
     )
-    removeHooksFrom({ configPath: configPath(), events: CLAUDE_HOOK_EVENTS, scriptFileName: 'claude.sh' })
+    removeHooksFrom({ configPath: configPath(), events: CLAUDE_HOOK_EVENTS, scriptFileName: 'ohlab-claude.sh' })
     expect(readConfig().hooks.Stop).toEqual([FOREIGN])
   })
 })

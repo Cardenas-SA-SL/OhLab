@@ -121,7 +121,7 @@ describe('initServerCanvasControl', () => {
       installAgentIntegrations: false
     })
 
-    const shim = path.join(dataDir, 'canvas-control', 'nodeterm.sh')
+    const shim = path.join(dataDir, 'canvas-control', 'ohlab.sh')
     const shimBody = fs.readFileSync(shim, 'utf8')
     expect(shimBody).toContain('NODETERM_CANVAS_CONTROL')
     expect(shimBody).toContain('CODEX_THREAD_ID')
@@ -130,7 +130,7 @@ describe('initServerCanvasControl', () => {
     const accountDir = path.join(dataDir, 'test-account')
     runtime.installSkillInto(accountDir)
     expect(
-      fs.readFileSync(path.join(accountDir, 'skills', 'manage-nodeterm-canvas', 'SKILL.md'), 'utf8')
+      fs.readFileSync(path.join(accountDir, 'skills', 'manage-ohlab-canvas', 'SKILL.md'), 'utf8')
     ).toContain(shim)
 
     const opened = await runtime.handler({

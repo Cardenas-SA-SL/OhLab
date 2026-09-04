@@ -26,5 +26,5 @@ export function hookSockPath(userDataDir: string, home: string = os.homedir()): 
   const primary = path.join(userDataDir, 'sock', 'hook.sock')
   if (Buffer.byteLength(primary, 'utf8') <= SUN_PATH_BUDGET) return primary
   const id = createHash('sha256').update(userDataDir).digest('hex').slice(0, 16)
-  return path.join(home, '.nodeterm', 'sock', `hook-${id}.sock`)
+  return path.join(home, '.ohlab', 'sock', `hook-${id}.sock`)
 }

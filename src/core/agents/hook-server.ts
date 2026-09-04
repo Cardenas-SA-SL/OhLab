@@ -493,7 +493,7 @@ class HookServer {
    * bytes so a truncated/garbage load can never arm a weak identity.
    */
   setNodeAuthSecret(secret: Uint8Array): void {
-    if (secret.byteLength < 32) throw new Error('Invalid NodeTerm node-auth secret')
+    if (secret.byteLength < 32) throw new Error('Invalid OhLab node-auth secret')
     this.nodeAuthSecret = Buffer.from(secret)
   }
 

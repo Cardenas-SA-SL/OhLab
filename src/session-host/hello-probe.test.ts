@@ -1,22 +1,23 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import net from 'net'
-import os from 'os'
 import path from 'path'
 import { randomUUID } from 'crypto'
 import { rmSync } from 'fs'
 import { encodeFrame } from './protocol'
 import { trySessionHostHello } from './hello-probe'
+import { makeShortSocketDir } from '../core/test/short-socket-dir'
 
 const cleanupPaths: string[] = []
 afterEach(() => {
-  for (const target of cleanupPaths.splice(0)) rmSync(target, { force: true })
+  for (const target of cleanupPaths.splice(0)) rmSync(target, { force: true, recursive: true })
 })
 
 function testEndpoint(): string {
   const id = randomUUID()
   if (process.platform === 'win32') return `\\\\.\\pipe\\nodeterm-hello-probe-${id}`
-  const endpoint = path.join(os.tmpdir(), `nodeterm-hello-probe-${id}.sock`)
-  cleanupPaths.push(endpoint)
+  const dir = makeShortSocketDir('nt-hp-')
+  const endpoint = path.join(dir, `${id}.sock`)
+  cleanupPaths.push(dir)
   return endpoint
 }
 

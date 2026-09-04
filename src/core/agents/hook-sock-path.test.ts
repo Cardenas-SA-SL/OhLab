@@ -12,7 +12,7 @@ describe('hookSockPath — the SUN_LEN discipline', () => {
   it('falls back to a digest-keyed homedir path when the data dir would blow sun_path', () => {
     const long = '/Users/a-very-long-username/Library/Application Support/' + 'x'.repeat(80)
     const p = hookSockPath(long, home)
-    expect(p.startsWith(path.join(home, '.nodeterm', 'sock') + path.sep)).toBe(true)
+    expect(p.startsWith(path.join(home, '.ohlab', 'sock') + path.sep)).toBe(true)
     expect(p).toMatch(/hook-[0-9a-f]{16}\.sock$/)
     // The point of the fallback: the result itself must FIT.
     expect(Buffer.byteLength(p, 'utf8')).toBeLessThanOrEqual(SUN_PATH_BUDGET)

@@ -7,7 +7,7 @@ describe('dryRunRequested', () => {
     expect(dryRunRequested({ count: '2' })).toBe(false)
   })
   it("the shim's valueless flag (empty string) means ON", () => {
-    // `sh nodeterm.sh spawn-team --dry-run --team …` translates to `arg.dry-run=` — an empty
+    // `sh ohlab.sh spawn-team --dry-run --team …` translates to `arg.dry-run=` — an empty
     // string. Reading that as off would run the real mutation under a flag that asked it not to.
     expect(dryRunRequested({ 'dry-run': '' })).toBe(true)
   })

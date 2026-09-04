@@ -15,7 +15,7 @@ type Status =
   | { kind: 'required'; minSupported: string | null }
   | { kind: 'error'; message: string }
 
-const RELEASES_URL = 'https://nodeterm.dev/releases'
+const RELEASES_URL = 'https://github.com/Cardenas-SA-SL/OhLab/releases'
 
 export function UpdateCard(): JSX.Element | null {
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
@@ -173,7 +173,7 @@ export function UpdateCard(): JSX.Element | null {
 
       {status.kind === 'available' && (
         <>
-          <p className="update-card__body">nodeterm v{status.version} is downloading.</p>
+          <p className="update-card__body">OhLab v{status.version} is downloading.</p>
           <button className="update-card__link" onClick={openReleases}>
             Release notes
           </button>
@@ -187,7 +187,7 @@ export function UpdateCard(): JSX.Element | null {
       {status.kind === 'manual' && (
         <>
           <p className="update-card__body">
-            nodeterm v{status.version} is available. Download it to update.
+            OhLab v{status.version} is available. Download it to update.
           </p>
           <button className="update-card__btn" onClick={openReleases}>
             Download
@@ -197,7 +197,7 @@ export function UpdateCard(): JSX.Element | null {
 
       {status.kind === 'downloaded' && (
         <>
-          <p className="update-card__body">nodeterm v{status.version} is ready to install.</p>
+          <p className="update-card__body">OhLab v{status.version} is ready to install.</p>
           <button className="update-card__link" onClick={openReleases}>
             Release notes
           </button>
@@ -211,7 +211,7 @@ export function UpdateCard(): JSX.Element | null {
       )}
 
       {status.kind === 'upToDate' && (
-        <p className="update-card__body">nodeterm is on the latest version.</p>
+        <p className="update-card__body">OhLab is on the latest version.</p>
       )}
 
       {status.kind === 'required' && (

@@ -8,7 +8,7 @@ import type { ManagedHookEvent } from '../../../shared/agents/hook-events'
 import { GROK_HOOK_FILE, grokHomeDir } from '../grok-paths'
 import { installHooksInto, removeHooksFrom } from './install-helper'
 
-const SCRIPT_FILE_NAME = "grok.sh"
+const SCRIPT_FILE_NAME = "ohlab-grok.sh"
 
 /**
  * Complete Grok 1.0.13 hook set, measured against

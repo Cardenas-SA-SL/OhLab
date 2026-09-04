@@ -155,7 +155,7 @@ describe('collectSessionMemory', () => {
   })
 
   it('counts "no server" as an answer but a permission failure as a failure', () => {
-    expect(isNoServerError('no server running on /tmp/tmux-0/node-terminal')).toBe(true)
+    expect(isNoServerError('no server running on /tmp/tmux-0/ohlab')).toBe(true)
     expect(isNoServerError('error connecting to /tmp/x (No such file or directory)')).toBe(true)
     // A socket dir we may not read says nothing about whether sessions exist there.
     expect(isNoServerError('error connecting to /tmp/x (Permission denied)')).toBe(false)
@@ -165,7 +165,7 @@ describe('collectSessionMemory', () => {
     // it as an answer would print "no sessions" while the already-running server holds live ones.
     expect(
       isNoServerError(
-        'Command failed: tmux -L node-terminal list-panes\ntmux: error while loading shared ' +
+        'Command failed: tmux -L ohlab list-panes\ntmux: error while loading shared ' +
           'libraries: libtinfo.so.6: cannot open shared object file: No such file or directory'
       )
     ).toBe(false)

@@ -18,7 +18,7 @@ const ROWS = {
   },
   pair: {
     title: 'Pair phone',
-    keywords: ['phone', 'pair', 'qr', 'ios', 'mobile', 'ssh', 'scan', 'nodeterm']
+    keywords: ['phone', 'pair', 'qr', 'ios', 'mobile', 'ssh', 'scan', 'ohlab']
   },
   devices: {
     title: 'Paired devices',
@@ -145,7 +145,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
     <SettingsSection
       id="phone"
       title="Phone"
-      description="Pair the nodeterm iOS app so it can connect to this machine over your local network — no terminal commands needed."
+      description="Pair the mobile companion so it can connect to this machine over your local network — no terminal commands needed."
       isActive={isActive}
       searchEntries={ENTRIES}
     >
@@ -174,7 +174,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
         <div className="space-y-4">
           <h4 className="text-[13px] font-medium text-text">Pair phone</h4>
           <p className="text-sm text-muted">
-            Pair the nodeterm iOS app: scan this QR with your phone. Your phone generates its own
+            Pair the mobile companion: scan this QR with your phone. Your phone generates its own
             key on-device — nothing secret leaves this machine except a single-use pairing token.
           </p>
           <p className="text-sm text-muted">
@@ -183,7 +183,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
               className="cursor-pointer underline hover:text-text"
               onClick={() => window.nodeTerminal.shell.openExternal(IOS_APP_STORE_URL)}
             >
-              Get nodeterm for iOS on the App Store
+              Get the mobile companion on the App Store
             </button>
           </p>
 

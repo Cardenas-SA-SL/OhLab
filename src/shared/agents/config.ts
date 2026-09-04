@@ -252,15 +252,15 @@ export const TITLE_READ_CAPABLE = ['claude', 'codex', 'grok', 'gemini'] as const
 // Only codex today: it is the only builtin with an app-server mode NodeTerm can attach many
 // clients to. A second agent joins by being added here and writing its own launcher body.
 export const SHARED_IDENTITY_CAPABLE = ['codex'] as const
-// Agents allowed to drive the canvas via the `nodeterm` CLI (open/show/write/close).
-// Discovery differs per agent: claude gets the manage-nodeterm-canvas skill; codex/gemini/
+// Agents allowed to drive the canvas via the `ohlab` CLI (open/show/write/close).
+// Discovery differs per agent: claude gets the manage-ohlab-canvas skill; codex/gemini/
 // opencode a marker block in ~/.codex/AGENTS.md / ~/.gemini/GEMINI.md /
 // ~/.config/opencode/AGENTS.md (see canvas-control.ts).
 //
 // grok needs NO new installer: it scans `~/.claude/skills` by default for Claude Code
 // compatibility (its shipped docs, user-guide/08-skills.md; switched off only by
 // `[compat.claude] skills = false` or GROK_CLAUDE_SKILLS_ENABLED=false), and that is exactly
-// where the manage-nodeterm-canvas skill is already written — locally, and on an SSH host via
+// where the manage-ohlab-canvas skill is already written — locally, and on an SSH host via
 // RemoteHooks.installCanvasControl. Membership here is what sets NODETERM_CANVAS_CONTROL in the
 // session env (hook-server's buildPtyEnv, remoteHookEnvArgs), i.e. what makes the shim anything
 // other than a no-op.

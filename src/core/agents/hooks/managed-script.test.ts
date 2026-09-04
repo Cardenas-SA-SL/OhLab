@@ -127,7 +127,7 @@ describe('buildManagedScript', () => {
         '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
       )
       expect(s).toContain('"behavior":"deny"')
-      expect(s).toContain('"message":"Denied from nodeterm."')
+      expect(s).toContain('"message":"Denied from OhLab."')
     })
     it('cleans up request + answer files and, on timeout, removes the request file', () => {
       expect(s).toContain('rm -f "$nt_answer" "$nt_pending_file"')
@@ -287,8 +287,8 @@ describe('buildManagedScript', () => {
   describe('endpoint failover (dead-primary retry against a live sibling endpoint)', () => {
     it('lists the three known candidate endpoint files', () => {
       expect(s).toContain('"$HOME/.nodeterm-server/hook-endpoint.env"')
-      expect(s).toContain('"$HOME/.config/node-terminal/hook-endpoint.env"')
-      expect(s).toContain('"$HOME/Library/Application Support/node-terminal/hook-endpoint.env"')
+      expect(s).toContain('"$HOME/.config/ohlab/hook-endpoint.env"')
+      expect(s).toContain('"$HOME/Library/Application Support/ohlab/hook-endpoint.env"')
     })
     it('also globs the per-project SSH endpoints, with $HOME quoted but the pattern NOT', () => {
       // A quoted glob never expands — the whole self-heal for a session left on a dead project
@@ -303,7 +303,7 @@ describe('buildManagedScript', () => {
       // live endpoint under N dead siblings — see the measured table in managed-script.ts.
       const list = s.slice(s.indexOf('nt_candidates() {'), s.indexOf('nt_adopt() {'))
       const server = list.indexOf('"$HOME/.nodeterm-server/hook-endpoint.env"')
-      const appSupport = list.indexOf('"$HOME/Library/Application Support/node-terminal/hook-endpoint.env"')
+      const appSupport = list.indexOf('"$HOME/Library/Application Support/ohlab/hook-endpoint.env"')
       const glob = list.indexOf('"$HOME"/.nodeterm/hook-endpoint-*.env')
       expect(server).toBeGreaterThan(-1)
       expect(glob).toBeGreaterThan(appSupport)
@@ -625,7 +625,7 @@ describe('buildManagedScript endpoint failover, executed under /bin/sh', () => {
     const home = join(dir, 'home-space')
     const bin = join(dir, 'bin-space')
     const log = join(dir, 'curl-space.log')
-    const appSupportDir = join(home, 'Library', 'Application Support', 'node-terminal')
+    const appSupportDir = join(home, 'Library', 'Application Support', 'ohlab')
     mkdirSync(join(home, '.nodeterm'), { recursive: true })
     mkdirSync(join(home, '.nodeterm-server'), { recursive: true })
     mkdirSync(appSupportDir, { recursive: true })

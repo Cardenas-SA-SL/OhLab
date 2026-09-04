@@ -115,14 +115,14 @@ export function initRelayHost(
    */
   async function addSeat({ projectId, email }: AddSeatOptions): Promise<{ offer: string; id: string }> {
     if (!isPremium()) {
-      throw new Error('Remote access requires nodeterm Pro.')
+      throw new Error('Remote access requires OhLab Pro.')
     }
     if (!relayAllowed()) {
       throw new Error('Remote access is unavailable in development builds (set NODETERM_RELAY_URL).')
     }
     const entitlement = getEntitlement()
     if (!entitlement) {
-      throw new Error('No entitlement found — please re-activate nodeterm Pro.')
+      throw new Error('No entitlement found — please re-activate OhLab Pro.')
     }
 
     // SEAT CAP + RESERVATION — atomic (no await between reading the count and reserving). The count is

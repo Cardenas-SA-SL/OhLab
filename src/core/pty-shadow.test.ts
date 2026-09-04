@@ -438,10 +438,10 @@ describe('control-mode shadow clients for released sessions', () => {
     const listings: Record<string, string> = {
       // `nt-node-1` reads as attached because our shadow IS a real tmux client; `nt-node-9` is a
       // genuinely attached session (somebody is looking at it) and must survive.
-      'node-terminal': `nt-node-1|1|${FRESH}|${OLD}\nnt-node-9|1|${FRESH}|${OLD}`,
+      'ohlab': `nt-node-1|1|${FRESH}|${OLD}\nnt-node-9|1|${FRESH}|${OLD}`,
       // The SAME NAME on the SSH-remote socket, attached for real. Shadows only ever live on the
       // local socket, so the exclusion must not follow the name across sockets.
-      'nodeterm-rmt': `nt-node-1|1|${FRESH}|${OLD}`
+      'ohlab-rmt': `nt-node-1|1|${FRESH}|${OLD}`
     }
     const killed: Array<{ socket: string; target: string }> = []
     const reaper = createSessionReaper({
@@ -461,13 +461,13 @@ describe('control-mode shadow clients for released sessions', () => {
     })
 
     expect(await reaper.sweep()).toBe(1)
-    expect(killed).toEqual([{ socket: 'node-terminal', target: '=nt-node-1' }])
+    expect(killed).toEqual([{ socket: 'ohlab', target: '=nt-node-1' }])
   })
 
   it('leaves a session somebody is really watching alone — the attached flag is a client COUNT', async () => {
     // `#{session_attached}` counts clients. Subtracting our shadow by forcing the flag to false
     // would report a session that has our shadow PLUS a real client — the user's own
-    // `tmux -L node-terminal attach`, or a second nodeterm process on the same socket — as
+    // `tmux -L ohlab attach`, or a second nodeterm process on the same socket — as
     // detached, and the budget would then kill a session out from under a live user, inverting its
     // one hard rule in the state-destroying direction. The shadow comes off the COUNT.
     const { createSessionReaper } = await import('./session-budget')
@@ -486,7 +486,7 @@ describe('control-mode shadow clients for released sessions', () => {
     let listings = 0
     const reaper = createSessionReaper({
       tmuxBin: () => m.getTmuxBin(),
-      sockets: ['node-terminal'],
+      sockets: ['ohlab'],
       shadowed: (socket) => m.shadowedTmuxSessions(socket),
       exec: async (_bin: string, args: string[]) => {
         if (args.includes('kill-session')) {

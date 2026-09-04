@@ -4,7 +4,7 @@
  * submits under their own account (see docs/superpowers/specs/2026-07-14-help-menu-bug-report-design.md).
  */
 
-export const REPO_URL = 'https://github.com/eneskirca/nodeterm'
+export const REPO_URL = 'https://github.com/Cardenas-SA-SL/OhLab'
 
 /** GitHub rejects URLs past ~8 KB; keep the pre-encoding body well under that. */
 export const BODY_BUDGET = 6000

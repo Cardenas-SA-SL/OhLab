@@ -123,7 +123,7 @@ describe('managed Codex account paths', () => {
   })
 
   it('keeps the managed daemon socket below macOS SUN_LEN', () => {
-    const userData = '/Users/example/Library/Application Support/node-terminal'
+    const userData = '/Users/example/Library/Application Support/ohlab'
     const accountId = 'be28d3d4-c18c-430c-a257-ae550d3dd7ed'
     expect(Buffer.byteLength(codexSocketForAccount(userData, accountId))).toBeLessThan(104)
   })
@@ -188,7 +188,7 @@ describe('legacy home migration (real fs, fail closed)', () => {
   it('moves an existing long managed home to its deterministic short home', () => {
     const fixture = mkdtempSync(path.join(os.tmpdir(), 'nodeterm-codex-home-'))
     try {
-      const userData = path.join(fixture, 'Library', 'Application Support', 'node-terminal')
+      const userData = path.join(fixture, 'Library', 'Application Support', 'ohlab')
       const shortRoot = path.join(fixture, 'cx')
       const legacy = legacyCodexAccountHome(userData, 'account-a')
       mkdirSync(legacy, { recursive: true })

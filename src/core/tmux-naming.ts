@@ -3,7 +3,7 @@
 import { randomBytes } from 'crypto'
 import { sanitizePasteText } from './paste-injection'
 
-export const TMUX_SOCKET = 'node-terminal'
+export const TMUX_SOCKET = 'ohlab'
 
 /** Per-node tmux session name. Must stay stable — it is the persistence key. */
 export function sessionName(persistKey: string): string {

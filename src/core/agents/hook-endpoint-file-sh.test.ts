@@ -19,7 +19,7 @@ let spaced = ''
 beforeAll(async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nodeterm-ep-sh-'))
   // A subdir with a space in its name — the "Application Support" shape.
-  spaced = path.join(root, 'App Support', 'node-terminal')
+  spaced = path.join(root, 'App Support', 'ohlab')
   fs.mkdirSync(spaced, { recursive: true })
   resetPlatformForTests()
   initPlatform(fakePlatform({ userDataDir: spaced }))

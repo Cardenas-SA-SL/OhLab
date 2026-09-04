@@ -9,7 +9,7 @@ const CORE = [
   'Remote access from your phone (relay, E2E encrypted)'
 ]
 const PRO = [
-  'nodeterm mobile Pro included',
+  'Mobile companion Pro included',
   '3 team seats included (extra seats $5/seat/mo)'
 ]
 

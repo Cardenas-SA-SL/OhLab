@@ -27,7 +27,7 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 
-const planted = () => path.join(tmp, '.config', 'opencode', 'plugins', 'nodeterm-status.js')
+const planted = () => path.join(tmp, '.config', 'opencode', 'plugins', 'ohlab-status.js')
 
 describe('opencode plugin install', () => {
   it('writes the marker-bearing plugin file (idempotent)', () => {
@@ -88,7 +88,7 @@ describe('generated plugin behavior (executed)', () => {
     const file = path.join(tmp, `plugin-under-test-${Math.random().toString(36).slice(2)}.mjs`)
     fs.writeFileSync(file, buildOpencodePlugin())
     const mod = await import(/* @vite-ignore */ `file://${file}`)
-    return mod.NodetermStatus()
+    return mod.OhLabStatus()
   }
 
   afterEach(() => {
@@ -199,7 +199,7 @@ describe('generated plugin unix-socket transport', () => {
     const file = path.join(tmp, `plugin-sock-${Math.random().toString(36).slice(2)}.mjs`)
     fs.writeFileSync(file, buildOpencodePlugin())
     const mod = await import(/* @vite-ignore */ `file://${file}`)
-    return mod.NodetermStatus()
+    return mod.OhLabStatus()
   }
 
   it('posts over the unix socket via node:http when NODETERM_HOOK_SOCK is set (no port)', async () => {
@@ -309,7 +309,7 @@ describe('generated plugin presents the per-node token', () => {
     const file = path.join(tmp, `plugin-token-${Math.random().toString(36).slice(2)}.mjs`)
     fs.writeFileSync(file, buildOpencodePlugin())
     const mod = await import(/* @vite-ignore */ `file://${file}`)
-    return mod.NodetermStatus()
+    return mod.OhLabStatus()
   }
 
   /** Fires one event over the plain TCP `fetch` path and returns the headers it sent. */
@@ -446,12 +446,12 @@ describe('opencodeConfigDir honors XDG_CONFIG_HOME', () => {
     vi.stubEnv('XDG_CONFIG_HOME', xdg)
     try {
       expect(opencodeConfigDir()).toBe(path.join(xdg, 'opencode'))
-      expect(pluginPath()).toBe(path.join(xdg, 'opencode', 'plugins', 'nodeterm-status.js'))
+      expect(pluginPath()).toBe(path.join(xdg, 'opencode', 'plugins', 'ohlab-status.js'))
       installOpencodeHooks()
-      const body = fs.readFileSync(path.join(xdg, 'opencode', 'plugins', 'nodeterm-status.js'), 'utf8')
+      const body = fs.readFileSync(path.join(xdg, 'opencode', 'plugins', 'ohlab-status.js'), 'utf8')
       expect(body.startsWith(PLUGIN_MARKER)).toBe(true)
       // and NOT under ~/.config
-      expect(fs.existsSync(path.join(tmp, '.config', 'opencode', 'plugins', 'nodeterm-status.js'))).toBe(false)
+      expect(fs.existsSync(path.join(tmp, '.config', 'opencode', 'plugins', 'ohlab-status.js'))).toBe(false)
     } finally {
       vi.unstubAllEnvs()
       fs.rmSync(xdg, { recursive: true, force: true })
@@ -461,7 +461,7 @@ describe('opencodeConfigDir honors XDG_CONFIG_HOME', () => {
     vi.stubEnv('XDG_CONFIG_HOME', '')
     try {
       expect(opencodeConfigDir()).toBe(path.join(tmp, '.config', 'opencode'))
-      expect(pluginPath()).toBe(path.join(tmp, '.config', 'opencode', 'plugins', 'nodeterm-status.js'))
+      expect(pluginPath()).toBe(path.join(tmp, '.config', 'opencode', 'plugins', 'ohlab-status.js'))
     } finally {
       vi.unstubAllEnvs()
     }

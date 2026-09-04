@@ -1,5 +1,5 @@
 // Installs the outbound canvas-control CLI + per-agent discovery docs. Mirrors
-// context-link.ts: a self-contained POSIX-sh CLI (nodeterm.sh) POSTs to the hook server's
+// context-link.ts: a self-contained POSIX-sh CLI (ohlab.sh) POSTs to the hook server's
 // /control/* routes; a Claude skill / codex-gemini instruction blocks tell the agent how +
 // when to call it. The CLI no-ops unless NODETERM_CANVAS_CONTROL is set.
 //
@@ -24,10 +24,10 @@ function dir(): string {
   return path.join(app.getPath('userData'), 'canvas-control')
 }
 function shimPath(): string {
-  return path.join(dir(), 'nodeterm.sh')
+  return path.join(dir(), 'ohlab.sh')
 }
 function skillPathIn(configDir: string): string {
-  return path.join(configDir, 'skills', 'manage-nodeterm-canvas', 'SKILL.md')
+  return path.join(configDir, 'skills', 'manage-ohlab-canvas', 'SKILL.md')
 }
 function skillBody(): string {
   return buildCanvasSkillBody(shimPath())

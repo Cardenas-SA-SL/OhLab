@@ -1,15 +1,10 @@
-// Polls the backend /v1/check feed from the main process (so the renderer CSP stays 'self').
-// Successor to the static announcements.json: returns targeted messages for the announcement
-// banner AND the mandatory-update policy for the Update Card. It also carries the anonymous
-// install id (deviceId + os/arch/version), which the backend upserts into `devices` as a
-// passive active-install counter — so the version distribution reflects EVERY install, not only
-// the (few) that also opt into the telemetry ping. Nothing personal is sent and the client IP is
-// never stored server-side; a hard opt-out is still DO_NOT_TRACK / NODETERM_TELEMETRY_DISABLED.
+// Polls OhLab's static announcements feed from the main process (so the renderer CSP stays 'self').
+// Updates are handled independently by electron-updater through the GitHub publish provider.
 import { platform } from './platform'
-import { getDeviceId } from './device-id'
 import type { Announcement, UpdatePolicy } from '../shared/types'
 
-const API_BASE = process.env.NODETERM_API_BASE || 'https://api.nodeterm.dev'
+const ANNOUNCEMENTS_URL =
+  'https://raw.githubusercontent.com/Cardenas-SA-SL/OhLab/main/docs/announcements.json'
 const CACHE_MS = 5 * 60 * 1000
 
 export interface CheckResult {
@@ -19,21 +14,17 @@ export interface CheckResult {
 
 const EMPTY: CheckResult = { messages: [], update: { minSupported: null, mandatory: false } }
 
-// Same build + DO_NOT_TRACK gate as telemetry: dev never hits the prod API unless a local
-// server is targeted explicitly. Deliberately NOT gated on the in-app telemetry toggle: this
-// call always runs (content delivery + the anonymous install count), so an install still counts
-// even if the user never opts into the detailed telemetry ping. The env kill-switches above are
-// the hard off.
+// Dev builds never contact the production announcement feed. The existing privacy kill switches
+// remain hard opt-outs for all background product communication.
 function allowed(): boolean {
   if (process.env.DO_NOT_TRACK || process.env.NODETERM_TELEMETRY_DISABLED) return false
-  if (!platform().isPackaged && !process.env.NODETERM_API_BASE) return false
-  return true
+  return platform().isPackaged
 }
 
 function sanitize(data: unknown): CheckResult {
   if (!data || typeof data !== 'object') return EMPTY
   const d = data as Record<string, unknown>
-  const rawMessages = Array.isArray(d.messages) ? d.messages : []
+  const rawMessages = Array.isArray(data) ? data : Array.isArray(d.messages) ? d.messages : []
   const messages: Announcement[] = rawMessages
     .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
     .filter((m) => typeof m.id === 'string' && typeof m.title === 'string')
@@ -59,16 +50,9 @@ export async function fetchCheck(): Promise<CheckResult> {
   const now = Date.now()
   if (cache && now - cache.at < CACHE_MS) return cache.data
   try {
-    const q = new URLSearchParams({
-      deviceId: getDeviceId(),
-      version: platform().appVersion,
-      os: process.platform,
-      arch: process.arch,
-      channel: 'stable'
-    })
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), 8000)
-    const res = await fetch(`${API_BASE}/v1/check?${q.toString()}`, {
+    const res = await fetch(ANNOUNCEMENTS_URL, {
       signal: ctrl.signal,
       cache: 'no-cache'
     }).finally(() => clearTimeout(t))

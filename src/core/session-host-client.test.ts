@@ -3,7 +3,7 @@ import fs from 'fs'
 import net from 'net'
 import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionHostPaths } from '../session-host/paths'
 import {
   LineFramer,
@@ -17,10 +17,18 @@ import {
   SessionHostProtocolCompatibilityError,
   type SessionSubscriber
 } from './session-host-client'
+import { makeShortSocketDir } from './test/short-socket-dir'
 
 const openServers = new Set<net.Server>()
 const openSockets = new Set<net.Socket>()
 const tempDirs = new Set<string>()
+
+beforeEach(() => {
+  if (process.platform !== 'darwin') return
+  const socketRoot = makeShortSocketDir('nt-st-')
+  tempDirs.add(socketRoot)
+  vi.spyOn(os, 'tmpdir').mockReturnValue(socketRoot)
+})
 
 function within<T>(promise: Promise<T>, ms = 1_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -76,7 +84,10 @@ function createUserData(
   paths: ReturnType<typeof sessionHostPaths>
   token: string
 } {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nodeterm-session-client-'))
+  const userDataDir =
+    process.platform === 'darwin'
+      ? makeShortSocketDir('nt-sc-')
+      : fs.mkdtempSync(path.join(os.tmpdir(), 'nodeterm-session-client-'))
   tempDirs.add(userDataDir)
   const paths = sessionHostPaths(userDataDir)
   const token = tokenFor(label)

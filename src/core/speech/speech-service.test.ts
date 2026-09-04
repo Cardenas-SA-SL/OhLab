@@ -39,7 +39,7 @@ describe('SpeechService', () => {
   it('rejects a Pro model without premium — core-side gate', async () => {
     const svc = new SpeechService({ models, isPremium: () => false, engineFactory: factory() })
     await expect(svc.transcribe(pcm, { model: 'base', language: 'auto' }))
-      .rejects.toThrow(/requires nodeterm Pro/)
+      .rejects.toThrow(/requires OhLab Pro/)
     expect(loads).toHaveLength(0) // never even loads the model
   })
 

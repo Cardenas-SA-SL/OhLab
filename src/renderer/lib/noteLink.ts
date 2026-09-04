@@ -80,7 +80,7 @@ export function buildNotePushMessage(title: string, text: string, agentId?: stri
   const pointer =
     !agentId || agentId === 'claude'
       ? 'read the full note with the get-linked-context skill'
-      : 'read the full note with the nodeterm linked-context CLI — see the get-linked-context section in your global agent instructions'
+      : 'read the full note with the OhLab linked-context CLI — see the get-linked-context section in your global agent instructions'
   const body =
     flat.length > NOTE_PUSH_MAX ? flat.slice(0, NOTE_PUSH_MAX) + ` … [truncated — ${pointer}]` : flat
   return `[nodeterm] Sticky note "${oneLine(title)}" linked as context: ${body}`

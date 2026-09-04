@@ -107,7 +107,7 @@ export function LicenseSection({ isActive }: { isActive: boolean }): React.JSX.E
     <SettingsSection
       id="license"
       title="License"
-      description="Manage your nodeterm Pro subscription."
+      description="Manage your OhLab Pro subscription."
       isActive={isActive}
       searchEntries={ENTRIES}
     >

@@ -198,7 +198,7 @@ export class RemoteHooks {
       if (endpointResult.code !== 0) return null
       // 3. install the managed hook for each JSON agent (script + merged config).
       for (const t of AGENT_TARGETS) {
-        const script = `${remoteDir}/agent-hooks/${t.agentId}.sh`
+        const script = `${remoteDir}/agent-hooks/ohlab-${t.agentId}.sh`
         const config = `${home}/${t.config}`
         await this.r.run(
           childArgs(
@@ -374,7 +374,7 @@ export class RemoteHooks {
     remoteDir: string
   ): Promise<void> {
     try {
-      const script = `${remoteDir}/agent-hooks/codex.sh`
+      const script = `${remoteDir}/agent-hooks/ohlab-codex.sh`
       await this.r.run(
         childArgs(
           conn,
@@ -474,7 +474,7 @@ export class RemoteHooks {
       const grokHome = isSafeRemoteGrokHome(reported) ? stripped : `${home}/.grok`
       // Joined so the separator is never doubled (`//hooks` is implementation-defined in POSIX).
       const config = `${grokHome.replace(/\/$/, '')}/hooks/${GROK_HOOK_FILE}`
-      const script = `${remoteDir}/agent-hooks/grok.sh`
+      const script = `${remoteDir}/agent-hooks/ohlab-grok.sh`
 
       await this.r.run(
         childArgs(
@@ -518,7 +518,7 @@ export class RemoteHooks {
     try {
       const copilotHome = await this.resolveCopilotHome(conn, controlPath, home)
       const config = `${copilotHome.replace(/\/$/, '')}/hooks/${COPILOT_HOOK_FILE}`
-      const script = `${remoteDir}/agent-hooks/copilot.sh`
+      const script = `${remoteDir}/agent-hooks/ohlab-copilot.sh`
       await this.r.run(
         childArgs(
           conn,
@@ -571,7 +571,7 @@ export class RemoteHooks {
   ): Promise<void> {
     try {
       const remoteDir = `${remoteHome}/.nodeterm`
-      const script = `${remoteDir}/agent-hooks/claude.sh`
+      const script = `${remoteDir}/agent-hooks/ohlab-claude.sh`
       const accountDir = `${remoteHome}/.nodeterm/claude-accounts/${accountId}`
       const config = `${accountDir}/settings.json`
       const events = AGENT_TARGETS.find((t) => t.agentId === 'claude')?.events ?? []
@@ -616,13 +616,13 @@ export class RemoteHooks {
    */
   async installCanvasControl(conn: SshConnection, controlPath: string, remoteHome: string): Promise<void> {
     try {
-      const shim = `${remoteHome}/.nodeterm/nodeterm.sh`
+      const shim = `${remoteHome}/.ohlab/ohlab.sh`
       await this.writeRemoteShim(conn, controlPath, shim, CONTROL_SHIM_SCRIPT)
       await this.writeRemoteSkill(
         conn,
         controlPath,
         `${remoteHome}/.claude`,
-        'manage-nodeterm-canvas',
+        'manage-ohlab-canvas',
         buildCanvasSkillBody(shim)
       )
       // codex / gemini / opencode have no skill system — same marker-delimited instruction block
@@ -661,7 +661,7 @@ export class RemoteHooks {
     accountId: string
   ): Promise<void> {
     try {
-      const shim = `${remoteHome}/.nodeterm/nodeterm.sh`
+      const shim = `${remoteHome}/.ohlab/ohlab.sh`
       // Idempotently (re)write the shim: installCanvasControl may not have run (fail-open) yet.
       await this.writeRemoteShim(conn, controlPath, shim, CONTROL_SHIM_SCRIPT)
       const accountDir = `${remoteHome}/.nodeterm/claude-accounts/${accountId}`
@@ -669,7 +669,7 @@ export class RemoteHooks {
         conn,
         controlPath,
         accountDir,
-        'manage-nodeterm-canvas',
+        'manage-ohlab-canvas',
         buildCanvasSkillBody(shim)
       )
     } catch {

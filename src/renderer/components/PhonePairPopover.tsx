@@ -93,7 +93,7 @@ export function PhonePairPopover({
           ) : (
             <>
               <img src={qr} width={208} height={208} alt="Pairing QR code" className="phone-pair__qr" />
-              <div className="phone-pair__hint">Scan with the nodeterm iOS app · waiting (10 min)</div>
+              <div className="phone-pair__hint">Scan with the mobile companion · waiting (10 min)</div>
               {relayPlan === 'dev' ? (
                 <div className="phone-pair__warn">
                   Dev build: the relay is off regardless of the toggle, so this code pairs
@@ -158,7 +158,7 @@ export function PhonePairPopover({
           className="phone-pair__link phone-pair__footer"
           onClick={() => window.nodeTerminal.shell.openExternal(IOS_APP_STORE_URL)}
         >
-          Get the nodeterm iOS app ↗
+          Get the mobile companion ↗
         </button>
         <button className="phone-pair__link phone-pair__footer" onClick={onOpenSettings}>
           All phone settings…

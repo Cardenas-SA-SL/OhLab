@@ -348,7 +348,7 @@ describe('SessionMemoryPanel', () => {
   it('says whose memory it is showing', () => {
     mount()
     const attrib = host.querySelector('.sessmem-panel__attrib')?.textContent ?? ''
-    expect(attrib).toMatch(/not nodeterm/i)
+    expect(attrib).toMatch(/not OhLab/i)
   })
 
   it('says it in EVERY state, including a failed sweep', () => {
@@ -356,7 +356,7 @@ describe('SessionMemoryPanel', () => {
     // so the line must not hang off the rows.
     mount({ ok: false, rows: [] })
     expect(host.querySelector('.sessmem-panel__note')?.textContent).toContain('Could not measure')
-    expect(host.querySelector('.sessmem-panel__attrib')?.textContent ?? '').toMatch(/not nodeterm/i)
+    expect(host.querySelector('.sessmem-panel__attrib')?.textContent ?? '').toMatch(/not OhLab/i)
   })
 
   it('never touches the host poll — the pill owns that timer', () => {

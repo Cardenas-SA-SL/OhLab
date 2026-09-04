@@ -29,7 +29,7 @@ beforeAll(async () => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nodeterm-shim-fo-'))
   resetPlatformForTests()
   initPlatform(fakePlatform({ userDataDir: path.join(dir, 'userdata') }))
-  shim = path.join(dir, 'nodeterm.sh')
+  shim = path.join(dir, 'ohlab.sh')
   fs.writeFileSync(shim, CONTROL_SHIM_SCRIPT, { mode: 0o755 })
   await hookServer.start()
   hookServer.setControlHandler(async (cmd) => {

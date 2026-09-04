@@ -81,9 +81,9 @@ export const useCodexIdentity = create<CodexIdentityState>((set) => ({
 
 /** Human copy for the reasons the generated launcher can report. */
 export const CODEX_FALLBACK_REASONS: Record<string, string> = {
-  'node-id-unavailable': 'this session was not started by nodeterm',
-  'hook-endpoint-unavailable': "nodeterm's hook endpoint was unreadable",
-  'broker-unreachable': "nodeterm's hook server was unreachable",
+  'node-id-unavailable': 'this session was not started by OhLab',
+  'hook-endpoint-unavailable': "OhLab's hook endpoint was unreadable",
+  'broker-unreachable': "OhLab's hook server was unreachable",
   'node-token-unavailable': 'this build could not mint a node identity key',
   'thread-id-unavailable': 'the session id to resume was not usable',
   // Two different facts, and the single old string named only the first — "an older CLI" sent a

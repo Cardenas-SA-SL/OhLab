@@ -22,7 +22,7 @@ import type { CorePlatform } from '../core/platform'
 import { classifyPtyPressure } from '../core/pty-pressure'
 import { invalidatePtyCeiling, readPtyDevices, type PtyDevices } from '../core/pty-devices'
 
-export const PTMX_DAEMON_LABEL = 'com.nodeterm.ptmx-max'
+export const PTMX_DAEMON_LABEL = 'com.ohlab.ptmx-max'
 export const PTMX_PLIST_PATH = `/Library/LaunchDaemons/${PTMX_DAEMON_LABEL}.plist`
 
 /**

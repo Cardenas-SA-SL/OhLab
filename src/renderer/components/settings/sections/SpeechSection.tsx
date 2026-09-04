@@ -221,7 +221,7 @@ export function SpeechSection({
       <SearchableRow {...ROWS.engine}>
         <FieldRow
           label="Engine"
-          description="Local Whisper transcribes on-device. Cloud requires the nodeterm backend · not available yet."
+          description="Local Whisper transcribes on-device. Cloud requires the OhLab backend · not available yet."
           control={
             <SegmentedPill<'whisper' | 'cloud'>
               value={settings.speech.engine}

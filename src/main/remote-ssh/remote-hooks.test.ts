@@ -60,7 +60,7 @@ describe('RemoteHooks.setup', () => {
       /cat > ('\/home\/u\/\.nodeterm\/\.nodeterm-[0-9a-f-]{36}\.tmp')/
     )?.[1]
     expect(endpointTemp).toBeTruthy()
-    expect(endpointWrite?.cmd).toContain(`chmod 600 -- ${endpointTemp}`)
+    expect(endpointWrite?.cmd).toContain(`chmod -- 600 ${endpointTemp}`)
     expect(endpointWrite?.cmd).toContain(
       `mv -f -- ${endpointTemp} '/home/u/.nodeterm/hook-endpoint-p1.env'`
     )
@@ -74,14 +74,14 @@ describe('RemoteHooks.setup', () => {
       )
     ).toBe(true)
     // managed script written to the absolute path + config merged with the guarded command.
-    expect(joined.some((j) => j.includes(`cat > '/home/u/.nodeterm/agent-hooks/claude.sh'`))).toBe(true)
+    expect(joined.some((j) => j.includes(`cat > '/home/u/.nodeterm/agent-hooks/ohlab-claude.sh'`))).toBe(true)
     expect(joined.some((j) => j.includes(`cat > '/home/u/.claude/settings.json'`))).toBe(true)
     expect(calls.some((c) => (c.stdin ?? '').includes('--unix-socket'))).toBe(true)
     // The merged command guards on the script still existing — a removed ~/.nodeterm must not
     // make every prompt fail the hook (a non-zero UserPromptSubmit hook blocks the prompt).
     expect(
       calls.some((c) =>
-        (c.stdin ?? '').includes("if [ -r '/home/u/.nodeterm/agent-hooks/claude.sh' ]; then sh ")
+        (c.stdin ?? '').includes("if [ -r '/home/u/.nodeterm/agent-hooks/ohlab-claude.sh' ]; then sh ")
       )
     ).toBe(true)
     expect(calls.some((c) => (c.stdin ?? '').includes('"hooks"'))).toBe(true)
@@ -95,13 +95,13 @@ describe('RemoteHooks.setup', () => {
     expect(res).not.toBeNull()
     const joined = calls.map((c) => c.args.join(' '))
     // codex managed script written to the absolute agent-hooks path (paths are posix-quoted).
-    expect(joined.some((j) => j.includes("cat > '/home/u/.nodeterm/agent-hooks/codex.sh'"))).toBe(true)
+    expect(joined.some((j) => j.includes("cat > '/home/u/.nodeterm/agent-hooks/ohlab-codex.sh'"))).toBe(true)
     // hooks.json merged with the [ -x ] guarded command (embedded as JSON in stdin).
     expect(
       calls.some(
         (c) =>
           c.args.join(' ').includes("cat > '/home/u/.codex/hooks.json'") &&
-          (c.stdin ?? '').includes("if [ -x '/home/u/.nodeterm/agent-hooks/codex.sh' ]")
+          (c.stdin ?? '').includes("if [ -x '/home/u/.nodeterm/agent-hooks/ohlab-codex.sh' ]")
       )
     ).toBe(true)
     // the part claude/gemini don't need: a config.toml trust block with a trusted_hash.
@@ -131,7 +131,7 @@ describe('RemoteHooks.setup', () => {
     await new RemoteHooks({ run }).setup('p1', conn, '/s.sock', { port: 1, token: 't', version: '1' })
     const joined = calls.map((c) => c.args.join(' '))
     // the script is still (idempotently) written, but neither hooks.json nor config.toml is rewritten.
-    expect(joined.some((j) => j.includes("cat > '/home/u/.nodeterm/agent-hooks/codex.sh'"))).toBe(true)
+    expect(joined.some((j) => j.includes("cat > '/home/u/.nodeterm/agent-hooks/ohlab-codex.sh'"))).toBe(true)
     expect(joined.some((j) => j.includes("cat > '/home/u/.codex/hooks.json'"))).toBe(false)
     expect(joined.some((j) => j.includes("cat > '/home/u/.codex/config.toml'"))).toBe(false)
   })
@@ -367,16 +367,16 @@ describe('RemoteHooks.setup — grok', () => {
       responses: { '$HOME': '/home/dev', 'GROK_HOME': '/opt/grok-home' }
     })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
-    const write = runs.find((r) => r.cmd.includes('/opt/grok-home/hooks/nodeterm-status.json') && r.stdin)
+    const write = runs.find((r) => r.cmd.includes('/opt/grok-home/hooks/ohlab-status.json') && r.stdin)
     expect(write).toBeTruthy()
     // The HOST's answer wins outright: nothing may touch the $HOME/.grok default.
     expect(runs.some((r) => r.cmd.includes('/home/dev/.grok'))).toBe(false)
     const cfg = JSON.parse(write!.stdin!)
     expect(cfg.hooks.PreToolUse[0].matcher).toBe('.*')
     expect(cfg.hooks.Stop[0].matcher).toBeUndefined()
-    expect(cfg.hooks.SessionStart[0].hooks[0].command).toContain('/home/dev/.nodeterm/agent-hooks/grok.sh')
+    expect(cfg.hooks.SessionStart[0].hooks[0].command).toContain('/home/dev/.nodeterm/agent-hooks/ohlab-grok.sh')
     // The shared managed script is written on the host too, posting to /hook/grok through the tunnel.
-    const script = runs.find((r) => r.cmd.includes('agent-hooks/grok.sh') && r.stdin)
+    const script = runs.find((r) => r.cmd.includes('agent-hooks/ohlab-grok.sh') && r.stdin)
     expect(script!.stdin).toContain('/hook/grok')
   })
 
@@ -388,7 +388,7 @@ describe('RemoteHooks.setup — grok', () => {
       responses: { '$HOME': '/home/dev', 'GROK_HOME': '/opt/grok-home\n' }
     })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
-    expect(runs.some((r) => r.cmd.includes("'/opt/grok-home/hooks/nodeterm-status.json'"))).toBe(true)
+    expect(runs.some((r) => r.cmd.includes("'/opt/grok-home/hooks/ohlab-status.json'"))).toBe(true)
     expect(runs.some((r) => r.cmd.includes('/home/dev/.grok'))).toBe(false)
     // and no raw newline survives into any remote command line.
     expect(runs.some((r) => r.cmd.includes('/opt/grok-home\n'))).toBe(false)
@@ -397,20 +397,20 @@ describe('RemoteHooks.setup — grok', () => {
   it('falls back to $HOME/.grok when the host reports an unusable GROK_HOME', async () => {
     const { rh, conn, runs } = harness({ responses: { '$HOME': '/home/dev', 'GROK_HOME': 'relative/oops' } })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
-    expect(runs.some((r) => r.cmd.includes('/home/dev/.grok/hooks/nodeterm-status.json'))).toBe(true)
+    expect(runs.some((r) => r.cmd.includes('/home/dev/.grok/hooks/ohlab-status.json'))).toBe(true)
     expect(runs.some((r) => r.cmd.includes('relative/oops'))).toBe(false)
   })
 
   it('HEALS a present-but-malformed remote hook file (the file is ours to rewrite)', async () => {
-    // The opposite of the codex/AGENT_TARGETS guard, on purpose: `nodeterm-status.json` is a file
+    // The opposite of the codex/AGENT_TARGETS guard, on purpose: `ohlab-status.json` is a file
     // WE own by name and rewrite wholesale, so there is no user content to preserve — and skipping
     // the write would leave that host's grok nodes dark forever with no in-app repair. The local
     // installer (installHooksInto) already heals; this matches it.
     const { rh, conn, runs } = harness({
-      responses: { '$HOME': '/home/dev', 'GROK_HOME': '/opt/grok-home', 'nodeterm-status.json': '{ oops' }
+      responses: { '$HOME': '/home/dev', 'GROK_HOME': '/opt/grok-home', 'ohlab-status.json': '{ oops' }
     })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
-    const write = runs.find((r) => r.cmd.includes('cat > ') && r.cmd.includes('nodeterm-status.json'))
+    const write = runs.find((r) => r.cmd.includes('cat > ') && r.cmd.includes('ohlab-status.json'))
     expect(write).toBeTruthy()
     const cfg = JSON.parse(write!.stdin!)
     expect(Object.keys(cfg.hooks).sort()).toEqual(GROK_EVENTS)
@@ -424,12 +424,12 @@ describe('RemoteHooks.setup — grok', () => {
       responses: { '$HOME': '/home/dev', 'GROK_HOME': '/opt/my grok' }
     })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
-    const write = runs.find((r) => r.cmd.includes('cat > ') && r.cmd.includes('nodeterm-status.json'))
-    expect(write!.cmd).toContain(`mkdir -p "$(dirname '/opt/my grok/hooks/nodeterm-status.json')"`)
+    const write = runs.find((r) => r.cmd.includes('cat > ') && r.cmd.includes('ohlab-status.json'))
+    expect(write!.cmd).toContain(`mkdir -p "$(dirname '/opt/my grok/hooks/ohlab-status.json')"`)
   })
 
   it('a grok failure never breaks the connect (fail open)', async () => {
-    const { rh, conn } = harness({ failOn: 'nodeterm-status.json' })
+    const { rh, conn } = harness({ failOn: 'ohlab-status.json' })
     await expect(rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })).resolves.toBeTruthy()
   })
 })
@@ -441,17 +441,17 @@ describe('RemoteHooks.setup — copilot', () => {
     })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
     const write = runs.find(
-      (r) => r.cmd.includes('/opt/copilot-home/hooks/nodeterm-status.json') && r.stdin
+      (r) => r.cmd.includes('/opt/copilot-home/hooks/ohlab-status.json') && r.stdin
     )
     expect(write).toBeTruthy()
     const cfg = JSON.parse(write!.stdin!)
     expect(cfg.version).toBe(1)
     expect(cfg.hooks.SessionStart[0]).toEqual({
       type: 'command',
-      bash: expect.stringContaining('/home/dev/.nodeterm/agent-hooks/copilot.sh'),
+      bash: expect.stringContaining('/home/dev/.nodeterm/agent-hooks/ohlab-copilot.sh'),
       timeoutSec: 5
     })
-    expect(runs.find((r) => r.cmd.includes('agent-hooks/copilot.sh'))?.stdin).toContain(
+    expect(runs.find((r) => r.cmd.includes('agent-hooks/ohlab-copilot.sh'))?.stdin).toContain(
       '/hook/copilot'
     )
     expect(runs.some((r) => r.cmd.includes('/home/dev/.copilot'))).toBe(false)
@@ -463,13 +463,13 @@ describe('RemoteHooks.setup — copilot', () => {
     })
     await rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
     expect(
-      runs.some((r) => r.cmd.includes('/home/dev/.copilot/hooks/nodeterm-status.json'))
+      runs.some((r) => r.cmd.includes('/home/dev/.copilot/hooks/ohlab-status.json'))
     ).toBe(true)
     expect(runs.some((r) => r.cmd.includes('relative/copilot/hooks'))).toBe(false)
   })
 
   it('fails open when the Copilot hook write fails', async () => {
-    const { rh, conn } = harness({ failOn: '.copilot/hooks/nodeterm-status.json' })
+    const { rh, conn } = harness({ failOn: '.copilot/hooks/ohlab-status.json' })
     await expect(
       rh.setup('p1', conn, '/s.sock', { port: 1234, token: 't', version: '1' })
     ).resolves.toBeTruthy()
@@ -549,17 +549,17 @@ describe('RemoteHooks.installCanvasControl', () => {
     const joined = calls.map((c) => c.args.join(' '))
     // The shim must land executable: the skill tells the agent to run it via `sh <path>`, but the
     // instruction blocks and a user's own habits may exec it directly.
-    expect(joined.some((j) => j.includes('cat > \'/home/u/.nodeterm/nodeterm.sh\'') && j.includes('chmod 755'))).toBe(true)
+    expect(joined.some((j) => j.includes('cat > \'/home/u/.ohlab/ohlab.sh\'') && j.includes('chmod 755'))).toBe(true)
     // It is the POSIX shim, NOT the retired Electron-as-Node one — nothing may reference a local
     // interpreter path, which is exactly what made the old CLI unusable off the desktop.
-    const shim = calls.find((c) => isWriteTo(c.args, '/home/u/.nodeterm/nodeterm.sh'))?.stdin ?? ''
+    const shim = calls.find((c) => isWriteTo(c.args, '/home/u/.ohlab/ohlab.sh'))?.stdin ?? ''
     expect(shim).toContain('#!/bin/sh')
     expect(shim).toContain('--unix-socket')
     expect(shim).not.toContain('ELECTRON_RUN_AS_NODE')
     // The skill points at the REMOTE shim path (a desktop path would resolve to nothing here).
-    const skill = calls.find((c) => isWriteTo(c.args, '/home/u/.claude/skills/manage-nodeterm-canvas/SKILL.md'))?.stdin ?? ''
-    expect(skill).toContain('name: manage-nodeterm-canvas')
-    expect(skill).toContain('sh "/home/u/.nodeterm/nodeterm.sh"')
+    const skill = calls.find((c) => isWriteTo(c.args, '/home/u/.claude/skills/manage-ohlab-canvas/SKILL.md'))?.stdin ?? ''
+    expect(skill).toContain('name: manage-ohlab-canvas')
+    expect(skill).toContain('sh "/home/u/.ohlab/ohlab.sh"')
     // codex/gemini get the marker block; opencode's path is expanded by the REMOTE shell, since
     // the desktop's XDG_CONFIG_HOME says nothing about the host's.
     expect(joined.some((j) => j.includes('/home/u/.codex/AGENTS.md'))).toBe(true)
@@ -569,13 +569,13 @@ describe('RemoteHooks.installCanvasControl', () => {
     expect(joined.some((j) => j.includes(`NT_H='/home/u'`))).toBe(true)
     expect(joined.some((j) => j.includes('${XDG_CONFIG_HOME:-$NT_H/.config}/opencode/AGENTS.md'))).toBe(true)
     expect(joined.some((j) => j.includes('/home/u/.copilot/copilot-instructions.md'))).toBe(true)
-    expect(calls.some((c) => (c.stdin ?? '').includes('nodeterm:manage-canvas:start'))).toBe(true)
+    expect(calls.some((c) => (c.stdin ?? '').includes('ohlab:manage-canvas:start'))).toBe(true)
     // no unexpanded tilde survives in any remote path.
     expect(joined.some((j) => j.includes('~/'))).toBe(false)
   })
 
   it('preserves existing instruction-file content and rewrites its own block only', async () => {
-    const existing = '# my notes\n\n<!-- nodeterm:manage-canvas:start -->\nSTALE\n<!-- nodeterm:manage-canvas:end -->\n'
+    const existing = '# my notes\n\n<!-- ohlab:manage-canvas:start -->\nSTALE\n<!-- ohlab:manage-canvas:end -->\n'
     const calls: { args: string[]; stdin?: string }[] = []
     const run = vi.fn(async (args: string[], stdin?: string) => {
       calls.push({ args, stdin })
@@ -587,7 +587,7 @@ describe('RemoteHooks.installCanvasControl', () => {
     const write = calls.find((c) => isWriteTo(c.args, '/home/u/.codex/AGENTS.md'))
     expect(write?.stdin).toContain('# my notes')
     expect(write?.stdin).not.toContain('STALE')
-    expect(write?.stdin).toContain('nodeterm canvas')
+    expect(write?.stdin).toContain('OhLab canvas')
   })
 
   it('skips the write when the block is already current (idempotent reconnects)', async () => {
@@ -614,10 +614,10 @@ describe('RemoteHooks.installCanvasControl', () => {
     // ~/.claude/skills — the same gap installIntoAccountDir exists for on the hook side.
     const { rh, calls } = harness()
     await rh.installCanvasSkillIntoAccountDir(conn, '/s.sock', '/home/u', 'acc-1')
-    const target = '/home/u/.nodeterm/claude-accounts/acc-1/skills/manage-nodeterm-canvas/SKILL.md'
+    const target = '/home/u/.nodeterm/claude-accounts/acc-1/skills/manage-ohlab-canvas/SKILL.md'
     expect(calls.some((c) => isWriteTo(c.args, target))).toBe(true)
     // the shim is (re)written too — installCanvasControl may have failed open earlier.
-    expect(calls.some((c) => isWriteTo(c.args, '/home/u/.nodeterm/nodeterm.sh'))).toBe(true)
+    expect(calls.some((c) => isWriteTo(c.args, '/home/u/.ohlab/ohlab.sh'))).toBe(true)
   })
 
   it('fails open when the remote runner throws', async () => {
@@ -646,7 +646,7 @@ describe('RemoteHooks.installContextLink', () => {
     const skill = calls.find((c) => isWriteTo(c.args, '/home/u/.claude/skills/get-linked-context/SKILL.md'))?.stdin ?? ''
     expect(skill).toContain('name: get-linked-context')
     expect(skill).toContain('sh "/home/u/.nodeterm/context.sh"')
-    expect(calls.some((c) => (c.stdin ?? '').includes('nodeterm:get-linked-context:start'))).toBe(true)
+    expect(calls.some((c) => (c.stdin ?? '').includes('ohlab:get-linked-context:start'))).toBe(true)
     expect(joined.some((j) => j.includes('~/'))).toBe(false)
   })
 
@@ -654,7 +654,7 @@ describe('RemoteHooks.installContextLink', () => {
     // Both features merge into ~/.codex/AGENTS.md under DIFFERENT markers. Installing one must
     // not evict the other, or every connect would leave the host with exactly one of the two.
     const existing =
-      '<!-- nodeterm:manage-canvas:start -->\nCANVAS BLOCK\n<!-- nodeterm:manage-canvas:end -->\n'
+      '<!-- ohlab:manage-canvas:start -->\nCANVAS BLOCK\n<!-- ohlab:manage-canvas:end -->\n'
     const calls: { args: string[]; stdin?: string }[] = []
     const run = vi.fn(async (args: string[], stdin?: string) => {
       calls.push({ args, stdin })
@@ -665,7 +665,7 @@ describe('RemoteHooks.installContextLink', () => {
     await new RemoteHooks({ run }).installContextLink(conn, '/s.sock', '/home/u')
     const write = calls.find((c) => isWriteTo(c.args, '/home/u/.codex/AGENTS.md'))
     expect(write?.stdin).toContain('CANVAS BLOCK')
-    expect(write?.stdin).toContain('nodeterm:get-linked-context:start')
+    expect(write?.stdin).toContain('ohlab:get-linked-context:start')
   })
 
   it('installs the skill into a remote managed-account config dir', async () => {
@@ -723,7 +723,7 @@ describe('RemoteHooks.writeNodeTokens', () => {
       /cat > ('\/home\/u\/\.nodeterm\/node-tokens\/\.nodeterm-[0-9a-f-]{36}\.tmp')/
     )?.[1]
     expect(temp).toBeTruthy()
-    expect(writes[0].cmd).toContain(`chmod 600 -- ${temp}`)
+    expect(writes[0].cmd).toContain(`chmod -- 600 ${temp}`)
     expect(writes[0].cmd).toContain(
       `mv -f -- ${temp} '/home/u/.nodeterm/node-tokens/node-1'`
     )

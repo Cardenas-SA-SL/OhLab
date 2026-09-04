@@ -157,7 +157,7 @@ export function TeamAccessSection({
                   <p className="text-sm text-muted">
                     Share this single-use pairing code with{' '}
                     <strong className="text-text">{offerEmail || 'your teammate'}</strong> — they
-                    paste it in nodeterm → New Remote Connection:
+                    paste it in OhLab → New Remote Connection:
                   </p>
                   <FieldRow
                     label="Pairing code"

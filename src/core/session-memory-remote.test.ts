@@ -21,7 +21,7 @@ const sock = (name: string, rc: number, body = ''): string =>
 /** The two sockets answering "no server running" — the normal state of an idle host, and the
  *  baseline every "the panes are what matters" fixture wants. */
 const bothIdle = (panes = ''): string =>
-  sock('node-terminal', 0, panes) + sock('nodeterm-rmt', 1, 'no server running on /tmp/x\n')
+  sock('ohlab', 0, panes) + sock('ohlab-rmt', 1, 'no server running on /tmp/x\n')
 
 describe('parseRemoteSessionMemory', () => {
   it('parses all three sections into a report', () => {
@@ -58,8 +58,8 @@ describe('parseRemoteSessionMemory', () => {
     it('accepts tmux saying there is no server (an ANSWER: the socket is simply unused)', () => {
       const r = parseRemoteSessionMemory(
         '##MEM\n##PANES\n' +
-          sock('node-terminal', 1, 'no server running on /tmp/tmux-0/node-terminal\n') +
-          sock('nodeterm-rmt', 1, 'error connecting to /tmp/tmux-0/nodeterm-rmt (No such file or directory)\n') +
+          sock('ohlab', 1, 'no server running on /tmp/tmux-0/ohlab\n') +
+          sock('ohlab-rmt', 1, 'error connecting to /tmp/tmux-0/ohlab-rmt (No such file or directory)\n') +
           procs
       )
       expect(r.ok).toBe(true)
@@ -73,8 +73,8 @@ describe('parseRemoteSessionMemory', () => {
         'tmux: error while loading shared libraries: libevent-2.1.so.7: cannot open shared object file: No such file or directory\n'
       const r = parseRemoteSessionMemory(
         '##MEM\n##PANES\n' +
-          sock('node-terminal', 127, linker) +
-          sock('nodeterm-rmt', 127, linker) +
+          sock('ohlab', 127, linker) +
+          sock('ohlab-rmt', 127, linker) +
           procs
       )
       expect(r.ok).toBe(false)
@@ -84,8 +84,8 @@ describe('parseRemoteSessionMemory', () => {
     it('reports ok:true when only SOME sockets failed — one answer is enough', () => {
       const r = parseRemoteSessionMemory(
         '##MEM\n##PANES\n' +
-          sock('node-terminal', 0, 'nt-term-a|100|claude\n') +
-          sock('nodeterm-rmt', 13, 'error connecting to /tmp/tmux-1/nodeterm-rmt (Permission denied)\n') +
+          sock('ohlab', 0, 'nt-term-a|100|claude\n') +
+          sock('ohlab-rmt', 13, 'error connecting to /tmp/tmux-1/ohlab-rmt (Permission denied)\n') +
           '##PROCS\n100 1 1024\n'
       )
       expect(r.ok).toBe(true)
@@ -94,7 +94,7 @@ describe('parseRemoteSessionMemory', () => {
 
     it('reports ok:false when a socket fence was never closed (the stream was cut mid-socket)', () => {
       const r = parseRemoteSessionMemory(
-        '##MEM\n##PANES\n##SOCK node-terminal\nnt-term-a|100|claude\n' + procs
+        '##MEM\n##PANES\n##SOCK ohlab\nnt-term-a|100|claude\n' + procs
       )
       expect(r.ok).toBe(false)
       expect(r.rows).toEqual([])
@@ -109,11 +109,11 @@ describe('parseRemoteSessionMemory', () => {
       const r = parseRemoteSessionMemory(
         '##MEM\n##PANES\n' +
           sock(
-            'node-terminal',
+            'ohlab',
             0,
             'nt-term-a|100|claude\n##SOCK not-a-socket\nnt-term-b|200|##SOCKRC 0\n'
           ) +
-          sock('nodeterm-rmt', 1, 'no server running\n') +
+          sock('ohlab-rmt', 1, 'no server running\n') +
           '##PROCS\n100 1 1024\n200 1 2048\n'
       )
       expect(r.ok).toBe(true)
@@ -159,8 +159,8 @@ describe('parseRemoteSessionMemory', () => {
   it('collapses a session reported by several panes into one row', () => {
     const r = parseRemoteSessionMemory(
       '##MEM\n##PANES\n' +
-        sock('node-terminal', 0, 'nt-term-a|100|claude\n') +
-        sock('nodeterm-rmt', 0, 'nt-term-a|300|bash\n') +
+        sock('ohlab', 0, 'nt-term-a|100|claude\n') +
+        sock('ohlab-rmt', 0, 'nt-term-a|300|bash\n') +
         '##PROCS\n100 1 1024\n300 1 2048\n'
     )
     expect(r.ok).toBe(true)

@@ -140,7 +140,7 @@ export class SessionHostProtocolCompatibilityError extends Error {
 
   constructor(operation: string) {
     super(
-      `The persistent terminal host is from an older nodeterm version and cannot ${operation}. ` +
+      `The persistent terminal host is from an older OhLab version and cannot ${operation}. ` +
         'Existing terminals remain attachable; close them and let the legacy host exit before ' +
         'starting or restarting a Windows terminal.'
     )
@@ -836,6 +836,13 @@ export class SessionHostClient {
             // A response may beat a late write callback. Identity-check this exact pending entry so
             // that callback can neither settle nor delete a newer request that reused surrounding state.
             if (!error || this.pending.get(id) !== pending) return
+            // EPIPE is the kernel refusing the write because the peer had already closed: the frame
+            // was never queued, let alone read, so it is CERTAINLY undelivered and may be replayed on
+            // a fresh connection — the same verdict as the pre-write `socket.destroyed` recheck. On
+            // macOS a peer hangup routinely surfaces this way (the write fails before the FIN is
+            // processed) rather than as a destroyed socket, which used to fail an idempotent request
+            // outright instead of resending it.
+            if ((error as NodeJS.ErrnoException).code === 'EPIPE') pending.sent = false
             this.dropSocket(socket, asError(error), true)
           })
         } catch (error) {

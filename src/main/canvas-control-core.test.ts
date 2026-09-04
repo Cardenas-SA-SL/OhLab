@@ -207,27 +207,27 @@ describe('parseControlRequest', () => {
   })
 
   it('merges the canvas-control block idempotently, preserving other content', () => {
-    const block = buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    const block = buildCanvasControlInstructions('/tmp/ohlab.sh')
     const first = mergeCanvasControlBlock('# My own notes\n', block)
     expect(first).toContain('# My own notes')
-    expect(first).toContain('nodeterm:manage-canvas:start')
-    expect(first).toContain('/tmp/nodeterm.sh')
+    expect(first).toContain('ohlab:manage-canvas:start')
+    expect(first).toContain('/tmp/ohlab.sh')
     // Re-merging (e.g. next app launch, updated verbs) replaces the block, not duplicates it.
-    const second = mergeCanvasControlBlock(first, buildCanvasControlInstructions('/new/nodeterm.sh'))
-    expect(second.match(/nodeterm:manage-canvas:start/g)).toHaveLength(1)
-    expect(second).toContain('/new/nodeterm.sh')
-    expect(second).not.toContain('/tmp/nodeterm.sh')
+    const second = mergeCanvasControlBlock(first, buildCanvasControlInstructions('/new/ohlab.sh'))
+    expect(second.match(/ohlab:manage-canvas:start/g)).toHaveLength(1)
+    expect(second).toContain('/new/ohlab.sh')
+    expect(second).not.toContain('/tmp/ohlab.sh')
     expect(second).toContain('# My own notes')
   })
 
   it('instructions cover the verb set and the confirm caveat', () => {
-    const body = buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    const body = buildCanvasControlInstructions('/tmp/ohlab.sh')
     for (const verb of ['list', 'open-agent', 'spawn-team', 'group', 'ungroup', 'move', 'arrange', 'rename', 'color', 'write', 'close', 'board', 'assign']) {
       expect(body).toContain(verb)
     }
     expect(body).toContain('group --nodes <id,id> [--label L] [--color C]')
     expect(body).toContain('color --node <id,id> --color C')
-    const skill = buildCanvasSkillBody('/tmp/nodeterm.sh')
+    const skill = buildCanvasSkillBody('/tmp/ohlab.sh')
     expect(skill).toContain('group --nodes <id,id> [--label "Frontend Team"] [--color C]')
     expect(skill).toContain('color --node <id,id> --color C')
     expect(body.toLowerCase()).toContain('confirm')
@@ -243,7 +243,7 @@ describe('parseControlRequest', () => {
   })
 
   it('the codex/gemini instructions carry the same rule', () => {
-    const body = buildCanvasControlInstructions('/tmp/nodeterm.sh')
+    const body = buildCanvasControlInstructions('/tmp/ohlab.sh')
     expect(body).toContain('--flag=value')
     expect(body).toMatch(/starts? with `--`/)
   })
@@ -253,13 +253,13 @@ describe('parseControlRequest', () => {
   // script drift. The runtime behaviour itself is proven against real /bin/sh in
   // canvas-control-shim.test.ts; this pins the TEACHING of it into both agent-facing bodies.
   it('both agent-facing texts carry the codex-sandbox transport guidance (issue #367)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // Names both exact errors the agent can see: the generic sentence and the sandbox one.
       expect(body).toContain(CONTROL_UNREACHABLE_MSG.replace(/\.$/, ''))
       expect(body).toContain(CODEX_SANDBOX_BLOCKED_LINE)
       // The one action that works everywhere, and the never-do.
       expect(body.toLowerCase()).toContain('escalated permissions')
-      expect(body).toMatch(/never relink, reinstall or restart nodeterm/)
+      expect(body).toMatch(/never relink, reinstall or restart OhLab/)
       // The macOS permanent remedy, named exactly as codex's config reads it.
       expect(body).toContain('network.allow_unix_sockets')
       expect(body).toContain('~/.codex/config.toml')
@@ -313,7 +313,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts warn that --prompt is one line and must not start with a slash', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // `assembleLaunchCommand` collapses every whitespace run in the prompt, because the prompt
       // rides argv on a line that is typed into the pane. An agent that does not know this writes
       // a numbered brief and gets one paragraph.
@@ -326,7 +326,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts separate a denial from an unanswered dialog', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // The two answers carry opposite guidance — a denial is final, a timeout is retryable — and
       // a body that names only "may be denied" leaves a caller reading its own timeout as refusal.
       expect(body).toContain('denied by user')
@@ -335,7 +335,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts document --model on the open verbs and per-role model on spawn-team', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // The flag is the only cost lever an orchestrator has: without it every station it opens
       // inherits one default model. A body that stops naming it leaves that lever undiscoverable,
       // which is the state this test was written to end.
@@ -349,7 +349,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts document --base accepting a station id (issue #530)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // The flag surface must show the widened grammar…
       expect(body).toContain('--base <ref|stationId>')
       // …and both hard truths beside it: what a station id resolves to, and that the base is
@@ -361,7 +361,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts document --dry-run, derived from DRY_RUN_VERBS (issue #532)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       expect(body).toContain('--dry-run')
       // The verb list is RENDERED from the set (dryRunDocLines) — walk the real set so a verb
       // added to the gate lands in the text the day it is added, and a removed one reds here.
@@ -374,7 +374,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts document --prompt-file and the one-line --prompt fact (issue #520)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // `assembleLaunchCommand` collapses every whitespace run in a --prompt literal (it rides
       // argv on a line typed into the pane). An agent that does not know this writes a numbered
       // brief and gets one paragraph — and the fix, --prompt-file, is useless undocumented.
@@ -389,7 +389,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts say the open reply reports `queued` (issue #569 item 1)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // The field itself, and the list that says WHICH ids — a caller that cannot name the queued
       // nodes cannot act on the answer.
       expect(body).toContain('queued')
@@ -406,7 +406,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts say an ERRORED station does not release its dependents (#521)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // The contract changed under `--after`: "gone idle" no longer releases a dependent, because
       // a station whose turn died on an API error reaches idle IMMEDIATELY. A text still promising
       // the old rule tells an orchestrator its chain launched on something that produced nothing.
@@ -418,14 +418,14 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts document the sticky verb', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       expect(body).toContain('`sticky --node')
       expect(body).toContain('--create')
     }
   })
 
   it('both agent-facing texts say an unchanged rename types nothing into the session', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // Issues #582 / #569 §2. An orchestrator that re-asserts its node's name on startup and
       // after every context reset was previously paying a `/rename` injection into the working
       // session each time — one reporter worked around it by reading the title first. The verb
@@ -436,7 +436,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts document the messaging verbs and the outermost-frame convention', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       for (const frag of ['`send --node', '`reply --node', '`notify --node']) {
         expect(body).toContain(frag)
       }
@@ -448,7 +448,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts say a busy target is QUEUED, not refused (deliver-on-idle, PR 7)', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       // PR 7 replaced "busy target is refused with targetBusy" with a bounded deliver-on-idle
       // queue. The prose must describe the queue, and must NOT reassert the pre-PR-7 claim — an
       // orchestrating agent that reads "busy = hard refusal" polls or gives up instead of trusting
@@ -460,7 +460,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both agent-facing texts state the Server creator-ownership and inert-boot contract', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       expect(body).toContain('ownership is fail-closed')
       expect(body).toContain('verified node identity')
       expect(body).toContain('current server run')
@@ -490,7 +490,7 @@ describe('parseControlRequest', () => {
   it('both agent-facing texts document the browser verb and its FULL flag surface', () => {
     // The modifiers `parseBrowserArgs` reads off the arg map, listed here so the doc cannot drop one.
     const modifierFlags = ['into', 'clear', 'press', 'times', 'scroll', 'wait', 'timeout', 'screenshot', 'cookies']
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       expect(body).toContain('`browser --node')
       // Every action key from the pure parser table appears as a documented `--<key>` flag.
       for (const key of BROWSER_ACTION_KEYS) {
@@ -503,7 +503,7 @@ describe('parseControlRequest', () => {
   })
 
   it('both browser docs teach refs over selectors and state the real contract', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       const lower = body.toLowerCase()
       // Teach @refs over CSS selectors (Task 10.1).
       expect(body).toContain('@ref')
@@ -524,7 +524,7 @@ describe('parseControlRequest', () => {
   // it BYTE-FOR-BYTE so an agent that reads it stops instead of burning a turn — importing the real
   // constant here reddens the doc on any drift of the source string.
   it('both browser docs carry the capability-off sentence verbatim from the source', () => {
-    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
       expect(body).toContain(BROWSER_CAPABILITY_OFF_MESSAGE)
     }
   })

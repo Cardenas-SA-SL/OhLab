@@ -42,7 +42,7 @@ export interface DictationOverlayProps {
 /** A Pro-gated model was picked but the account isn't premium — see SpeechService.transcribeNow,
  *  which throws exactly this shape. Matched by substring since the model id is interpolated in. */
 export function isProGateError(message: string): boolean {
-  return message.includes('requires nodeterm Pro')
+  return message.includes('requires OhLab Pro')
 }
 
 type Phase = 'idle' | 'recording' | 'transcribing'
@@ -281,7 +281,7 @@ export function DictationOverlay({ target, stopSignal, onClose, onOpenLicense }:
       <span>{error}</span>
       {isProGateError(error) && (
         <button type="button" className="dictation__error-action" onClick={onOpenLicense}>
-          See nodeterm Pro
+          See OhLab Pro
         </button>
       )}
       <button type="button" className="dictation__close" title="Dismiss" onClick={handleClose}>

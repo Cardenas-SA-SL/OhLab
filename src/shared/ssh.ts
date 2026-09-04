@@ -370,7 +370,7 @@ export function remoteTmuxCommand(opts: {
   /** When set, sources this remote conf via `-f` (spliced before `new-session`). */
   confPath?: string
 }): string {
-  const socket = opts.socket ?? 'nodeterm-rmt'
+  const socket = opts.socket ?? 'ohlab-rmt'
   const parts = [
     'tmux',
     '-L',

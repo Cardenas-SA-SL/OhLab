@@ -6,7 +6,7 @@ import path from 'path'
 import { installHooksInto, removeHooksFrom } from './install-helper'
 
 
-const SCRIPT_FILE_NAME = 'gemini.sh'
+const SCRIPT_FILE_NAME = 'ohlab-gemini.sh'
 
 function configPath(): string {
   return path.join(homedir(), '.gemini', 'settings.json')

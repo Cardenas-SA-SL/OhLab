@@ -23,12 +23,12 @@ describe('buildLinkDoc', () => {
       {
         transcriptOf: (id) => (id === 'node-B' ? '/t/b.jsonl' : ''),
         tmuxBin: '/usr/bin/tmux',
-        tmuxSocket: 'node-terminal'
+        tmuxSocket: 'ohlab'
       }
     )
     expect(doc.self).toEqual({ id: 'node-A' })
     expect(doc.tmuxBin).toBe('/usr/bin/tmux')
-    expect(doc.tmuxSocket).toBe('node-terminal')
+    expect(doc.tmuxSocket).toBe('ohlab')
     expect(doc.links).toEqual([
       { id: 'node-B', title: 'Builder', cwd: '/proj', transcriptPath: '/t/b.jsonl', tmux: 'nt-node-B' },
       { id: 'node-C', title: 'Tester', cwd: '', transcriptPath: '', tmux: 'nt-node-C' }
@@ -39,7 +39,7 @@ describe('buildLinkDoc', () => {
     const doc = buildLinkDoc('node-A', [{ id: 'note-1', title: 'Deploy notes', note: 'use staging' }], {
       transcriptOf: () => '/should/not/be/used.jsonl',
       tmuxBin: '/usr/bin/tmux',
-      tmuxSocket: 'node-terminal'
+      tmuxSocket: 'ohlab'
     })
     expect(doc.links).toEqual([
       { id: 'note-1', title: 'Deploy notes', cwd: '', transcriptPath: '', tmux: '', note: 'use staging' }
@@ -180,21 +180,21 @@ describe('mergeInstructionsBlock', () => {
   it('appends the marker-delimited block to existing content', () => {
     const out = mergeInstructionsBlock('# My rules\n\nBe nice.\n', block)
     expect(out).toContain('# My rules')
-    expect(out).toContain('<!-- nodeterm:get-linked-context:start -->')
+    expect(out).toContain('<!-- ohlab:get-linked-context:start -->')
     expect(out).toContain(block)
-    expect(out).toContain('<!-- nodeterm:get-linked-context:end -->')
+    expect(out).toContain('<!-- ohlab:get-linked-context:end -->')
   })
   it('is idempotent: re-merging replaces the block in place', () => {
     const once = mergeInstructionsBlock('# My rules\n', block)
     const twice = mergeInstructionsBlock(once, 'UPDATED body')
-    expect(twice.match(/nodeterm:get-linked-context:start/g)).toHaveLength(1)
+    expect(twice.match(/ohlab:get-linked-context:start/g)).toHaveLength(1)
     expect(twice).toContain('UPDATED body')
     expect(twice).not.toContain('sh "/x/context.sh" list')
     expect(twice).toContain('# My rules')
   })
   it('works on an empty file', () => {
     const out = mergeInstructionsBlock('', block)
-    expect(out.startsWith('<!-- nodeterm:get-linked-context:start -->')).toBe(true)
+    expect(out.startsWith('<!-- ohlab:get-linked-context:start -->')).toBe(true)
   })
 })
 
@@ -215,7 +215,7 @@ describe('buildLinkedContextInstructions', () => {
       expect(body).toContain(CONTEXT_UNREACHABLE_MSG.replace(/\.$/, ''))
       expect(body).toContain(CODEX_SANDBOX_BLOCKED_LINE)
       expect(body.toLowerCase()).toContain('escalated permissions')
-      expect(body).toMatch(/never relink, reinstall or restart nodeterm/)
+      expect(body).toMatch(/never relink, reinstall or restart OhLab/)
       expect(body).toContain('network.allow_unix_sockets')
       expect(body).toContain('~/.codex/config.toml')
     }

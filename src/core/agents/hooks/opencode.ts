@@ -9,7 +9,7 @@ import os from 'os'
 import path from 'path'
 import { parseEndpointEnv } from '../hook-endpoint-parse'
 
-export const PLUGIN_MARKER = '// nodeterm managed plugin — do not edit (reinstalled at app launch)'
+export const PLUGIN_MARKER = '// OhLab managed plugin — do not edit (reinstalled at app launch)'
 
 /** opencode is XDG-respecting: its config dir is $XDG_CONFIG_HOME/opencode when the env var
  *  is set (Linux/Server Edition users do this), else ~/.config/opencode. */
@@ -21,7 +21,7 @@ export function opencodeConfigDir(): string {
 }
 
 export function pluginPath(): string {
-  return path.join(opencodeConfigDir(), 'plugins', 'nodeterm-status.js')
+  return path.join(opencodeConfigDir(), 'plugins', 'ohlab-status.js')
 }
 
 /** The managed plugin body. Mirrors the managed POSIX script's wire contract exactly
@@ -59,7 +59,7 @@ import http from 'node:http'
 // which the hook server's constant-time bearer check rejects on every POST.
 const parseEndpointEnv = ${parseEndpointEnv.toString()}
 
-export const NodetermStatus = async () => {
+export const OhLabStatus = async () => {
   const nodeId = process.env.NODETERM_NODE_ID
   if (!nodeId) return {}
   const live = () => {

@@ -12,8 +12,8 @@ import {
   installManagedHookScript
 } from './install-helper'
 
-const SCRIPT_FILE_NAME = 'copilot.sh'
-export const COPILOT_HOOK_FILE = 'nodeterm-status.json'
+const SCRIPT_FILE_NAME = 'ohlab-copilot.sh'
+export const COPILOT_HOOK_FILE = 'ohlab-status.json'
 
 type CopilotEnv = { COPILOT_HOME?: string }
 const REMOTE_HOME_MAX = 4096

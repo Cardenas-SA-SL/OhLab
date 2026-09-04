@@ -12,7 +12,7 @@ import {
 } from './install-helper'
 import { CLAUDE_HOOK_EVENTS } from '@shared/agents/hook-events'
 
-const cmd = buildManagedHookCommand('/remote/.nodeterm/agent-hooks/claude.sh')
+const cmd = buildManagedHookCommand('/remote/.nodeterm/agent-hooks/ohlab-claude.sh')
 
 describe('writeManagedHookFileAtomic', () => {
   it('leaves the previous hook file intact and cleans its temp when publication fails', () => {
@@ -57,12 +57,12 @@ describe('buildManagedHookCommand', () => {
     // The whole point: a stale entry (uninstalled app, cleared data dir, a server --data-dir
     // under a temp path) must not exit non-zero — that BLOCKS every UserPromptSubmit.
     expect(cmd).toBe(
-      "if [ -r '/remote/.nodeterm/agent-hooks/claude.sh' ]; then sh '/remote/.nodeterm/agent-hooks/claude.sh'; else cat >/dev/null 2>&1 || :; fi"
+      "if [ -r '/remote/.nodeterm/agent-hooks/ohlab-claude.sh' ]; then sh '/remote/.nodeterm/agent-hooks/ohlab-claude.sh'; else cat >/dev/null 2>&1 || :; fi"
     )
   })
   it("single-quote escapes the path so a quote or $ in it can't break out", () => {
-    expect(buildManagedHookCommand("/a'b/$x/agent-hooks/claude.sh")).toContain(
-      "'/a'\\''b/$x/agent-hooks/claude.sh'"
+    expect(buildManagedHookCommand("/a'b/$x/agent-hooks/ohlab-claude.sh")).toContain(
+      "'/a'\\''b/$x/agent-hooks/ohlab-claude.sh'"
     )
   })
   it('still carries the marker that makes the entry ours', () => {
@@ -70,7 +70,7 @@ describe('buildManagedHookCommand', () => {
     expect(mergeManagedHook(out, cmd, ['Stop']).hooks!.Stop).toHaveLength(1)
   })
   it('replaces the pre-guard `sh "<path>"` entry from an older install', () => {
-    const legacy = { hooks: [{ type: 'command', command: 'sh "/old/data/agent-hooks/claude.sh"' }] }
+    const legacy = { hooks: [{ type: 'command', command: 'sh "/old/data/agent-hooks/ohlab-claude.sh"' }] }
     const out = mergeManagedHook({ hooks: { UserPromptSubmit: [legacy] } }, cmd, ['UserPromptSubmit'])
     expect(out.hooks!.UserPromptSubmit).toEqual([{ hooks: [{ type: 'command', command: cmd }] }])
   })
@@ -104,19 +104,22 @@ describe('mergeManagedHook', () => {
     const out = mergeManagedHook({ hooks: { StopFailure: [foreign] } }, cmd, ['StopFailure'])
     expect(out.hooks!.StopFailure).toEqual([foreign, { hooks: [{ type: 'command', command: cmd }] }])
   })
-  it('drops a legacy claude-signals managed entry too', () => {
+  it("leaves nodeterm's legacy claude-signals entry alone", () => {
     const out = mergeManagedHook(
       { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'sh /x/claude-signals.sh' }] }] } },
       cmd,
       ['Stop']
     )
-    expect(out.hooks!.Stop).toEqual([{ hooks: [{ type: 'command', command: cmd }] }])
+    expect(out.hooks!.Stop).toEqual([
+      { hooks: [{ type: 'command', command: 'sh /x/claude-signals.sh' }] },
+      { hooks: [{ type: 'command', command: cmd }] }
+    ])
   })
 })
 
 describe('mergeManagedHook — repair sweep', () => {
-  const cmd = "if [ -r '/home/u/.nodeterm/agent-hooks/claude.sh' ]; then sh '/home/u/.nodeterm/agent-hooks/claude.sh'; else cat >/dev/null 2>&1 || :; fi"
-  const stale = "if [ -r '/tmp/gone/agent-hooks/claude.sh' ]; then sh '/tmp/gone/agent-hooks/claude.sh'; else cat >/dev/null 2>&1 || :; fi"
+  const cmd = "if [ -r '/home/u/.nodeterm/agent-hooks/ohlab-claude.sh' ]; then sh '/home/u/.nodeterm/agent-hooks/ohlab-claude.sh'; else cat >/dev/null 2>&1 || :; fi"
+  const stale = "if [ -r '/tmp/gone/agent-hooks/ohlab-claude.sh' ]; then sh '/tmp/gone/agent-hooks/ohlab-claude.sh'; else cat >/dev/null 2>&1 || :; fi"
 
   it("drops another instance's managed entry from events we don't subscribe to", () => {
     // The field state: a second nodeterm wrote its own (since-deleted) script path, and every
@@ -171,12 +174,12 @@ describe('mergeManagedHook — matcher support is opt-in per event', () => {
  * which `path.win32` gives us without a Windows runner.
  */
 describe('mergeManagedHook — Windows path separators (issue #558)', () => {
-  const winScript = path.win32.join('C:\\Users\\u', '.nodeterm', 'agent-hooks', 'claude.sh')
+  const winScript = path.win32.join('C:\\Users\\u', '.nodeterm', 'agent-hooks', 'ohlab-claude.sh')
   const winCmd = buildManagedHookCommand(winScript)
 
   it('the command really does carry backslashes (guards the fixture itself)', () => {
-    expect(winScript).toBe('C:\\Users\\u\\.nodeterm\\agent-hooks\\claude.sh')
-    expect(winCmd).toContain('agent-hooks\\claude.sh')
+    expect(winScript).toBe('C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-claude.sh')
+    expect(winCmd).toContain('agent-hooks\\ohlab-claude.sh')
   })
 
   it('recognizes its own entry — five installs leave ONE, not five', () => {
@@ -199,7 +202,7 @@ describe('mergeManagedHook — Windows path separators (issue #558)', () => {
   it('collapses duplicates written with the OTHER separator too', () => {
     // Same machine, different builds/instances: only the separator spelling differs, and both
     // sides of the comparison are normalized now, so either spelling is recognized as ours.
-    const posix = buildManagedHookCommand('/home/u/.nodeterm/agent-hooks/claude.sh')
+    const posix = buildManagedHookCommand('/home/u/.nodeterm/agent-hooks/ohlab-claude.sh')
     const before = {
       hooks: { Stop: [{ hooks: [{ type: 'command', command: winCmd }] }, { hooks: [{ type: 'command', command: posix }] }] }
     }

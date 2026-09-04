@@ -211,7 +211,7 @@ export function AppearanceSection({ isActive }: { isActive: boolean }): React.JS
           label="Show active session in window title"
           description={
             'Sets the native window title (and the browser tab, on the Server Edition) to the ' +
-            'focused node and project — "api server — myrepo — node-terminal" — so ' +
+            'focused node and project — "api server — myrepo — OhLab" — so ' +
             'window-title-based time trackers like ActivityWatch can tell sessions apart. ' +
             'Off keeps the static title.'
           }

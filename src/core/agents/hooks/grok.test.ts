@@ -31,7 +31,7 @@ describe('grok hook installer', () => {
   it('writes OUR OWN file in grok\'s hooks DIRECTORY — no shared settings file to merge into', async () => {
     const { installGrokHooks, grokHookConfigPath } = await import('./grok')
     installGrokHooks()
-    expect(grokHookConfigPath()).toBe(path.join(grokHome, 'hooks', 'nodeterm-status.json'))
+    expect(grokHookConfigPath()).toBe(path.join(grokHome, 'hooks', 'ohlab-status.json'))
     const cfg = read(grokHookConfigPath())
     expect(Object.keys(cfg.hooks).sort()).toEqual(
       [
@@ -90,16 +90,16 @@ describe('grok hook installer', () => {
     installGrokHooks()
     const cfg = read(grokHookConfigPath())
     const command = cfg.hooks.SessionStart[0].hooks[0].command
-    expect(command).toContain(path.join(home, '.nodeterm', 'agent-hooks', 'grok.sh'))
+    expect(command).toContain(path.join(home, '.nodeterm', 'agent-hooks', 'ohlab-grok.sh'))
     expect(command).toMatch(/^if \[ -r /)
-    expect(readFileSync(path.join(home, '.nodeterm', 'agent-hooks', 'grok.sh'), 'utf8')).toContain('/hook/grok')
+    expect(readFileSync(path.join(home, '.nodeterm', 'agent-hooks', 'ohlab-grok.sh'), 'utf8')).toContain('/hook/grok')
   })
 
   it('honors GROK_HOME, because grok reads its hooks from there', async () => {
     process.env.GROK_HOME = path.join(home, 'custom-grok')
     const { installGrokHooks, grokHookConfigPath } = await import('./grok')
     installGrokHooks()
-    expect(grokHookConfigPath()).toBe(path.join(home, 'custom-grok', 'hooks', 'nodeterm-status.json'))
+    expect(grokHookConfigPath()).toBe(path.join(home, 'custom-grok', 'hooks', 'ohlab-status.json'))
     expect(read(grokHookConfigPath()).hooks.Stop).toHaveLength(1)
   })
 
@@ -113,13 +113,13 @@ describe('grok hook installer', () => {
 
   it('sweeps a managed entry off an event we no longer subscribe to', async () => {
     const { installGrokHooks, grokHookConfigPath } = await import('./grok')
-    const p = path.join(grokHome, 'hooks', 'nodeterm-status.json')
+    const p = path.join(grokHome, 'hooks', 'ohlab-status.json')
     mkdirSync(path.dirname(p), { recursive: true })
     writeFileSync(
       p,
       JSON.stringify({
         hooks: {
-          ObsoleteEvent: [{ hooks: [{ type: 'command', command: `sh '${path.join(home, '.nodeterm/agent-hooks/grok.sh')}'` }] }]
+          ObsoleteEvent: [{ hooks: [{ type: 'command', command: `sh '${path.join(home, '.nodeterm/agent-hooks/ohlab-grok.sh')}'` }] }]
         }
       })
     )

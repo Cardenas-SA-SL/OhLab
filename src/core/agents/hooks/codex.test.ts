@@ -23,16 +23,16 @@ describe('buildManagedCommand', () => {
   // "-x was unexpected at this time." and exit 1 to an `sh` one-liner — on EVERY event, for the
   // life of the node.
   it('win32: points cmd.exe at the batch wrapper beside the script, not at an sh one-liner', () => {
-    expect(buildManagedCommand('C:\\Users\\u\\.nodeterm\\agent-hooks\\codex.sh', 'win32')).toBe(
-      '"C:\\Users\\u\\.nodeterm\\agent-hooks\\codex-hook.cmd"'
+    expect(buildManagedCommand('C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-codex.sh', 'win32')).toBe(
+      '"C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-codex-hook.cmd"'
     )
     expect(buildManagedCommand('C:\\a\\codex.sh', 'win32')).not.toContain('[ -x')
     expect(buildManagedCommand('C:\\a\\codex.sh', 'win32')).not.toContain('/bin/sh')
   })
 
   it('win32: the path stays one quoted token — a user profile routinely has a space in it', () => {
-    expect(buildManagedCommand('C:\\Users\\First Last\\agent-hooks\\codex.sh', 'win32')).toBe(
-      '"C:\\Users\\First Last\\agent-hooks\\codex-hook.cmd"'
+    expect(buildManagedCommand('C:\\Users\\First Last\\agent-hooks\\ohlab-codex.sh', 'win32')).toBe(
+      '"C:\\Users\\First Last\\agent-hooks\\ohlab-codex-hook.cmd"'
     )
   })
 
@@ -40,7 +40,7 @@ describe('buildManagedCommand', () => {
   // hooks.json, and that host is POSIX whatever the desktop is — so a Windows desktop must not put
   // a `.cmd` command on a Linux server.
   it('the platform argument decides, not the host generating the string', () => {
-    expect(buildManagedCommand('/home/u/.nodeterm/agent-hooks/codex.sh', 'linux')).toContain(
+    expect(buildManagedCommand('/home/u/.nodeterm/agent-hooks/ohlab-codex.sh', 'linux')).toContain(
       '/bin/sh'
     )
   })
@@ -52,7 +52,7 @@ describe('buildCodexWindowsWrapper', () => {
   it('runs the SAME codex.sh, found beside itself — no second copy of the protocol', () => {
     // The wrapper only locates a shell. Everything about the hook protocol (the POST, the endpoint
     // failover, the node token, the permission-answer poll) stays in the one POSIX script.
-    expect(wrapper).toContain('set "NT_SCRIPT=%~dp0codex.sh"')
+    expect(wrapper).toContain('set "NT_SCRIPT=%~dp0ohlab-codex.sh"')
     expect(wrapper).not.toContain('curl')
   })
 
@@ -92,7 +92,7 @@ describe('buildCodexHooksAndTrust', () => {
   })
 
   it('appends the managed handler to all eight events + emits one trust entry per event', () => {
-    const command = buildManagedCommand('/home/u/.nodeterm/agent-hooks/codex.sh')
+    const command = buildManagedCommand('/home/u/.nodeterm/agent-hooks/ohlab-codex.sh')
     const built = buildCodexHooksAndTrust({}, command, '/home/u/.codex/hooks.json')
     expect(built).not.toBeNull()
     const { config, trustEntries } = built!
@@ -107,7 +107,7 @@ describe('buildCodexHooksAndTrust', () => {
   })
 
   it('is idempotent — re-running on its own output does not duplicate the managed handler', () => {
-    const command = buildManagedCommand('/x/agent-hooks/codex.sh')
+    const command = buildManagedCommand('/x/agent-hooks/ohlab-codex.sh')
     const first = buildCodexHooksAndTrust({}, command, '/x/hooks.json')!
     const second = buildCodexHooksAndTrust(first.config, command, '/x/hooks.json')!
     for (const ev of CODEX_EVENTS) {
@@ -120,7 +120,7 @@ describe('buildCodexHooksAndTrust', () => {
   })
 
   it('preserves a user-authored hook at its original index before the managed handler', () => {
-    const command = buildManagedCommand('/x/agent-hooks/codex.sh')
+    const command = buildManagedCommand('/x/agent-hooks/ohlab-codex.sh')
     const userDef = { hooks: [{ type: 'command' as const, command: 'echo mine' }] }
     const built = buildCodexHooksAndTrust({ hooks: { Stop: [userDef] } }, command, '/x/hooks.json')!
     const stop = built.config.hooks?.Stop ?? []
@@ -129,7 +129,7 @@ describe('buildCodexHooksAndTrust', () => {
   })
 
   it('keeps two user definitions at their trust-key indices and trusts the managed tail', () => {
-    const command = buildManagedCommand('/x/agent-hooks/codex.sh')
+    const command = buildManagedCommand('/x/agent-hooks/ohlab-codex.sh')
     const firstUserDef = { hooks: [{ type: 'command' as const, command: 'echo first' }] }
     const secondUserDef = { hooks: [{ type: 'command' as const, command: 'echo second' }] }
     const built = buildCodexHooksAndTrust(
@@ -148,7 +148,7 @@ describe('buildCodexHooksAndTrust', () => {
   })
 
   it('sweeps a stale managed handler out of an event we no longer subscribe to', () => {
-    const command = buildManagedCommand('/x/agent-hooks/codex.sh')
+    const command = buildManagedCommand('/x/agent-hooks/ohlab-codex.sh')
     // PreCompact is not in CODEX_EVENTS; a stale managed copy there must be removed.
     const stale = { hooks: [{ type: 'command' as const, command }] }
     const built = buildCodexHooksAndTrust({ hooks: { PreCompact: [stale] } }, command, '/x/hooks.json')!
@@ -165,22 +165,22 @@ describe('buildCodexHooksAndTrust', () => {
     // on it. Change the command string here only if you have re-captured the hashes from a host
     // where the hooks demonstrably fire.
     const command =
-      "if [ -x '/root/.nodeterm-server/agent-hooks/codex.sh' ]; then /bin/sh '/root/.nodeterm-server/agent-hooks/codex.sh'; fi"
+      "if [ -x '/root/.nodeterm-server/agent-hooks/ohlab-codex.sh' ]; then /bin/sh '/root/.nodeterm-server/agent-hooks/ohlab-codex.sh'; fi"
     const built = buildCodexHooksAndTrust({}, command, '/root/.codex/hooks.json')!
     const byLabel = Object.fromEntries(built.trustEntries.map((e) => [e.eventLabel, computeTrustedHash(e)]))
     expect(byLabel).toMatchObject({
-      session_start: 'sha256:9ad2be7ba503a6c29d73fe63da7e6e6b90a3418a9367d27e8b79ad67ce4208e6',
-      user_prompt_submit: 'sha256:ce3fcb34da617dc3be97142660e0c2ae30c9000333b0bfa29ffde7a941813840',
-      pre_tool_use: 'sha256:4518d886ca33ee61eba15a15e6348df03891a37f496a9a29a7eaae8b05623eed',
-      permission_request: 'sha256:c15e31e91f0ad513f1dd37bbbf5e1263cb0ba7a819b16dd60bc85f576d5bcb85',
-      post_tool_use: 'sha256:ec6d59bff150ef00c30f7ef63abdf3c5a839a12f98ebe5dc542ecdfcc2da9d2f',
-      stop: 'sha256:bd559fa7db307ab42dac8fa42b49c46b3daa50f944adad2f0a97140a70c70081',
+      session_start: 'sha256:0adde47908ceee250d75dc1ee9ed0ea1ee4fd147e11740f7dcefc63b63c113f1',
+      user_prompt_submit: 'sha256:50063e0dadd35d5cb3548c8eb606a453cfd14207e7d2f954b7ab0001cc22e238',
+      pre_tool_use: 'sha256:ee07d2a98b8cca6fcfc1d0d943364d257927d27636207cc55f8f3335adf9a6b8',
+      permission_request: 'sha256:9d154bc439158969aff1fcd56bbd6d9b908ed645dd6a13c31186a52f3e4bd35a',
+      post_tool_use: 'sha256:e53bc1daed86794bc0c95f8a662f32bb75083daafa20e0111836554234c68cb6',
+      stop: 'sha256:e09fe6b6387e06b410f5a2c2478c12ac7db2e7b420d0794387abb3ade4d52e53',
       // The subagent pair was verified live differently: a capture home whose trust entries were
       // computed by this same algorithm had codex-cli 0.146.0 FIRE SubagentStart/SubagentStop
       // (spawn_agent measurement run, 2026-08-24) — i.e. codex accepted hashes of this shape for
       // these labels. The values below pin the canonicalization for this command string.
-      subagent_start: 'sha256:9034d6329983b581fc9f996344766d6129321c5c33369a79c9971aa8879d3d5f',
-      subagent_stop: 'sha256:88c207ae65d9d016967fce19b01735b5700f827cbfdb48692e42305f7427f0b6'
+      subagent_start: 'sha256:49a46f787dfe2e4beeb58a3fb7d2a1ba901f94f5d1a09f4a9b777e37cf904bf2',
+      subagent_stop: 'sha256:d03dbeb7ae37f2fd00aa6bbd78a606f9bd628e96be7802e324e2ae21074a5600'
     })
   })
 
@@ -195,11 +195,11 @@ describe('buildCodexHooksAndTrust', () => {
         {
           type: 'command' as const,
           command:
-            "if [ -x 'C:\\Users\\u\\.nodeterm\\agent-hooks\\codex.sh' ]; then /bin/sh 'C:\\Users\\u\\.nodeterm\\agent-hooks\\codex.sh'; fi"
+            "if [ -x 'C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-codex.sh' ]; then /bin/sh 'C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-codex.sh'; fi"
         }
       ]
     }
-    const command = buildManagedCommand('C:\\Users\\u\\.nodeterm\\agent-hooks\\codex.sh', 'win32')
+    const command = buildManagedCommand('C:\\Users\\u\\.nodeterm\\agent-hooks\\ohlab-codex.sh', 'win32')
     const built = buildCodexHooksAndTrust(
       { hooks: { Stop: [stale], SessionStart: [stale] } },
       command,
@@ -214,9 +214,9 @@ describe('buildCodexHooksAndTrust', () => {
   // copied between machines) is repaired the same way rather than accumulating both.
   it('replaces a stray Windows entry on a POSIX install', () => {
     const stale = {
-      hooks: [{ type: 'command' as const, command: '"/home/u/.nodeterm/agent-hooks/codex-hook.cmd"' }]
+      hooks: [{ type: 'command' as const, command: '"/home/u/.nodeterm/agent-hooks/ohlab-codex-hook.cmd"' }]
     }
-    const command = buildManagedCommand('/home/u/.nodeterm/agent-hooks/codex.sh', 'linux')
+    const command = buildManagedCommand('/home/u/.nodeterm/agent-hooks/ohlab-codex.sh', 'linux')
     const built = buildCodexHooksAndTrust({ hooks: { Stop: [stale] } }, command, '/h/hooks.json')!
     expect(built.config.hooks!.Stop).toEqual([{ hooks: [{ type: 'command', command }] }])
   })

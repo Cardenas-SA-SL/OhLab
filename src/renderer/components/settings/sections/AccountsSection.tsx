@@ -648,7 +648,7 @@ export function AccountsSection({ isActive }: { isActive: boolean }): React.JSX.
     // NOTHING (core refuses to `rm -rf` anything outside its own managed dirs). Saying "will be
     // deleted" here would be a lie that stops people unlinking.
     if (a.configDir) {
-      return `Unlink account "${a.label}"? nodeterm forgets it — the folder ${a.configDir} keeps its login and transcripts exactly as they are. ${fallout}`
+      return `Unlink account "${a.label}"? OhLab forgets it — the folder ${a.configDir} keeps its login and transcripts exactly as they are. ${fallout}`
     }
     return `Remove account "${a.label}"? Its logged-in credentials and all its Claude transcripts will be deleted. ${fallout}`
   }
@@ -854,7 +854,7 @@ export function AccountsSection({ isActive }: { isActive: boolean }): React.JSX.
             <div className="text-[13px] font-medium text-text">Link existing config dir…</div>
             <p className="text-[12px] leading-relaxed text-muted">
               Already have a second login in its own folder (say <code>~/.claude-2</code>)? Link it
-              and nodeterm will label its terminals, read its transcripts, and offer it in the add
+              and OhLab will label its terminals, read its transcripts, and offer it in the add
               menus. Nothing is copied or moved, and unlinking later leaves the folder alone.
             </p>
             <div className="flex flex-wrap items-center gap-2">
@@ -957,7 +957,7 @@ export function AccountsSection({ isActive }: { isActive: boolean }): React.JSX.
                 </div>
               ) : (
                 <p className="text-[12px] leading-relaxed text-muted">
-                  Codex accounts on this machine are managed from its own NodeTerm. Accounts already
+                  Codex accounts on this machine are managed from its own OhLab. Accounts already
                   created here are shown above.
                 </p>
               )}
@@ -994,7 +994,7 @@ export function AccountsSection({ isActive }: { isActive: boolean }): React.JSX.
         <ConfirmDialog
           message={`Remove Codex account "${pendingRemoveCodex.label}"?${
             pendingRemoveCodex.host
-              ? ' It is dropped from this NodeTerm; its credentials on the host are untouched.'
+              ? ' It is dropped from this OhLab; its credentials on the host are untouched.'
               : ' Its logged-in credentials and its Codex home will be deleted.'
           }`}
           confirmLabel="Remove"

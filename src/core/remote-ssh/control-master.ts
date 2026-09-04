@@ -23,7 +23,7 @@ import { COMBINED_PANE_MARKER, PANE_OWNER_FMT, PS_FOREGROUND_FLAGS } from '../ag
 // Dependency-free (no node-pty): safe to import from these pure builders.
 
 /** Dedicated remote tmux socket so an SSH project never collides with the user's own tmux. */
-export const RMT_TMUX_SOCKET = 'nodeterm-rmt'
+export const RMT_TMUX_SOCKET = 'ohlab-rmt'
 
 /**
  * Every remote command that invokes `tmux` goes through this: the PATH-append prologue
@@ -47,7 +47,7 @@ function tmuxCmd(body: string): string {
  */
 export function controlPathFor(projectId: string): string {
   const id = createHash('sha256').update(projectId).digest('hex').slice(0, 16)
-  return path.join(os.homedir(), '.nodeterm', 'ssh-cm', `${id}.sock`)
+  return path.join(os.homedir(), '.ohlab', 'ssh-cm', `${id}.sock`)
 }
 
 function target(conn: SshConnection): string {
@@ -776,8 +776,8 @@ export function remoteTmuxPtyArgs(
 /** What a tmux-less remote loses, told to the user IN the pane. English + apostrophe-free: each
  *  line is embedded as one single-quoted printf argument in the remote shell line. */
 const REMOTE_TMUX_MISSING_LINES = [
-  'nodeterm: tmux was not found on this host.',
-  'nodeterm runs remote terminals inside tmux so they survive disconnects, app restarts and project switches.',
+  'OhLab: tmux was not found on this host.',
+  'OhLab runs remote terminals inside tmux so they survive disconnects, app restarts and project switches.',
   'Install tmux on the host (brew install tmux / apt install tmux / dnf install tmux) and reopen this terminal.',
   'Starting a plain shell instead - it will NOT persist when this terminal closes.'
 ]

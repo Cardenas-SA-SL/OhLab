@@ -20,7 +20,7 @@ const host = (q: SessionMemoryQuery): Promise<MemInfo | null> =>
 /** One socket answering "no server running" — the per-socket fence the sweep now emits. A `##PANES`
  *  section with NO fence in it means no socket answered, which is `ok:false` by design (see
  *  session-memory-remote.ts): "every tmux call failed" must not render as "this host has nothing". */
-const IDLE_SOCKET = '##SOCK node-terminal\nno server running on /tmp/x\n##SOCKRC 1\n'
+const IDLE_SOCKET = '##SOCK ohlab\nno server running on /tmp/x\n##SOCKRC 1\n'
 
 /** A remote reply the parser accepts: all three markers, in order, one answered socket, one
  *  process row. */

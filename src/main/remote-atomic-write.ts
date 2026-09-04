@@ -55,7 +55,7 @@ export function remoteAtomicWrite(
   const parent = options.makeParent === false
     ? ''
     : `mkdir -p -- ${quoteRemotePath(parentPath)} && `
-  const protect = options.chmod600 ? ` && chmod 600 -- ${temporary}` : ''
+  const protect = options.chmod600 ? ` && chmod -- 600 ${temporary}` : ''
   const command =
     `${prefix}${parent}{ cat > ${temporary}${protect} && mv -f -- ${temporary} ${target}; ` +
     `nt_status=$?; ` +

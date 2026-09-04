@@ -11,7 +11,7 @@ import { codexThreadIdentityResolverSh } from './codex-thread-identity-sh'
 
 /** The shim's generic transport-failure sentence — exported so the agent-facing docs below can
  *  quote it verbatim and the parity test holds the two ends together. */
-export const CONTEXT_UNREACHABLE_MSG = 'Could not read linked context (nodeterm unreachable).'
+export const CONTEXT_UNREACHABLE_MSG = 'Could not read linked context (OhLab unreachable).'
 
 // nodeId -> latest known transcript path, fed from the raw hook listener (see index.ts).
 const nodeTranscript = new Map<string, string>()
@@ -60,8 +60,8 @@ export async function resolveLinkTranscript(
   }
 }
 
-const INSTR_START = '<!-- nodeterm:get-linked-context:start -->'
-const INSTR_END = '<!-- nodeterm:get-linked-context:end -->'
+const INSTR_START = '<!-- ohlab:get-linked-context:start -->'
+const INSTR_END = '<!-- ohlab:get-linked-context:end -->'
 
 /** Idempotently merge our marker-delimited block into a global instructions file
  *  (~/.codex/AGENTS.md, ~/.gemini/GEMINI.md). Everything outside the markers is preserved. */
@@ -79,9 +79,9 @@ export function mergeInstructionsBlock(existing: string, block: string): string 
 /** The instructions body telling codex/gemini how to read linked-node context. */
 export function buildLinkedContextInstructions(shimPath: string): string {
   return [
-    '# Reading linked nodeterm nodes (get-linked-context)',
+    '# Reading linked OhLab nodes (get-linked-context)',
     '',
-    'When you run inside a nodeterm canvas session, this node may be linked to other agent',
+    'When you run inside an OhLab canvas session, this node may be linked to other agent',
     'nodes (Claude, Codex or Gemini) or sticky notes by a context-link edge. You can READ a',
     "linked node's context on demand — nothing is pushed automatically:",
     '',
@@ -92,8 +92,8 @@ export function buildLinkedContextInstructions(shimPath: string): string {
     `sh "${shimPath}" terminal --node <id|title>  # its recent terminal output`,
     '```',
     '',
-    'Only meaningful inside nodeterm (NODETERM_NODE_ID set) with a linked edge. If the CLI',
-    'says "Not a nodeterm session" or "No linked nodes", there is nothing to read — do not retry.',
+    'Only meaningful inside OhLab (NODETERM_NODE_ID set) with a linked edge. If the CLI',
+    'says "Not an OhLab session" or "No linked nodes", there is nothing to read — do not retry.',
     '',
     ...codexSandboxGuidanceLines(CONTEXT_UNREACHABLE_MSG)
   ].join('\n')
@@ -109,9 +109,9 @@ export function codexSandboxGuidanceLines(unreachableMsg: string): string[] {
   return [
     `Sandboxed Codex: if a call fails with "${unreachableMsg.replace(/\.$/, '')}" or with`,
     `"${CODEX_SANDBOX_BLOCKED_LINE}",`,
-    "Codex's command sandbox is denying loopback/socket connections while nodeterm itself is",
+    "Codex's command sandbox is denying loopback/socket connections while OhLab itself is",
     'healthy. Retry the SAME command once with command-specific escalated permissions (approve the',
-    'escalation prompt) — never relink, reinstall or restart nodeterm for this error; that cannot',
+    'escalation prompt) — never relink, reinstall or restart OhLab for this error; that cannot',
     'help. On macOS the permanent fix is adding the advertised hook socket path (the',
     '`NODETERM_HOOK_SOCK` value) to `network.allow_unix_sockets` in ~/.codex/config.toml: hook',
     'calls then work inside the sandbox with no escalation.'
@@ -172,10 +172,10 @@ export function buildLinkDoc(
 // desktop (context-link-render.ts) behind the hook server's /context-link/ route, and this shim is
 // the thin client that reaches it — over the reverse tunnel's unix socket for a remote node, over
 // loopback for a local one. Same script either way; sh + curl only.
-const CONTEXT_SHIM_BODY = `# nodeterm context-link CLI (auto-generated — do not edit).
+const CONTEXT_SHIM_BODY = `# OhLab context-link CLI (auto-generated — do not edit).
 
 if [ -z "$NODETERM_NODE_ID" ]; then
-  echo "Not a nodeterm session (NODETERM_NODE_ID unset) — nothing to read."
+  echo "Not an OhLab session (NODETERM_NODE_ID unset) — nothing to read."
   exit 0
 fi
 
@@ -220,7 +220,7 @@ done
 
 ${HOOK_ENDPOINT_FALLBACK_SH}
 
-nt_out=$(mktemp 2>/dev/null || echo "/tmp/nodeterm-context.$$")
+nt_out=$(mktemp 2>/dev/null || echo "/tmp/ohlab-context.$$")
 
 # One POST against the CURRENT endpoint vars — call as \`nt_ctx_post "$@"\` so the translated curl
 # args reach it. Sets nt_code: '' when there is no transport at all, curl's %{http_code} otherwise
@@ -291,7 +291,7 @@ rm -f "$nt_out"
 if [ -z "$nt_code" ] || [ "$nt_code" = "000" ]; then
   nt_codex_sandbox_hint && exit 1
   if [ -z "$nt_had_transport" ]; then
-    echo "nodeterm is not reachable from this session — nothing to read." >&2
+    echo "OhLab is not reachable from this session — nothing to read." >&2
     exit 1
   fi
 fi
@@ -307,7 +307,7 @@ exit 1
 /**
  * Build the local context-link shim with the same shared-Codex identity recovery used by managed
  * hooks and canvas control. The resolver has to precede the NODETERM_NODE_ID early return or a
- * legitimate app-server tool shell is misdiagnosed as being outside nodeterm.
+ * legitimate app-server tool shell is misdiagnosed as being outside OhLab.
  *
  * Omit `identityRoot` for the machine-neutral script copied to SSH hosts.
  */
@@ -325,12 +325,12 @@ export const CONTEXT_SHIM_SCRIPT = buildContextShimScript()
 export function buildContextLinkSkillBody(shimPath: string): string {
   return `---
 name: get-linked-context
-description: Read the conversation/transcript, a recent summary, or the terminal output of another agent node (Claude, Codex or Gemini) you are linked to on the nodeterm canvas. Use when you need to know what a connected node has been doing, hand off, or continue its work. Only meaningful inside a nodeterm session with a context-link edge. Also reads sticky notes linked to this node as context.
+description: Read the conversation/transcript, a recent summary, or the terminal output of another agent node (Claude, Codex or Gemini) you are linked to on the OhLab canvas. Use when you need to know what a connected node has been doing, hand off, or continue its work. Only meaningful inside an OhLab session with a context-link edge. Also reads sticky notes linked to this node as context.
 ---
 
 # Get linked context
 
-On the nodeterm canvas, this Claude session may be connected to other agent nodes (Claude, Codex or Gemini) by a
+On the OhLab canvas, this Claude session may be connected to other agent nodes (Claude, Codex or Gemini) by a
 context-link edge. When you are linked, you can READ the other node's context on demand by
 running the local CLI shim below. Nothing is pushed to you automatically — pull what you need.
 
@@ -351,7 +351,7 @@ prints its **current** text (the note is read live from the canvas, so it may ha
 since it was first linked).
 
 \`--node\` is optional when you are linked to exactly one node; otherwise pass the id or title
-from \`list\`. If the CLI says "Not a nodeterm session" or "No linked nodes", there is nothing
+from \`list\`. If the CLI says "Not an OhLab session" or "No linked nodes", there is nothing
 to read — do not retry.
 
 ${codexSandboxGuidanceLines(CONTEXT_UNREACHABLE_MSG).join('\n')}

@@ -65,7 +65,7 @@ describe('controlPathFor', () => {
     // Regression: macOS userData is `~/Library/Application Support/<app>` — too long for a unix
     // socket (sun_path 104, minus ssh's ~17-char bind suffix) AND has a space ssh's `-o` rejects.
     const cp = controlPathFor('a-fairly-long-project-id-0123456789')
-    expect(cp.startsWith(`${os.homedir()}/.nodeterm/ssh-cm/`)).toBe(true)
+    expect(cp.startsWith(`${os.homedir()}/.ohlab/ssh-cm/`)).toBe(true)
     expect(cp.endsWith('.sock')).toBe(true)
     expect(cp).not.toContain(' ')
     // Must stay well under 104 even after ssh appends its ~17-char temp suffix while binding.
@@ -303,7 +303,7 @@ describe('remoteListSessionsArgs', () => {
   it('asks the remote nodeterm tmux socket for session names only', () => {
     const args = remoteListSessionsArgs(conn, '/cm/p1')
     const cmd = args[args.length - 1]
-    expect(cmd).toContain('tmux -L nodeterm-rmt list-sessions')
+    expect(cmd).toContain('tmux -L ohlab-rmt list-sessions')
     expect(cmd).toContain('#{session_name}')
   })
 
@@ -533,20 +533,20 @@ describe('probeSaysAbsent (has-session probe discrimination)', () => {
 })
 
 describe('killing a session by name (both sockets, exact target)', () => {
-  // Two nodeterm tmux sockets live on every host at once: `node-terminal` for a nodeterm running ON
-  // the machine, `nodeterm-rmt` for one SSH-ing INTO it. The session-memory sweep lists BOTH, so a
+  // Two nodeterm tmux sockets live on every host at once: `ohlab` for a nodeterm running ON
+  // the machine, `ohlab-rmt` for one SSH-ing INTO it. The session-memory sweep lists BOTH, so a
   // kill routed to one of them promised something it could not do for every row off the other — a
   // host running its own nodeterm-server is exactly that shape.
   it('covers both sockets a nodeterm session can live on', () => {
-    expect([...KILL_TMUX_SOCKETS].sort()).toEqual(['node-terminal', 'nodeterm-rmt'])
+    expect([...KILL_TMUX_SOCKETS].sort()).toEqual(['ohlab', 'ohlab-rmt'])
   })
 
   it('targets the session EXACTLY — never tmux prefix matching', () => {
     // A speculative kill misses by design, and a miss is when tmux falls back to fnmatch and then
     // to prefix matching. Node ids end in a counter, so `nt-a-1` is a prefix of `nt-a-12`: without
     // `=` a miss could kill a different session.
-    expect(localTmuxKillArgs('node-terminal', 'nt-a-1')).toEqual([
-      '-L', 'node-terminal', 'kill-session', '-t', '=nt-a-1'
+    expect(localTmuxKillArgs('ohlab', 'nt-a-1')).toEqual([
+      '-L', 'ohlab', 'kill-session', '-t', '=nt-a-1'
     ])
     expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-a-1').at(-1)).toContain('-t =nt-a-1')
   })
@@ -554,24 +554,24 @@ describe('killing a session by name (both sockets, exact target)', () => {
   it('aims a local destroy at the socket we hold, whatever the caller asked for', () => {
     // Holding the session means we KNOW which socket it is on, so the fan-out flag is irrelevant:
     // one kill either way. This is what keeps the ordinary node-x path at exactly one kill.
-    expect(localKillSockets('node-terminal')).toEqual(['node-terminal'])
-    expect(localKillSockets('node-terminal', true)).toEqual(['node-terminal'])
+    expect(localKillSockets('ohlab')).toEqual(['ohlab'])
+    expect(localKillSockets('ohlab', true)).toEqual(['ohlab'])
   })
 
   it('fans a socket-less kill out only when the caller opts in', () => {
     // Holding nothing means the name is all we have — but the unheld branch is NOT rare (an
     // ordinary node-x on a node never mounted in this process takes it), so the blast radius is
     // the caller's to ask for. Only the session-memory panel, which swept BOTH sockets, does.
-    expect(localKillSockets(null)).toEqual(['node-terminal'])
-    expect([...localKillSockets(null, true)].sort()).toEqual(['node-terminal', 'nodeterm-rmt'])
+    expect(localKillSockets(null)).toEqual(['ohlab'])
+    expect([...localKillSockets(null, true)].sort()).toEqual(['ohlab', 'ohlab-rmt'])
   })
 
   it('keeps the remote default on the ssh socket, and overrides it explicitly', () => {
     expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-x').at(-1)).toBe(
       `${TP}tmux -L ${RMT_TMUX_SOCKET} kill-session -t =nt-x`
     )
-    expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-x', 'node-terminal').at(-1)).toBe(
-      `${TP}tmux -L node-terminal kill-session -t =nt-x`
+    expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-x', 'ohlab').at(-1)).toBe(
+      `${TP}tmux -L ohlab kill-session -t =nt-x`
     )
   })
 
@@ -579,7 +579,7 @@ describe('killing a session by name (both sockets, exact target)', () => {
     const runs = remoteTmuxKillEverySocketArgs(conn, '/s.sock', 'nt-x')
     expect(runs).toHaveLength(2)
     expect(runs.map((r) => r.at(-1)).sort()).toEqual([
-      `${TP}tmux -L node-terminal kill-session -t =nt-x`,
+      `${TP}tmux -L ohlab kill-session -t =nt-x`,
       `${TP}tmux -L ${RMT_TMUX_SOCKET} kill-session -t =nt-x`
     ])
     // Each is a complete child-ssh argv, not a bare command.

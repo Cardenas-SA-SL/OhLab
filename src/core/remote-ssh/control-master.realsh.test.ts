@@ -18,6 +18,7 @@ import path from 'path'
 import { remoteHookEnvArgs, remoteTmuxPtyArgs } from './control-master'
 import { accountTmuxEnvArgs, remoteAccountConfigDirAbs } from '../claude-accounts-core'
 import { isSafeNodeId, isSafeRemoteHome } from '../remote-safety'
+import { REMOTE_TMUX_PATH_DIRS } from '../../shared/ssh'
 
 const conn = { host: 'h.example.com', user: 'deploy', port: 2222, identityFile: '/k/id' }
 
@@ -112,7 +113,7 @@ describe('REAL sh: a payload node id is one literal argument, never command stru
       expect(markers, `a canary EXECUTED for ${name}`).toEqual([])
       expect(extraStdout, `stray stdout for ${name}`).toBe('')
       expect(argv, `payload was not one literal arg for ${name}`).toContain(`NODETERM_NODE_ID=${payload}`)
-      expect(argv.slice(0, 2)).toEqual(['-L', 'nodeterm-rmt'])
+      expect(argv.slice(0, 2)).toEqual(['-L', 'ohlab-rmt'])
       expect(argv.filter((a) => a === 'new-session')).toHaveLength(1)
       expect(argv).toContain('nt-n1')
       expect(argv).toContain('/home/u')
@@ -214,17 +215,26 @@ describe('REAL sh: remote tmux PATH resolution + graceful degrade (issue #449)',
   // everything the guard needs (command, printf, cd, exec) is an sh builtin.
   const emptyPath = (): string => fs.mkdtempSync(path.join(os.tmpdir(), 'ntsh-nopath-'))
 
+  // The prologue APPENDS fixed dirs (`/opt/homebrew/bin`, ...) to PATH, and on a contributor's Mac
+  // one of them holds a real tmux — which would win `command -v` over the stub in $HOME/.local/bin
+  // and run for real. Re-point those fixed dirs at an empty one so only the $HOME leg can resolve;
+  // the generated line is otherwise byte-identical.
+  const fixedDirs = REMOTE_TMUX_PATH_DIRS.split(':')
+    .filter((d) => !d.includes('$HOME'))
+    .join(':')
+  const isolateFixedDirs = (cmd: string): string => cmd.split(fixedDirs).join(emptyPath())
+
   it('finds a tmux that lives only in an appended dir ($HOME/.local/bin)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ntsh-home-'))
     const local = path.join(home, '.local', 'bin')
     fs.mkdirSync(local, { recursive: true })
     fs.copyFileSync(path.join(binDir, 'tmux'), path.join(local, 'tmux'))
     fs.chmodSync(path.join(local, 'tmux'), 0o755)
-    const cmd = remoteTmuxPtyArgs(conn, '/s.sock', 'nt-n1', '/home/u').slice(-1)[0]
+    const cmd = isolateFixedDirs(remoteTmuxPtyArgs(conn, '/s.sock', 'nt-n1', '/home/u').slice(-1)[0])
     // PATH deliberately has NO tmux — only the $HOME/.local/bin append can resolve it.
     const out = runRaw(cmd, { PATH: emptyPath(), HOME: home })
     const argv = out.split('\0').slice(0, -1)
-    expect(argv.slice(0, 2)).toEqual(['-L', 'nodeterm-rmt'])
+    expect(argv.slice(0, 2)).toEqual(['-L', 'ohlab-rmt'])
     expect(argv).toContain('new-session')
   })
 
@@ -232,10 +242,10 @@ describe('REAL sh: remote tmux PATH resolution + graceful degrade (issue #449)',
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ntsh-home-'))
     const shell = path.join(home, 'shell-stub')
     fs.writeFileSync(shell, `#!/bin/sh\nprintf 'SHELL_STUB %s\\n' "$@"\n`, { mode: 0o755 })
-    const cmd = remoteTmuxPtyArgs(conn, '/s.sock', 'nt-n1', '/home/u').slice(-1)[0]
+    const cmd = isolateFixedDirs(remoteTmuxPtyArgs(conn, '/s.sock', 'nt-n1', '/home/u').slice(-1)[0])
     const out = runRaw(cmd, { PATH: emptyPath(), HOME: home, SHELL: shell })
     // The message names the fact and the fix — never the raw `command not found: tmux` line.
-    expect(out).toContain('nodeterm: tmux was not found on this host.')
+    expect(out).toContain('OhLab: tmux was not found on this host.')
     expect(out).toContain('Install tmux on the host')
     expect(out).toContain('will NOT persist')
     // …and the pane still gets a usable login shell instead of closing.

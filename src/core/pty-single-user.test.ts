@@ -583,7 +583,7 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
     // there. A destroy with NO live session cannot know, and fans out over both sockets
     // (`localKillSockets`) — this length is what keeps that off the solo path.
     expect(kills).toHaveLength(1)
-    expect(kills[0].args[kills[0].args.indexOf('-L') + 1]).toBe('node-terminal')
+    expect(kills[0].args[kills[0].args.indexOf('-L') + 1]).toBe('ohlab')
     // `=` forces an EXACT tmux target. Node ids end in a counter, so `nt-a-1` is a prefix of
     // `nt-a-12`, and tmux falls back to prefix matching whenever the exact name is not found.
     expect(kills[0].args[kills[0].args.indexOf('-t') + 1]).toBe(`=${sessionName('solo-1')}`)
@@ -591,17 +591,17 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
 
   // Destroying a name we hold NOTHING for is how the session-memory panel ends an ORPHAN row — a
   // tmux session with no node on any canvas. We cannot know which socket carries it, and on this
-  // machine a `nt-<id>` may be on `nodeterm-rmt`: that is where ANOTHER machine's nodeterm puts the
+  // machine a `nt-<id>` may be on `ohlab-rmt`: that is where ANOTHER machine's nodeterm puts the
   // sessions it SSHes in to spawn, and the panel sweeps (and offers to end) both sockets. Aiming
-  // only at `node-terminal` meant a confirm reading "this stops its tmux session" that killed
+  // only at `ohlab` meant a confirm reading "this stops its tmux session" that killed
   // nothing at all.
   it('destroying a session we do not hold tries EVERY socket when the caller asks', async () => {
     const m = await tmuxManager()
     await m.destroySession(SOLO, 'never-opened-here', { everySocket: true })
     const kills = tmuxCalls('kill-session')
     expect(kills.map((c) => c.args[c.args.indexOf('-L') + 1]).sort()).toEqual([
-      'node-terminal',
-      'nodeterm-rmt'
+      'ohlab',
+      'ohlab-rmt'
     ])
     for (const k of kills) {
       expect(k.args[k.args.indexOf('-t') + 1]).toBe(`=${sessionName('never-opened-here')}`)
@@ -611,12 +611,12 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
   // ...but the fan-out is OPT-IN, and the unheld branch is not rare: an ordinary node-× on a node
   // that was never mounted in this process takes it every time (the common case after an app
   // restart, and every non-active project's node). Those callers know their own node and have no
-  // business speculating at `nodeterm-rmt`, which holds another machine's sessions.
+  // business speculating at `ohlab-rmt`, which holds another machine's sessions.
   it('destroying a session we do not hold stays on ONE socket by default', async () => {
     const m = await tmuxManager()
     await m.destroySession(SOLO, 'never-opened-here')
     const kills = tmuxCalls('kill-session')
-    expect(kills.map((c) => c.args[c.args.indexOf('-L') + 1])).toEqual(['node-terminal'])
+    expect(kills.map((c) => c.args[c.args.indexOf('-L') + 1])).toEqual(['ohlab'])
   })
 
   // The flag arrives verbatim from a renderer, so the wire path must demand a real `true` — and it
@@ -629,8 +629,8 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
       true
     ) as unknown as Promise<void>)
     expect(tmuxCalls('kill-session').map((c) => c.args[c.args.indexOf('-L') + 1]).sort()).toEqual([
-      'node-terminal',
-      'nodeterm-rmt'
+      'ohlab',
+      'ohlab-rmt'
     ])
     execCalls.length = 0
     await (fake.handlers[IPC.ptyDestroy](
@@ -639,7 +639,7 @@ describe('SINGLE-USER REGRESSION: co-attach must not change the solo path', () =
       'yes' as unknown as boolean
     ) as unknown as Promise<void>)
     expect(tmuxCalls('kill-session').map((c) => c.args[c.args.indexOf('-L') + 1])).toEqual([
-      'node-terminal'
+      'ohlab'
     ])
   })
 
