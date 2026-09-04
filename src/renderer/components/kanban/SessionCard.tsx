@@ -57,16 +57,22 @@ export const SessionCard = memo(function SessionCard({
   // SLEEPING (Eco: the agent CLI was exited to reclaim its RAM) is one more branch here, not a
   // follow-up. Ranked last: a hibernated node is idle by definition, so `working`/`waiting` can
   // only mean the wake already landed and the hooks are ahead of the flag.
+  // DROPPED (the CLI died unannounced — see terminal/agent-liveness.ts) is ranked FIRST: it is the
+  // strongest claim on the card, and it cannot actually collide with the others, since the verdict
+  // is only ever raised on a `done` node that is neither paused nor hibernated. Ordering it here is
+  // about which sentence a reader of this chain meets first, not about resolving a conflict.
   const badge =
-    session.kind !== 'sticky' && status?.state === 'working'
-      ? 'running'
-      : session.kind !== 'sticky' && (status?.state === 'waiting' || status?.state === 'blocked')
-        ? 'needs'
-        : session.kind !== 'sticky' && status?.paused
-          ? 'paused'
-          : session.kind !== 'sticky' && status?.hibernated
-            ? 'sleeping'
-            : null
+    session.kind !== 'sticky' && status?.dropped
+      ? 'dropped'
+      : session.kind !== 'sticky' && status?.state === 'working'
+        ? 'running'
+        : session.kind !== 'sticky' && (status?.state === 'waiting' || status?.state === 'blocked')
+          ? 'needs'
+          : session.kind !== 'sticky' && status?.paused
+            ? 'paused'
+            : session.kind !== 'sticky' && status?.hibernated
+              ? 'sleeping'
+              : null
   const stickyPreview = session.kind === 'sticky' ? (session.text ?? '').trim() : ''
   const assignees = meta?.assignees ?? []
   const due = meta?.dueAt
@@ -118,6 +124,14 @@ export const SessionCard = memo(function SessionCard({
         <span className="kanban-card__title">{session.title}</span>
         {session.kind === 'sticky' && <span className="kanban-card__kind">note</span>}
         {session.kind === 'browser' && <span className="kanban-card__kind">web</span>}
+        {badge === 'dropped' && (
+          <span
+            className="kanban-badge kanban-badge--dropped"
+            title="This session's agent process is gone (it did not exit cleanly) — open the card to resume it"
+          >
+            DROPPED
+          </span>
+        )}
         {badge === 'running' && <span className="kanban-badge kanban-badge--running">RUNNING</span>}
         {badge === 'needs' && <span className="kanban-badge kanban-badge--needs">NEEDS YOU</span>}
         {badge === 'paused' && (

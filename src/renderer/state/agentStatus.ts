@@ -104,6 +104,20 @@ export interface AgentNodeStatus {
    * same reason: a live state is proof the CLI is running, so a standing `paused` would be wrong.
    */
   paused?: boolean
+  /**
+   * This node's agent CLI left its pane and NOTHING accounted for it — no SessionEnd hook, no
+   * `hibernated`, no `paused`. In practice: the process was killed (the OOM killer, a `pkill`, a
+   * host that ran out of memory), or a cold-restore `--resume` failed and fell back to a bare
+   * shell. The decision is the pure `terminal/agent-liveness.ts`; this field is only where the
+   * node records the verdict so its header and the kanban card can render the DROPPED chip.
+   *
+   * TRANSIENT, like `state` and for a stronger reason than the other clocks: it is a claim about a
+   * pane, and a pane's contents are re-measurable in milliseconds. Persisting it would let a stale
+   * verdict survive into a run where the session had been resumed by hand — a chip on a healthy
+   * node with nothing left to disprove it, since the check that would clear it only runs for nodes
+   * it can still see.
+   */
+  dropped?: boolean
   /** Which agent this node is running (claude/codex/gemini/…), when known. */
   agentId?: AgentId
   /**
@@ -221,6 +235,9 @@ export interface AgentStatusStore {
    *  restarts the idle clock, same as `setHibernated` — a resumed session must not read as having
    *  been idle since before the pause. */
   setPaused(id: string, on: boolean): void
+  /** Record (or withdraw) the verdict that this node's CLI died unannounced. Transient; see
+   *  `dropped`. Cheap to call repeatedly — it bails when the flag already reads that way. */
+  setDropped(id: string, on: boolean): void
   /** Record that this node just launched a background shell task (see `backgroundTaskAt`).
    *  Transient — nothing is written to localStorage. */
   markBackgroundTask(id: string): void
@@ -534,6 +551,12 @@ export function createAgentStatusSession(
           // the next deep pause to be typed into recognizing a pane it never measured.
           if (!next.hibernated) next.hibernatedPane = undefined
         }
+        // A hook event of ANY kind is proof the CLI is alive — it is the CLI that fired it — so a
+        // standing DROPPED verdict is withdrawn here, `done` included. That is the one self-heal
+        // above which deliberately does NOT gate on `alive`: `done` must not clear `hibernated`
+        // (a late Stop POST would undo a hibernation we just performed), but it absolutely does
+        // disprove "this pane has no CLI in it". Nothing is saved — the flag is transient.
+        if (prev.dropped) next.dropped = undefined
         const byId = { ...s.byId, [id]: next }
         // `state` itself is transient, so a plain transition writes nothing — but dropping a
         // PERSISTED flag has to reach disk, or a relaunch would restore a hibernated/paused node
@@ -661,6 +684,18 @@ export function createAgentStatusSession(
         const byId = { ...s.byId, [id]: next }
         save(byId)
         return { byId }
+      }),
+
+    setDropped: (id, on) =>
+      set((s) => {
+        const prev = s.byId[id] ?? EMPTY
+        // Bail when nothing changes: the liveness check re-asks on every reveal and on a timer, so
+        // the overwhelmingly common call is "still fine, still fine" — and a fresh entry object
+        // each time would re-render the node (and the minimap) for no news.
+        if (!!prev.dropped === on) return s
+        // Transient: cleared by dropping the key, and NO `save()` — see the field comment. An entry
+        // holding nothing else durable must not be conjured onto disk by a pane reading.
+        return { byId: { ...s.byId, [id]: { ...prev, dropped: on ? true : undefined } } }
       }),
 
     markBackgroundTask: (id) =>
