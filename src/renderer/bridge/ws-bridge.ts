@@ -56,6 +56,7 @@ import {
   type WorkspaceApi
 } from '../../shared/types'
 import type { PeerIdentity } from '../../shared/presence'
+import type { LastReply } from '../../shared/speech'
 import { buildStubApi } from './stubs'
 import { mountPickerRoot, openDirectoryPicker } from './dialog-picker'
 import { encodePcmForWire } from './speech-encode'
@@ -758,7 +759,10 @@ export function buildSpeechApi(client: RpcClient): Pick<NodeTerminalApi, 'speech
     downloadModel: (id) => client.request(IPC.speechModelDownload, { id }) as Promise<void>,
     deleteModel: (id) => client.request(IPC.speechModelDelete, { id }) as Promise<void>,
     onProgress: (cb) => client.subscribe(IPC.speechProgress, cb as Listener),
-    micConsent: () => Promise.resolve(true)
+    micConsent: () => Promise.resolve(true),
+    // Real over the bridge too: the server registers `registerLastReplyIpc` beside the speech
+    // handlers, and it runs ON the host whose transcripts it reads.
+    lastReply: (query) => client.request(IPC.speechLastReply, query) as Promise<LastReply | null>
   }
   return { speech }
 }

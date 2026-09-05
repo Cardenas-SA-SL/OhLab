@@ -590,5 +590,9 @@ export const IPC = {
   // Electron-only: registered in src/main/index.ts (systemPreferences.askForMediaAccess) and
   // stubbed `async () => true` in src/server/index.ts (browser mic permission is the browser's
   // own prompt, not ours to gate).
-  speechMicConsent: 'speech:mic-consent'
+  speechMicConsent: 'speech:mic-consent',
+  // Voice conversation: the LAST assistant message of an agent node's transcript, read core-side
+  // with the per-agent locators + parsers (core/speech/last-reply.ts). Registered on the platform
+  // seam in BOTH shells, so the Server Edition speaks replies too.
+  speechLastReply: 'speech:last-reply'
 } as const

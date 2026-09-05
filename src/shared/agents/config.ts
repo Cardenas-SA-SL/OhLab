@@ -377,6 +377,16 @@ export const canBranch = (id: AgentId): boolean => includes(BRANCH_CAPABLE, id)
 export const canContextLink = (id: AgentId): boolean => includes(CONTEXT_LINK_CAPABLE, id)
 export const hasUsage = (id: AgentId): boolean => includes(USAGE_CAPABLE, id)
 export const canChat = (id: AgentId): boolean => includes(CHAT_CAPABLE, id)
+/**
+ * Can a person TALK to this node and hear it answer (voice conversation)? Two existing facts, no
+ * new list: the loop submits an utterance and waits for the agent's `done`, so the agent must
+ * report turns through hooks (`hasHooks`); it then reads the LAST assistant message from the
+ * agent's own transcript, and CONTEXT_LINK_CAPABLE is exactly the set whose transcript we can
+ * locate AND parse (that list gates "read the other node's context", the same read). Copilot fires
+ * hooks but has no transcript reader, so it is out — a loop that listens and never answers would
+ * look broken rather than unsupported.
+ */
+export const canVoiceConverse = (id: AgentId): boolean => hasHooks(id) && canContextLink(id)
 /** Can CLAUDE's transcript resolver locate and parse this agent's conversation? Never widen this
  *  to mean "can we read this agent" — see CLAUDE_TRANSCRIPT_READABLE. */
 export const readsClaudeShapedTranscript = (id: AgentId): boolean =>

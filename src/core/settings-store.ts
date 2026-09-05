@@ -4,6 +4,7 @@ import { writeFileAtomic } from "./fs-atomic";
 import { IPC } from "../shared/ipc";
 import { platform } from "./platform";
 import { DEFAULT_SETTINGS, type Settings } from "../shared/types";
+import { normalizeSpeechReplySettings } from "../shared/speech";
 
 /**
  * Merge a possibly-partial/legacy `Settings` object over `DEFAULT_SETTINGS`. A plain
@@ -15,7 +16,13 @@ import { DEFAULT_SETTINGS, type Settings } from "../shared/types";
  */
 function mergeSettings(saved: Partial<Settings> | null | undefined): Settings {
   const merged = { ...DEFAULT_SETTINGS, ...saved };
-  merged.speech = { ...DEFAULT_SETTINGS.speech, ...saved?.speech };
+  merged.speech = {
+    ...DEFAULT_SETTINGS.speech,
+    ...saved?.speech,
+    // The voice-conversation fields are hand-editable numbers/booleans/strings that go straight
+    // to the speech synthesizer; a `"replyRate": "fast"` must not reach it (see shared/speech.ts).
+    ...normalizeSpeechReplySettings({ ...DEFAULT_SETTINGS.speech, ...saved?.speech }),
+  };
   merged.modelGateway = {
     ...DEFAULT_SETTINGS.modelGateway,
     ...saved?.modelGateway,

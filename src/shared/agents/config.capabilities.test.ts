@@ -4,6 +4,7 @@ import {
   BUILTIN_AGENT_IDS,
   canBranch,
   canChat,
+  canVoiceConverse,
   mintsSessionId,
   supportsSessionIdFlag,
   readsClaudeShapedTranscript,
@@ -35,6 +36,20 @@ describe('CONTEXT_LINK_CAPABLE', () => {
   })
   it('custom agents cannot', () => {
     expect(canContextLink('custom:abc')).toBe(false)
+  })
+})
+
+describe('canVoiceConverse', () => {
+  it('is exactly "reports turns through hooks AND we can read its transcript"', () => {
+    for (const id of BUILTIN_AGENT_IDS) {
+      expect(canVoiceConverse(id), id).toBe(hasHooks(id) && canContextLink(id))
+    }
+  })
+  it('covers codex (the motivating agent) and claude, and excludes copilot (hooks, no reader)', () => {
+    expect(canVoiceConverse('codex')).toBe(true)
+    expect(canVoiceConverse('claude')).toBe(true)
+    expect(canVoiceConverse('copilot')).toBe(false)
+    expect(canVoiceConverse('custom:abc')).toBe(false)
   })
 })
 

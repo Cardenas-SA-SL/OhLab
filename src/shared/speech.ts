@@ -265,3 +265,50 @@ export function modelAfterDelete(
   if (models.find((m) => m.id === current)?.downloaded) return null
   return models.find((m) => m.downloaded)?.id ?? null
 }
+
+// ---- Voice conversation (talk to an agent node and hear its reply) ----
+
+/** What the renderer asks core for after an agent's turn ends: the LAST assistant message of the
+ *  node's own transcript. `accountId`/`cwd` scope the claude locator (a managed account's root,
+ *  the cwd fallback); the codex/gemini/grok locators key on `sessionId` alone. */
+export interface LastReplyQuery {
+  agentId: string
+  sessionId: string
+  accountId?: string
+  cwd?: string
+}
+
+/** The reply text as written (markdown and all — `speakable()` sanitizes it renderer-side) plus
+ *  the message's own timestamp when the transcript carries one (`null` when it does not). */
+export interface LastReply {
+  text: string
+  at: number | null
+}
+
+/** Speech-synthesis rate bounds: the DOM's `SpeechSynthesisUtterance.rate` accepts 0.1–10, but
+ *  below 0.5 and above 2 the macOS voices stop sounding like speech. */
+export const REPLY_RATE_MIN = 0.5
+export const REPLY_RATE_MAX = 2
+export const REPLY_RATE_DEFAULT = 1
+
+/** Clamp a hand-edited rate into the sane band; anything that is not a finite number is the
+ *  default, never `NaN` handed to the synthesizer (which then speaks nothing, silently). */
+export function normalizeReplyRate(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return REPLY_RATE_DEFAULT
+  return Math.min(REPLY_RATE_MAX, Math.max(REPLY_RATE_MIN, value))
+}
+
+/** The three voice-conversation fields, validated the way the other speech fields are at load:
+ *  settings.json is hand-editable, and a `"speakReplies": "yes"` must read as a boolean, not as
+ *  a truthy string the Settings switch cannot render. Pure. */
+export function normalizeSpeechReplySettings(speech: {
+  replyVoice?: unknown
+  replyRate?: unknown
+  speakReplies?: unknown
+}): { replyVoice: string; replyRate: number; speakReplies: boolean } {
+  return {
+    replyVoice: typeof speech.replyVoice === 'string' ? speech.replyVoice : '',
+    replyRate: normalizeReplyRate(speech.replyRate),
+    speakReplies: typeof speech.speakReplies === 'boolean' ? speech.speakReplies : true
+  }
+}

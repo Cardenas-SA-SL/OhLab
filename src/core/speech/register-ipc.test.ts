@@ -22,7 +22,7 @@ function setup(engine: 'whisper' | 'cloud' = 'whisper', language = 'auto', cloud
     service, models,
     settings: () => ({
       ...DEFAULT_SETTINGS,
-      speech: { engine, model: 'tiny', language, shortcut: DEFAULT_SETTINGS.speech.shortcut }
+      speech: { ...DEFAULT_SETTINGS.speech, engine, model: 'tiny', language }
     }),
     licenseToken: () => null,
     apiBase: 'https://api.example.dev',

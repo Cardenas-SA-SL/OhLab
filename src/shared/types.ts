@@ -1270,6 +1270,14 @@ export interface SpeechSettings {
    *  platform-abstracted: metaKey on mac, ctrlKey elsewhere. Drives the Canvas listener, the
    *  Dock mic tooltip, and the ShortcutsPanel row. */
   shortcut: string
+  /** Voice conversation: the `SpeechSynthesisVoice.voiceURI` that reads agent replies, or '' for
+   *  the best system voice in the reply language (see renderer/speech/tts.ts `pickReplyVoice`). */
+  replyVoice: string
+  /** Voice conversation: speaking rate for replies (REPLY_RATE_MIN..REPLY_RATE_MAX, default 1). */
+  replyRate: number
+  /** Voice conversation: read the agent's reply aloud when its turn ends. Off = the loop still
+   *  listens and submits, but the reply is only on screen. */
+  speakReplies: boolean
 }
 
 /** xterm cursor shapes, mirrored here so `Settings` doesn't depend on the xterm typings (which
@@ -1796,7 +1804,16 @@ export const DEFAULT_SETTINGS: Settings = {
   // model: '' = the explicit "no dictation" state (SPEECH_MODEL_NONE, issue #143). Dictation is
   // Voice works without setup: the multilingual small model downloads on first use. Existing
   // installs keep an explicit prior choice because settings hydration only fills absent keys.
-  speech: { engine: 'whisper', model: 'small', language: 'auto', shortcut: 'Cmd+Alt' },
+  speech: {
+    engine: 'whisper',
+    model: 'small',
+    language: 'auto',
+    shortcut: 'Cmd+Alt',
+    // Voice conversation: system voice picked per reply language, natural rate, replies spoken.
+    replyVoice: '',
+    replyRate: 1,
+    speakReplies: true
+  },
 }
 
 export interface SettingsApi {
@@ -1826,6 +1843,9 @@ export interface SpeechApi {
   /** Ask for microphone permission. Electron: OS-level (macOS TCC prompt); browser: always
    *  resolves true — the browser's own getUserMedia prompt is not ours to gate. */
   micConsent(): Promise<boolean>
+  /** Voice conversation: the LAST assistant message of an agent node's own transcript on disk
+   *  (`speech:last-reply`, core/speech/last-reply.ts), or null when no transcript / no reply yet. */
+  lastReply(query: import('./speech').LastReplyQuery): Promise<import('./speech').LastReply | null>
 }
 
 export interface SshApi {

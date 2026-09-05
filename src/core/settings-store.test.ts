@@ -111,7 +111,11 @@ describe('SettingsStore nested-default merge', () => {
       engine: 'cloud',
       model: 'base',
       language: 'tr',
-      shortcut: 'Cmd+Shift+D'
+      shortcut: 'Cmd+Shift+D',
+      // Fields added since (voice conversation) are FILLED, never a reason to touch the rest.
+      replyVoice: '',
+      replyRate: 1,
+      speakReplies: true
     })
   })
 
@@ -364,5 +368,68 @@ describe('settings:save atomic write', () => {
 
     const mode = (await fs.stat(path.join(dir, 'settings.json'))).mode & 0o777
     expect(mode).toBe(0o600)
+  })
+})
+
+describe('SettingsStore voice-conversation reply fields', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'nodeterm-settings-store-voice-'))
+    initPlatform(fakePlatform({ userDataDir: dir }))
+  })
+
+  afterEach(() => {
+    resetPlatformForTests()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('fills the reply fields from defaults for a settings.json written before voice conversation', () => {
+    writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({ speech: { engine: 'whisper', model: 'tiny', language: 'es', shortcut: 'Cmd+Alt' } }),
+      'utf-8'
+    )
+    const store = new SettingsStore()
+    store.init()
+    expect(store.get().speech).toMatchObject({
+      model: 'tiny',
+      language: 'es',
+      replyVoice: '',
+      replyRate: 1,
+      speakReplies: true
+    })
+  })
+
+  it('validates hand-edited reply fields instead of handing them to the synthesizer', () => {
+    writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({
+        speech: { engine: 'whisper', model: 'small', language: 'auto', shortcut: 'Cmd+Alt',
+          replyVoice: 12, replyRate: 'fast', speakReplies: 'yes' }
+      }),
+      'utf-8'
+    )
+    const store = new SettingsStore()
+    store.init()
+    expect(store.get().speech).toMatchObject({ replyVoice: '', replyRate: 1, speakReplies: true })
+  })
+
+  it('clamps an out-of-band rate and keeps a real voice choice', () => {
+    writeFileSync(
+      path.join(dir, 'settings.json'),
+      JSON.stringify({
+        speech: { engine: 'whisper', model: 'small', language: 'auto', shortcut: 'Cmd+Alt',
+          replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 7, speakReplies: false }
+      }),
+      'utf-8'
+    )
+    const store = new SettingsStore()
+    store.init()
+    expect(store.get().speech).toMatchObject({
+      replyVoice: 'com.apple.voice.compact.es-MX.Paulina',
+      replyRate: 2,
+      speakReplies: false
+    })
   })
 })

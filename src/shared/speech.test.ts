@@ -13,7 +13,12 @@ import {
   speechLanguage,
   speechLanguageLabel,
   filterSpeechLanguages,
-  modelKnowsV3Languages
+  modelKnowsV3Languages,
+  normalizeReplyRate,
+  normalizeSpeechReplySettings,
+  REPLY_RATE_DEFAULT,
+  REPLY_RATE_MAX,
+  REPLY_RATE_MIN
 } from './speech'
 import { DEFAULT_SETTINGS } from './types'
 
@@ -40,7 +45,35 @@ describe('whisper model catalog', () => {
       engine: 'whisper',
       model: 'small',
       language: 'auto',
-      shortcut: 'Cmd+Alt'
+      shortcut: 'Cmd+Alt',
+      // Voice conversation: system voice per reply language, natural rate, replies spoken.
+      replyVoice: '',
+      replyRate: 1,
+      speakReplies: true
+    })
+  })
+
+  describe('voice conversation reply settings', () => {
+    it('clamps the rate into the audible band and defaults a non-number', () => {
+      expect(normalizeReplyRate(1.3)).toBe(1.3)
+      expect(normalizeReplyRate(0.1)).toBe(REPLY_RATE_MIN)
+      expect(normalizeReplyRate(9)).toBe(REPLY_RATE_MAX)
+      expect(normalizeReplyRate('fast')).toBe(REPLY_RATE_DEFAULT)
+      expect(normalizeReplyRate(Number.NaN)).toBe(REPLY_RATE_DEFAULT)
+      expect(normalizeReplyRate(undefined)).toBe(REPLY_RATE_DEFAULT)
+    })
+
+    it('reads a hand-edited settings.json defensively: strings stay strings, booleans stay booleans', () => {
+      expect(
+        normalizeSpeechReplySettings({ replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 1.5, speakReplies: false })
+      ).toEqual({ replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 1.5, speakReplies: false })
+      // A truthy string is NOT "on": the switch could not render it and the loop would speak anyway.
+      expect(normalizeSpeechReplySettings({ replyVoice: 42, replyRate: '2', speakReplies: 'yes' })).toEqual({
+        replyVoice: '',
+        replyRate: REPLY_RATE_DEFAULT,
+        speakReplies: true
+      })
+      expect(normalizeSpeechReplySettings({})).toEqual({ replyVoice: '', replyRate: 1, speakReplies: true })
     })
   })
 

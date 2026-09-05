@@ -165,7 +165,10 @@ describe('registry invariants', () => {
         darwin: ['Cmd+Enter'], other: ['Cmd+Enter'], allowWhileTyping: true },
       { id: 'speech.dictation', title: 'Dictate', group: 'Speech', scope: 'app',
         darwin: ['Cmd+Alt'], other: ['Cmd+Alt'],
-        allowHoldChord: true, allowInTerminal: true, allowWhileTyping: true }
+        allowHoldChord: true, allowInTerminal: true, allowWhileTyping: true },
+      // Unbound by default: a chord that starts listening to the room is opt-in.
+      { id: 'speech.voiceConversation', title: 'Toggle voice conversation', group: 'Speech',
+        scope: 'app', darwin: [], other: [], allowInTerminal: true }
     ])
   })
 

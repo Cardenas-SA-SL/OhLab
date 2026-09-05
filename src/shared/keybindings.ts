@@ -88,6 +88,7 @@ export type CommandId =
   | 'terminal.copySelection'
   | 'scm.commit'
   | 'speech.dictation'
+  | 'speech.voiceConversation'
 
 /** Same defaults on every platform. */
 const both = (...bindings: string[]): { darwin: string[]; other: string[] } => ({
@@ -249,7 +250,12 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
   // Speech — the migrated dictation chord; hold-to-talk by default.
   { id: 'speech.dictation', title: 'Dictate', group: 'Speech', scope: 'app',
     defaultBindings: both('Cmd+Alt'),
-    allowHoldChord: true, allowInTerminal: true, allowWhileTyping: true }
+    allowHoldChord: true, allowInTerminal: true, allowWhileTyping: true },
+  // Voice conversation on the focused/selected agent node — an ORDINARY registry command (the
+  // Canvas dispatcher owns it, unlike dictation's dedicated listeners), unbound by default so a
+  // toggle that starts listening to the room is never one accidental chord away.
+  { id: 'speech.voiceConversation', title: 'Toggle voice conversation', group: 'Speech',
+    scope: 'app', defaultBindings: both(), allowInTerminal: true }
 ]
 
 export const COMMANDS_BY_ID: ReadonlyMap<CommandId, CommandDefinition> = new Map(
