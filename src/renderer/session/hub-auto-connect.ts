@@ -370,13 +370,16 @@ export function mountHubAutoConnect(): () => void {
     hub: api.hub,
     relayClient: api.relayClient,
     openTab: (target, connectionId, reconnect) =>
-      openRelayTab(connectionId, target.label, {
+      // Session label = the member (renders as the tab's session badge, like "This Mac" on a local
+      // tab); tab name = the project. Passing the combined label to both painted
+      // "Project 1 · Hermano  Project 1 · Hermano" on the tab strip.
+      openRelayTab(connectionId, target.memberName, {
         relayClient: api.relayClient,
         addProject: reconnect ? () => ({ id: reconnect.projectId }) : (name) => useProjects.getState().addProject(name),
         adoptProject: reconnect ? undefined : (project) => useProjects.getState().adoptProject(project, { activate: false }),
         setActiveProject: (id) => useProjects.getState().setActive(id),
         activate: false,
-        tabName: target.label,
+        tabName: target.projectName,
         hostAccountId: target.accountId,
         memberName: target.memberName,
         machineLabel: target.machineLabel,
