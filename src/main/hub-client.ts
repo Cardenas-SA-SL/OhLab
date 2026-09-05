@@ -11,6 +11,9 @@ import { pinDevice } from './remote/approved-devices-core'
 import { hostname, userInfo } from 'node:os'
 import { retainUntilDismissed } from './notifications'
 import { createRevoker } from './remote/revocation'
+import { relayUrlMatchesHub } from '../core/hub/relay-url-guard'
+import { assertMemberKey, forgetMemberKey, HubMemberKeyChangedError } from './hub-member-pins'
+import { onVerifyCodesChange, rememberVerifyCode, verifyCodes } from './hub-verify-codes'
 
 type SessionRequest = {
   type: 'session-request'
@@ -45,7 +48,11 @@ export function initHubClient(
   let configuredUrl = ''
   let configuredAccountName = ''
   let syncTail: Promise<HubStatus> = Promise.resolve({ state: 'disabled' })
+  // Keyed by member account AND local project (finding 7): one member may open two of this
+  // desktop's projects, and only a request for the SAME project replaces the session it holds.
   const hosted = new Map<string, RelayHostSession>()
+  const hostedKey = (accountId: string, projectId: string): string => JSON.stringify([accountId, projectId])
+  const hostedAccountId = (key: string): string => (JSON.parse(key) as [string, string])[0]
   const memberRevoker = createRevoker({
     load: loadApprovedDevices,
     save: saveApprovedDevices,
@@ -56,13 +63,36 @@ export function initHubClient(
   const send = (event: HubEvent): void => {
     if (!win.isDestroyed()) win.webContents.send(IPC.hubEvent, event)
   }
+  /** The status the renderer sees carries every SAS this desktop has derived, keyed by peer key,
+   *  so Settings > Team can print a "verify code" beside each member (finding 3). */
+  const withVerifyCodes = (value: HubStatus): HubStatus => ({ ...value, verifyCodes: verifyCodes() })
   const updateStatus = (next: HubStatus): void => {
     status = next
-    send({ type: 'status', status: next })
+    send({ type: 'status', status: withVerifyCodes(next) })
+  }
+  const unsubscribeVerifyCodes = onVerifyCodesChange(() => send({ type: 'status', status: withVerifyCodes(status) }))
+  /** A member's key differs from the one pinned when they were first trusted: refuse, and say so
+   *  where a human will see it even with Settings closed (finding 3). */
+  const warnKeyChanged = (error: HubMemberKeyChangedError): void => {
+    console.warn(`[hub] ${error.message}`)
+    updateStatus({ ...status, error: error.message })
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title: 'OhLab refused a Hub session', body: error.message })
+      retainUntilDismissed(notification)
+      notification.show()
+    }
   }
 
   async function acceptSessionRequest(event: SessionRequest): Promise<void> {
     if (!client) return
+    // Finding 4: the relay URL rode the requesting member's Host header through the Hub. Only the
+    // Hub this desktop authenticated to may be dialled on its say-so, never an address a peer
+    // shaped - the E2EE key check below would still keep the data safe, but this desktop would
+    // open an outbound socket wherever it was pointed.
+    if (!relayUrlMatchesHub(event.relayUrl, configuredUrl)) {
+      console.warn('[hub] refused session request whose relay URL is not the configured Hub')
+      return
+    }
     const projects = await client.listProjects()
     const project = projects.find((item) => item.projectId === event.projectId)
     const member = project?.members?.find((item) => item.accountId === event.fromAccountId)
@@ -75,7 +105,20 @@ export function initHubClient(
       console.warn('[hub] refused session request because the shared project has no local copy')
       return
     }
+    // Finding 3: the Hub introduces a member's key once. Pinned on first sight, refused ever after
+    // if the same account shows up with another key - the substitution a compromised Hub would
+    // need to sit between the two tunnels.
+    try {
+      await assertMemberKey({ hubUrl: configuredUrl, accountId: member.accountId, publicKeyB64: event.fromPublicKeyB64, memberName: member.name })
+    } catch (error) {
+      if (error instanceof HubMemberKeyChangedError) {
+        warnKeyChanged(error)
+        return
+      }
+      throw error
+    }
     const keys = await loadOrCreatePeerKeyPair()
+    const key = hostedKey(member.accountId, localProjectId)
     let session: RelayHostSession
     session = connectRelayHost({
       url: event.relayUrl,
@@ -96,12 +139,17 @@ export function initHubClient(
         }
         void loadApprovedDevices().then((saved) => saveApprovedDevices(pinDevice(saved, event.fromPublicKeyB64)))
         pending.confirm()
+        rememberVerifyCode(event.fromPublicKeyB64, pending.sas())
       },
       onOpen: () => {},
-      onClose: () => hosted.delete(member.accountId)
+      // Only when the map still names THIS session: a superseded session's wire drop can land
+      // after its replacement was stored, and must not delete the live one (finding 7).
+      onClose: () => {
+        if (hosted.get(key) === session) hosted.delete(key)
+      }
     })
-    hosted.get(member.accountId)?.close()
-    hosted.set(member.accountId, session)
+    hosted.get(key)?.close()
+    hosted.set(key, session)
   }
 
   async function syncNow(): Promise<HubStatus> {
@@ -176,7 +224,7 @@ export function initHubClient(
     return client
   }
 
-  platform.handle(IPC.hubStatus, () => status)
+  platform.handle(IPC.hubStatus, () => withVerifyCodes(status))
   platform.handle(IPC.hubConnect, () => sync())
   platform.handle(IPC.hubProjectsList, async () => (await needClient()).listProjects())
   platform.handle(IPC.hubProjectsCreate, async (name: unknown, projectId?: unknown) =>
@@ -186,6 +234,9 @@ export function initHubClient(
   platform.handle(IPC.hubProjectsApprove, async (projectId: unknown, accountId: unknown) => {
     const hub = await needClient()
     const member = (await hub.listProjects()).find((p) => p.projectId === String(projectId))?.members?.find((m) => m.accountId === String(accountId))
+    // Before the approve lands on the Hub: a member whose account already carries a different
+    // pinned key is refused here, with the reason, rather than approved and then refused later.
+    if (member?.publicKeyB64) await assertMemberKey({ hubUrl: configuredUrl, accountId: member.accountId, publicKeyB64: member.publicKeyB64, memberName: member.name })
     const result = await hub.approveMember(String(projectId), String(accountId))
     if (member?.publicKeyB64) await saveApprovedDevices(pinDevice(await loadApprovedDevices(), member.publicKeyB64))
     return result
@@ -198,17 +249,23 @@ export function initHubClient(
       const revoked = await memberRevoker.revoke(member.publicKeyB64)
       if (!revoked.persisted || !revoked.killed) throw new Error('The member was removed, but relay access could not be fully revoked. Retry before sharing this project again.')
     }
-    hosted.delete(String(accountId))
+    for (const key of [...hosted.keys()]) if (hostedAccountId(key) === String(accountId)) hosted.delete(key)
+    await forgetMemberKey(String(accountId))
     return result
   })
   platform.handle(IPC.hubInviteRegenerate, async (projectId: unknown) => (await needClient()).regenerateInvite(String(projectId)))
   platform.handle(IPC.hubProjectsConnect, async (projectId: unknown, toAccountId: unknown, machineLabel?: unknown) => {
     const hub = await needClient()
+    const target = (await hub.listProjects()).find((p) => p.projectId === String(projectId))?.members?.find((m) => m.accountId === String(toAccountId))
     const result = await hub.connectMember(
       String(projectId),
       String(toAccountId),
       typeof machineLabel === 'string' ? machineLabel : undefined
     )
+    // The guest's half of findings 3 and 4: dial only the Hub's own relay, and only a member
+    // whose key is the one pinned for that account (first sight pins it).
+    if (!relayUrlMatchesHub(result.relayUrl, configuredUrl)) throw new Error('The Hub advertised a relay outside its own address, so the connection was refused.')
+    await assertMemberKey({ hubUrl: configuredUrl, accountId: String(toAccountId), publicKeyB64: result.toPublicKeyB64, memberName: target?.name ?? 'This member' })
     const keys = await loadOrCreatePeerKeyPair()
     return {
       offer: encodeHubConnectOffer(result),
@@ -219,6 +276,7 @@ export function initHubClient(
   return {
     sync,
     stop() {
+      unsubscribeVerifyCodes()
       client?.stop()
       client = null
       configuredUrl = ''

@@ -277,6 +277,7 @@ import {
 } from './remote/agent-collaboration-host'
 import { initRelayHost } from './remote/relay-host-service'
 import { initHubClient, type MainHubClient } from './hub-client'
+import { rememberVerifyCode } from './hub-verify-codes'
 import { createRevoker } from './remote/revocation'
 import { loadApprovedDevices, saveApprovedDevices } from './remote/approved-devices'
 import { publicKeyToB64 } from './remote/e2ee'
@@ -3749,9 +3750,12 @@ app.whenReady().then(async () => {
         token: offer.pairingToken,
         hostKeyB64: offer.hostPublicKeyB64,
         ourKeys: keys,
-        // The SAS is known — push it so this human can compare it before the host approves.
+        // The SAS is known — push it so this human can compare it before the host approves, and
+        // remember it by host key so Settings > Team can print it as the member's verify code
+        // (the brokered flow auto-confirms; the code is how two people check their pins once).
         onSas: (s) => {
           sendTo(IPC.relayClientSas(connectionId), s.sas())
+          rememberVerifyCode(offer.hostPublicKeyB64, s.sas())
           if (options.autoConfirm === true) setImmediate(() => s.confirm())
         },
         // Mutually approved — the frame pipe is live.

@@ -2858,6 +2858,10 @@ export interface HubStatus {
   accountId?: string
   accountName?: string
   error?: string
+  /** The SAS ("NNN NNN") of every relay session this desktop has been on, keyed by the peer's
+   *  public key (base64). Same on both computers of a pair unless someone sat between them, so
+   *  Settings > Team shows it beside each member as a "verify code" to compare once, out of band. */
+  verifyCodes?: Record<string, string>
 }
 
 export interface HubHostAddress {

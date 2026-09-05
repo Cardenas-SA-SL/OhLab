@@ -13,7 +13,7 @@ describe('embedded Hub', () => {
   it('boots once and closes when disabled', async () => {
     const close = vi.fn(async () => {})
     const listen = vi.fn(async () => ({ address: '0.0.0.0', family: 'IPv4', port: 8791 }))
-    const make = vi.fn(() => ({ close, listen, address: () => null }) as Hub)
+    const make = vi.fn(() => ({ close, listen, address: () => null, stats: () => ({ tokens: 0, devices: 0, challenges: 0, sessions: 0, accounts: 0, projects: 0 }) }) as Hub)
     const host = createEmbeddedHubHost('/tmp/ohlab-test', () => {}, make)
     await host.sync(true, 8791)
     await host.sync(true, 8791)

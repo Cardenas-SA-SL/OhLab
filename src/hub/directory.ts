@@ -4,6 +4,7 @@ import path from 'node:path'
 import nacl from 'tweetnacl'
 import { WebSocket } from 'ws'
 import { writeFileAtomic } from '../core/fs-atomic'
+import { DEFAULT_HUB_LIMITS, HubLimitError, type HubLimits } from './limits'
 
 export interface Account {
   accountId: string
@@ -61,7 +62,11 @@ interface Challenge {
   challengeB64: string
   publicKeyB64: string
   exp: number
+  /** The client address it was issued to, for the per-address ceiling. */
+  issuer?: string
 }
+
+type DirectoryLimits = Pick<HubLimits, 'maxChallenges' | 'maxChallengesPerIssuer' | 'maxSessionsPerAccount' | 'maxAccounts' | 'maxProjects' | 'maxProjectsPerAccount'>
 
 const SESSION_TTL_MS = 60 * 60 * 1000
 const CHALLENGE_TTL_MS = 2 * 60 * 1000
@@ -88,7 +93,11 @@ export class HubDirectory {
   private sockets = new Map<string, Map<WebSocket, DirectoryLink>>()
   private saveTail: Promise<void> = Promise.resolve()
 
-  constructor(dataDir: string, private readonly now: () => number = Date.now) {
+  constructor(
+    dataDir: string,
+    private readonly now: () => number = Date.now,
+    private readonly limits: DirectoryLimits = DEFAULT_HUB_LIMITS
+  ) {
     this.file = path.join(dataDir, 'directory.json')
   }
 
@@ -102,7 +111,7 @@ export class HubDirectory {
     }
   }
 
-  issueChallenge(publicKeyB64: string): {
+  issueChallenge(publicKeyB64: string, issuer?: string): {
     challengeId: string
     hubPublicKeyB64: string
     nonceB64: string
@@ -111,6 +120,11 @@ export class HubDirectory {
   } {
     const publicKey = validPublicKey(publicKeyB64)
     if (!publicKey) throw new Error('invalid publicKeyB64')
+    // Ceilings before the key pair: an unanswered challenge used to live forever, and every one
+    // costs a fresh box key pair, so an unauthenticated loop was both a memory and a CPU sink.
+    const live = this.pruneChallenges(issuer)
+    if (live.total >= this.limits.maxChallenges) throw new HubLimitError('the Hub has too many open key challenges')
+    if (issuer && live.mine >= this.limits.maxChallengesPerIssuer) throw new HubLimitError('too many open key challenges from this address')
     const hubKeys = nacl.box.keyPair()
     const nonce = nacl.randomBytes(nacl.box.nonceLength)
     const challenge = randomBytes(32)
@@ -120,7 +134,8 @@ export class HubDirectory {
     this.challenges.set(challengeId, {
       challengeB64: challenge.toString('base64'),
       publicKeyB64,
-      exp
+      exp,
+      ...(issuer ? { issuer } : {})
     })
     return {
       challengeId,
@@ -153,6 +168,7 @@ export class HubDirectory {
     let account = [...this.accounts.values()].find((item) => item.publicKeyB64 === input.publicKeyB64)
     if (!account) {
       if (!name) throw new Error('name is required for registration')
+      if (this.accounts.size >= this.limits.maxAccounts) throw new HubLimitError('the Hub has reached its account limit')
       account = { accountId: randomUUID(), name, publicKeyB64: input.publicKeyB64, createdAt: this.now(), machineLabel }
       this.accounts.set(account.accountId, account)
       await this.save()
@@ -171,7 +187,27 @@ export class HubDirectory {
     const sessionToken = opaque()
     const exp = this.now() + SESSION_TTL_MS
     this.sessions.set(sessionToken, { accountId: account.accountId, exp })
+    this.evictSurplusSessions(account.accountId)
     return { account, sessionToken, exp }
+  }
+
+  /** One account holds at most `maxSessionsPerAccount` live sessions; the oldest go first. A
+   *  desktop holds one (it re-proves its key only on restart or a 401), so an account past the
+   *  ceiling is a loop minting sessions, and evicting its oldest costs it nothing it needs. */
+  private evictSurplusSessions(accountId: string): void {
+    const at = this.now()
+    const mine: string[] = []
+    for (const [token, session] of this.sessions) {
+      if (session.exp <= at) {
+        this.sessions.delete(token)
+        continue
+      }
+      if (session.accountId === accountId) mine.push(token)
+    }
+    // Map iteration is insertion order, so the front of `mine` is the oldest session.
+    for (const token of mine.slice(0, Math.max(0, mine.length - this.limits.maxSessionsPerAccount))) {
+      this.sessions.delete(token)
+    }
   }
 
   accountForSession(token: string): Account | null {
@@ -186,6 +222,10 @@ export class HubDirectory {
   async createProject(accountId: string, name: string, projectId?: string): Promise<SharedProject> {
     const id = projectId?.trim() || randomUUID()
     if (this.projects.has(id)) throw new Error('project already exists')
+    if (this.projects.size >= this.limits.maxProjects) throw new HubLimitError('the Hub has reached its project limit')
+    let owned = 0
+    for (const project of this.projects.values()) if (project.ownerAccountId === accountId) owned++
+    if (owned >= this.limits.maxProjectsPerAccount) throw new HubLimitError('this account has reached its project limit')
     const project: SharedProject = {
       projectId: id,
       name: name.trim() || 'Shared project',
@@ -319,6 +359,50 @@ export class HubDirectory {
   async deleteProject(projectId: string): Promise<void> {
     this.projects.delete(projectId)
     await this.save()
+  }
+
+  /** Raw row counts, expired rows included (nothing is pruned on the way). */
+  size(): { accounts: number; projects: number; challenges: number; sessions: number } {
+    return { accounts: this.accounts.size, projects: this.projects.size, challenges: this.challenges.size, sessions: this.sessions.size }
+  }
+
+  /** Live (unexpired) challenges right now, overall and for one issuing address. */
+  liveChallengeCount(issuer?: string): { total: number; issuer: number } {
+    const live = this.pruneChallenges(issuer)
+    return { total: live.total, issuer: live.mine }
+  }
+
+  /** Live (unexpired) sessions right now. */
+  liveSessionCount(): number {
+    const at = this.now()
+    for (const [token, session] of this.sessions) if (session.exp <= at) this.sessions.delete(token)
+    return this.sessions.size
+  }
+
+  /** Drop expired challenges and sessions. Both are memory-only, so nothing is written; before the
+   *  Hub's periodic sweep an unanswered challenge and a session nobody presented again lived until
+   *  the process did. Returns what was dropped. */
+  sweep(): { challenges: number; sessions: number } {
+    const challenges = this.challenges.size
+    const sessions = this.sessions.size
+    this.pruneChallenges()
+    this.liveSessionCount()
+    return { challenges: challenges - this.challenges.size, sessions: sessions - this.sessions.size }
+  }
+
+  private pruneChallenges(issuer?: string): { total: number; mine: number } {
+    const at = this.now()
+    let total = 0
+    let mine = 0
+    for (const [id, challenge] of this.challenges) {
+      if (challenge.exp <= at) {
+        this.challenges.delete(id)
+        continue
+      }
+      total++
+      if (issuer && challenge.issuer === issuer) mine++
+    }
+    return { total, mine }
   }
 
   private requireOwner(projectId: string, accountId: string): SharedProject {
