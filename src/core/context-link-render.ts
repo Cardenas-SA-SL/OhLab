@@ -115,15 +115,33 @@ export function linesFromCodex(raw: string): string[] {
   return res
 }
 
-/** The whole gemini chat file: event-sourced ($set / $push / bare message), replayed then flattened. */
-export function linesFromGemini(buf: string): string[] {
-  type Msg = { type?: string; content?: unknown }
-  let messages: Msg[] = []
+/** One gemini chat message as stored: `type` is `user` / `gemini` (`model` on older builds), the
+ *  content a string or `{text}` parts, `timestamp` an ISO string on every message we have measured. */
+export interface GeminiMessage {
+  type?: string
+  content?: unknown
+  timestamp?: unknown
+}
+
+/**
+ * The whole gemini chat file REPLAYED: it is event-sourced (`$set` replaces the message list —
+ * a resume writes the full history this way — `$push` appends, a bare message line appends), so
+ * the messages are only knowable after walking every line. Exported so the voice-conversation
+ * reader (`core/speech/last-reply.ts`) shares this one replay instead of re-deriving the three
+ * line shapes and drifting from the context-link renderer below.
+ */
+export function geminiMessages(buf: string): GeminiMessage[] {
+  let messages: GeminiMessage[] = []
   for (const raw of buf.split('\n')) {
     const t = raw.trim()
     if (!t) continue
     const o = parseJson(t) as
-      | { $set?: { messages?: Msg[] }; $push?: { messages?: Msg | Msg[] }; content?: unknown; sessionId?: string }
+      | {
+          $set?: { messages?: GeminiMessage[] }
+          $push?: { messages?: GeminiMessage | GeminiMessage[] }
+          content?: unknown
+          sessionId?: string
+        }
       | undefined
     if (!o) continue
     if (o.$set && Array.isArray(o.$set.messages)) {
@@ -136,10 +154,15 @@ export function linesFromGemini(buf: string): string[] {
       else if (m && typeof m === 'object') messages.push(m)
       continue
     }
-    if (o.content !== undefined && o.sessionId === undefined) messages.push(o as Msg)
+    if (o.content !== undefined && o.sessionId === undefined) messages.push(o as GeminiMessage)
   }
+  return messages
+}
+
+/** The whole gemini chat file: event-sourced ($set / $push / bare message), replayed then flattened. */
+export function linesFromGemini(buf: string): string[] {
   const res: string[] = []
-  for (const m of messages) {
+  for (const m of geminiMessages(buf)) {
     const role =
       m.type === 'user' ? 'user' : m.type === 'gemini' || m.type === 'model' ? 'assistant' : String(m.type || 'message')
     const t = flatText(m.content)
@@ -154,13 +177,43 @@ export function linesFromGemini(buf: string): string[] {
  * defensively: a messages array whose items carry role + parts[] (text / tool) or a plain string.
  */
 export function linesFromOpencodeExport(raw: string): string[] | null {
+  const msgs = opencodeMessages(raw)
+  if (msgs === null) return null
+  const res: string[] = []
+  for (const m of msgs) {
+    for (const p of m.parts) {
+      if (p.kind === 'text') res.push(`${m.role}: ${p.text}`)
+      else res.push(`  $ ${p.name}${p.arg}`)
+    }
+  }
+  return res
+}
+
+/** One ordered part of an opencode message: prose, or a tool call with its rendered argument
+ *  (already prefixed with a space, or '' when the call carried none we print). */
+export type OpencodePart =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; name: string; arg: string }
+
+export interface OpencodeMessage {
+  role: 'user' | 'assistant'
+  parts: OpencodePart[]
+}
+
+/**
+ * The structured half of `linesFromOpencodeExport`: the export's messages with their ordered
+ * parts, shapes read defensively (role at the top or under `info`; `parts[]` or a string/array
+ * `content`). `null` = not JSON at all. Shared with the voice-conversation reader for the same
+ * reason `geminiMessages` is.
+ */
+export function opencodeMessages(raw: string): OpencodeMessage[] | null {
   const o = parseJson(raw) as
     | { messages?: unknown[]; data?: { messages?: unknown[] } }
     | unknown[]
     | undefined
   if (o === undefined) return null
   const msgs: unknown[] = Array.isArray(o) ? o : o?.messages ?? o?.data?.messages ?? []
-  const res: string[] = []
+  const res: OpencodeMessage[] = []
   for (const raw of msgs) {
     const m = raw as {
       role?: string
@@ -171,11 +224,12 @@ export function linesFromOpencodeExport(raw: string): string[] | null {
     if (!m) continue
     const role = (m.role ?? m.info?.role) === 'user' ? 'user' : 'assistant'
     if (typeof m.content === 'string' && m.content) {
-      res.push(`${role}: ${m.content}`)
+      res.push({ role, parts: [{ kind: 'text', text: m.content }] })
       continue
     }
     const parts = m.parts ?? (Array.isArray(m.content) ? (m.content as unknown[]) : null)
     if (!Array.isArray(parts)) continue
+    const out: OpencodePart[] = []
     for (const p of parts) {
       const c = p as {
         type?: string
@@ -187,14 +241,15 @@ export function linesFromOpencodeExport(raw: string): string[] | null {
       }
       if (!c) continue
       if (typeof c.text === 'string' && c.text && (c.type === 'text' || !c.type)) {
-        res.push(`${role}: ${c.text}`)
+        out.push({ kind: 'text', text: c.text })
       } else if (c.type === 'tool' || c.type === 'tool_use' || c.tool) {
         const name = c.tool || c.name || 'tool'
         const input = c.state?.input ?? c.input
         const a = input && (input.command ?? input.filePath ?? input.file_path ?? input.pattern ?? input.description)
-        res.push(`  $ ${name}${typeof a === 'string' ? ` ${a.slice(0, TOOL_ARG_MAX)}` : ''}`)
+        out.push({ kind: 'tool', name, arg: typeof a === 'string' ? ` ${a.slice(0, TOOL_ARG_MAX)}` : '' })
       }
     }
+    res.push({ role, parts: out })
   }
   return res
 }

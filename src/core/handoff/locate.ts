@@ -7,6 +7,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { resolveTranscriptPath } from '../transcript-reader'
+import { systemCodexHome } from '../codex-accounts-core'
+import { codexHomeFor } from '../codex-config-dir'
 
 // claude: ~/.claude/projects/<proj>/<sessionId>.jsonl — already implemented (searches all
 // project dirs for the exact <sessionId>.jsonl). `accountId` scopes to a managed account's
@@ -15,11 +17,14 @@ export function locateClaude(sessionId: string, accountId?: string): Promise<str
   return resolveTranscriptPath(sessionId, accountId)
 }
 
-// codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<sessionId>.jsonl — walk the tree and
-// match a .jsonl filename containing the sessionId. Managed accounts are Claude-only, so the
-// codex/gemini locators ignore accountId (present only to satisfy the shared Locator type).
-export async function locateCodex(sessionId: string): Promise<string | undefined> {
-  const root = path.join(os.homedir(), '.codex', 'sessions')
+// codex: <codexHome>/sessions/YYYY/MM/DD/rollout-<ts>-<sessionId>.jsonl — walk the tree and
+// match a .jsonl filename containing the sessionId. The home honours `$CODEX_HOME` (the CLI's
+// own relocation variable) and, for a node bound to a MANAGED codex account, that account's
+// short home — the rollouts of a `codex` launched with `CODEX_HOME=<managed>` live under it, and
+// the system tree would answer "no transcript" for every such session. The system branch reads
+// no platform state, so the handoff/link callers that predate a platform still resolve.
+export async function locateCodex(sessionId: string, accountId?: string): Promise<string | undefined> {
+  const root = path.join(accountId ? codexHomeFor(accountId) : systemCodexHome(), 'sessions')
   const stack = [root]
   while (stack.length) {
     const dir = stack.pop() as string

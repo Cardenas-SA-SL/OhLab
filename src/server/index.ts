@@ -96,6 +96,7 @@ import { IPC } from '@shared/ipc'
 import { WhisperModelStore } from '../core/speech/whisper-models'
 import { SpeechService } from '../core/speech/speech-service'
 import { registerSpeechIpc } from '../core/speech/register-ipc'
+import { registerLastReplyIpc } from '../core/speech/last-reply'
 import { getStoredEntitlement } from '../core/license'
 
 // Same env-override + default as src/core/check.ts / license.ts / src/main/telemetry.ts — each
@@ -457,6 +458,9 @@ export async function startServer(
   // leg: the Server Edition runs ON the host whose transcripts it reads, so local resolution is
   // the complete answer (an SSH-project node is a desktop-only concept here).
   registerTranscriptIpc({ pathFor: (sessionId) => contextTail.pathFor(sessionId) })
+  // Voice conversation's reply read (`speech:last-reply`), same path authority — the browser
+  // speaks agent replies with the host's transcripts, which is where they are.
+  registerLastReplyIpc({ pathFor: (sessionId) => contextTail.pathFor(sessionId) })
   // Deterministic hook-reply approvals (docs/hook-reply-approvals.md): the browser canvas answers a
   // held Claude permission hook here. The Server Edition runs ON the host, so a local project's
   // answer file is written right there (under os.homedir(), which the hook uses as $HOME). SSH

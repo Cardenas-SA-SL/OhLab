@@ -234,6 +234,7 @@ import { initLicense, getStoredEntitlement } from '../core/license'
 import { WhisperModelStore } from '../core/speech/whisper-models'
 import { SpeechService } from '../core/speech/speech-service'
 import { registerSpeechIpc } from '../core/speech/register-ipc'
+import { registerLastReplyIpc } from '../core/speech/last-reply'
 import { initClaudeAccounts } from './claude-accounts'
 import { initCodexAccounts } from './codex-accounts'
 import { claudeCliCaps, registerClaudeCliIpc, type ClaudeCliCaps } from '../core/claude-cli'
@@ -2447,6 +2448,9 @@ app.whenReady().then(async () => {
       return ref ? await readRemoteTranscript(sessionId!, ref) : null
     }
   })
+  // Voice conversation's reply read (`speech:last-reply`): the same hook-fed path authority as
+  // the channels above. Local-only on purpose — see core/speech/last-reply.ts on relay/SSH.
+  registerLastReplyIpc({ pathFor: (sessionId) => contextTail.pathFor(sessionId) })
 
   initTranscriptIndex(() => settingsStore.get().claudeAccounts ?? [])
   corePlatform.handle(IPC.transcriptSearch, (query: string) => searchTranscripts(query))
