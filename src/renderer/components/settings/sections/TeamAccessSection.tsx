@@ -13,6 +13,7 @@ import { Input } from '@renderer/ui/Input'
 import { CopyButton } from '@renderer/ui/CopyButton'
 import { Switch } from '@renderer/ui/Switch'
 import { thisMachineCap } from '../../../lib/machineName'
+import { canManageHubProject } from '../../../lib/hubTeam'
 
 const ROW = {
   title: 'OhLab Hub',
@@ -40,13 +41,21 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     setProjects(next)
   }
 
+  const applyStatus = (next: HubStatus): void => {
+    setStatus(next)
+    if (next.state === 'connected' && next.accountName) {
+      setAccountName((current) => current.trim() ? current : next.accountName!)
+      setJoinName((current) => current.trim() ? current : next.accountName!)
+    }
+  }
+
   useEffect(() => {
     if (!isActive) return
-    void window.nodeTerminal.hub.status().then(setStatus)
+    void window.nodeTerminal.hub.status().then(applyStatus)
     void window.nodeTerminal.hub.hostStatus().then(setHostStatus)
     void window.nodeTerminal.hub.pendingInvite().then((invite) => { if (invite) setJoinCode(invite) })
     const unsub = window.nodeTerminal.hub.onEvent((event) => {
-      if (event.type === 'status') setStatus(event.status)
+      if (event.type === 'status') applyStatus(event.status)
       else if (event.type === 'host-status') setHostStatus(event.status)
       else if (event.type === 'invite-prefill') setJoinCode(event.invite)
       else if (event.type === 'member-approved') {
@@ -66,6 +75,7 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     () => projects.find((project) => project.projectId === activeProject?.id || project.name === activeProject?.name),
     [projects, activeProject]
   )
+  const canManageActiveProject = canManageHubProject(myHubProject, status)
 
   const run = async (action: () => Promise<void>): Promise<void> => {
     setBusy(true)
@@ -79,7 +89,7 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     void run(async () => {
       // Save is coalesced, so let the main process receive the exact values before asking it to dial.
       await window.nodeTerminal.settings.save({ ...settings, hubUrl: hubUrl.trim(), hubAccountName: accountName.trim() })
-      setStatus(await window.nodeTerminal.hub.connect())
+      applyStatus(await window.nodeTerminal.hub.connect())
       await refresh()
     })
   }
@@ -102,14 +112,14 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
       setHubUrl(invite.hub)
       setAccountName(name)
       await window.nodeTerminal.settings.save(next)
-      setStatus(await window.nodeTerminal.hub.connect())
+      applyStatus(await window.nodeTerminal.hub.connect())
       const project = await window.nodeTerminal.hub.joinProject(invite.code)
       setWaiting(`Waiting for the owner to approve ${project.name}. Both sides need agent messaging enabled.`)
       await refresh()
     })
   }
 
-  const inviteString = myHubProject ? encodeHubInvite({
+  const inviteString = canManageActiveProject && myHubProject ? encodeHubInvite({
     v: 1,
     hub: settings.hubHostEnabled && settings.hubUrl.includes('127.0.0.1')
       ? (hostStatus.addresses?.[0]?.url ?? settings.hubUrl)
@@ -195,18 +205,20 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
 
           {status.state === 'connected' ? (
             <>
-              <div className="space-y-3">
-                <h4 className="text-[13px] font-medium text-text">Share this project</h4>
-                {myHubProject ? (
-                  <div className="flex items-center gap-2">
-                    <Input className="w-72" readOnly value={inviteString} onFocus={(event) => event.target.select()} />
-                    <CopyButton text={inviteString} label="Copy invite" />
-                    <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.regenerateInvite(myHubProject.projectId); await refresh() })}>Regenerate</Button>
-                  </div>
-                ) : (
-                  <Button disabled={busy || !activeProject} onClick={() => void run(async () => { await window.nodeTerminal.hub.createProject(activeProject?.name ?? 'Shared project', activeProject?.id); await refresh() })}>Share this project</Button>
-                )}
-              </div>
+              {!myHubProject || canManageActiveProject ? (
+                <div className="space-y-3">
+                  <h4 className="text-[13px] font-medium text-text">Share this project</h4>
+                  {myHubProject ? (
+                    <div className="flex items-center gap-2">
+                      <Input className="w-72" readOnly value={inviteString} onFocus={(event) => event.target.select()} />
+                      <CopyButton text={inviteString} label="Copy invite" />
+                      <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.regenerateInvite(myHubProject.projectId); await refresh() })}>Regenerate</Button>
+                    </div>
+                  ) : (
+                    <Button disabled={busy || !activeProject} onClick={() => void run(async () => { await window.nodeTerminal.hub.createProject(activeProject?.name ?? 'Shared project', activeProject?.id); await refresh() })}>Share this project</Button>
+                  )}
+                </div>
+              ) : null}
 
               <FieldRow
                 label="Agent messaging for this project"

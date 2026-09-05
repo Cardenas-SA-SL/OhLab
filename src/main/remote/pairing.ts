@@ -14,6 +14,12 @@ export type PairingOffer = {
   hostPublicKeyB64: string
 }
 
+export type HubConnectResult = {
+  relayUrl: string
+  pairingToken: string
+  toPublicKeyB64: string
+}
+
 const SCHEME_PREFIX = 'nodeterm://pair?code='
 
 export function encodeOffer(offer: PairingOffer): string {
@@ -22,6 +28,19 @@ export function encodeOffer(offer: PairingOffer): string {
   // Why: query params survive custom-scheme deep links / camera intents more
   // reliably than URL fragments.
   return `${SCHEME_PREFIX}${code}`
+}
+
+/** Translate the Hub directory's connect response at the one product boundary that consumes it.
+ * Validate the encoded result immediately so a missing/unsafe Hub field is reported here rather
+ * than later as the relay client's generic "pairing code is invalid" error. */
+export function encodeHubConnectOffer(result: HubConnectResult): string {
+  const encoded = encodeOffer({
+    relayEndpoint: result.relayUrl,
+    pairingToken: result.pairingToken,
+    hostPublicKeyB64: result.toPublicKeyB64
+  })
+  if (!decodeOffer(encoded)) throw new Error('The Hub returned an invalid or unreachable relay offer.')
+  return encoded
 }
 
 // Decode either a full `nodeterm://pair?code=…` URL or a bare base64url code.
@@ -66,9 +85,10 @@ function extractCode(input: string): string | null {
 }
 
 // R5: the client connects to `relayEndpoint` verbatim, so an attacker-crafted offer must not
-// be able to point it at a plaintext (or non-WebSocket) endpoint. TLS is required; plaintext
-// `ws://` is allowed ONLY to loopback, for the local relay in dev and the e2e tests — a
-// loopback endpoint never crosses a network.
+// be able to point it at an arbitrary plaintext (or non-WebSocket) endpoint. TLS is required for
+// public addresses. Plaintext `ws://` is limited to loopback and non-public networks because the
+// embedded self-hosted Hub deliberately advertises its LAN/Tailscale IPv4 address to teammates.
+// Tunnel frames remain E2EE; this allowance only makes that private-network transport reachable.
 function isAllowedRelayEndpoint(endpoint: string): boolean {
   let url: URL
   try {
@@ -79,9 +99,25 @@ function isAllowedRelayEndpoint(endpoint: string): boolean {
   if (url.protocol === 'wss:') return true
   if (url.protocol === 'ws:') {
     const h = url.hostname
-    return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]'
+    return isPrivateRelayHost(h)
   }
   return false
+}
+
+function isPrivateRelayHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  if (h === 'localhost' || h === '::1' || h === '[::1]') return true
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h)
+  if (ipv4) {
+    const octets = ipv4.slice(1).map(Number)
+    if (octets.some((part) => part > 255)) return false
+    const [a, b] = octets
+    return a === 10 || a === 127 || (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) || a === 192 && b === 168 ||
+      (a === 100 && b >= 64 && b <= 127)
+  }
+  const ipv6 = h.replace(/^\[|\]$/g, '')
+  return /^f[cd][0-9a-f]*:/i.test(ipv6) || /^fe[89ab][0-9a-f]*:/i.test(ipv6)
 }
 
 function isPairingOffer(value: unknown): value is PairingOffer {

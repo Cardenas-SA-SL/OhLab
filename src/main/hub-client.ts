@@ -5,10 +5,10 @@ import { HubClient } from '../core/hub/client'
 import type { ElectronPlatform } from './platform-electron'
 import { loadOrCreatePeerKeyPair } from './remote/peer-identity'
 import { connectRelayHost, killRelayHostsByPeerKey, type RelayHostSession } from './remote/relay-host'
-import { encodeOffer } from './remote/pairing'
+import { encodeHubConnectOffer } from './remote/pairing'
 import { loadApprovedDevices, saveApprovedDevices } from './remote/approved-devices'
 import { pinDevice } from './remote/approved-devices-core'
-import { hostname } from 'node:os'
+import { hostname, userInfo } from 'node:os'
 import { retainUntilDismissed } from './notifications'
 import { createRevoker } from './remote/revocation'
 
@@ -27,6 +27,14 @@ export interface MainHubClient {
   stop(): void
 }
 
+function localUserName(): string {
+  try {
+    return userInfo().username.trim()
+  } catch {
+    return ''
+  }
+}
+
 export function initHubClient(
   win: BrowserWindow,
   platform: ElectronPlatform,
@@ -35,6 +43,8 @@ export function initHubClient(
 ): MainHubClient {
   let client: HubClient | null = null
   let configuredUrl = ''
+  let configuredAccountName = ''
+  let syncTail: Promise<HubStatus> = Promise.resolve({ state: 'disabled' })
   const hosted = new Map<string, RelayHostSession>()
   const memberRevoker = createRevoker({
     load: loadApprovedDevices,
@@ -94,23 +104,34 @@ export function initHubClient(
     hosted.set(member.accountId, session)
   }
 
-  async function sync(): Promise<HubStatus> {
+  async function syncNow(): Promise<HubStatus> {
     const settings = getSettings()
     const url = settings.hubUrl.trim()
+    const accountName = settings.hubAccountName.trim() || localUserName()
     if (!url) {
       client?.stop()
       client = null
       configuredUrl = ''
+      configuredAccountName = ''
       updateStatus({ state: 'disabled' })
       return status
     }
-    if (client && configuredUrl === url && status.state === 'connected') return status
+    if (!accountName) {
+      client?.stop()
+      client = null
+      configuredUrl = ''
+      configuredAccountName = ''
+      updateStatus({ state: 'error', error: 'Enter an account name before connecting to the Hub.' })
+      return status
+    }
+    if (client && configuredUrl === url && configuredAccountName === accountName && status.state === 'connected') return status
     client?.stop()
     configuredUrl = url
+    configuredAccountName = accountName
     const keys = await loadOrCreatePeerKeyPair()
     client = new HubClient({
       hubUrl: url,
-      accountName: settings.hubAccountName,
+      accountName,
       machineLabel: hostname(),
       keys,
       onStatus: updateStatus,
@@ -141,6 +162,12 @@ export function initHubClient(
       }
     })
     return client.start()
+  }
+
+  function sync(): Promise<HubStatus> {
+    const run = syncTail.then(syncNow, syncNow)
+    syncTail = run.catch(() => status)
+    return run
   }
 
   const needClient = async (): Promise<HubClient> => {
@@ -184,7 +211,7 @@ export function initHubClient(
     )
     const keys = await loadOrCreatePeerKeyPair()
     return {
-      offer: encodeOffer({ relayEndpoint: result.relayUrl, pairingToken: result.pairingToken, hostPublicKeyB64: result.toPublicKeyB64 }),
+      offer: encodeHubConnectOffer(result),
       clientPublicKeyB64: Buffer.from(keys.publicKey).toString('base64')
     }
   })
@@ -194,6 +221,8 @@ export function initHubClient(
     stop() {
       client?.stop()
       client = null
+      configuredUrl = ''
+      configuredAccountName = ''
       for (const session of hosted.values()) session.close()
       hosted.clear()
     }

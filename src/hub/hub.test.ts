@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { promises as fs } from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import nacl from 'tweetnacl'
@@ -55,12 +56,68 @@ async function account(base: string, name: string): Promise<{ token: string; acc
   return { token: auth.sessionToken, accountId: auth.account.accountId, keys }
 }
 
-function opened(url: string): Promise<WebSocket> {
+/** A raw HTTP call with an explicit `Host` header. `fetch` cannot model a caller that dialled the
+ *  Hub through another address: Host is a forbidden request header in the Fetch spec and undici
+ *  silently drops it, so the Hub would only ever see 127.0.0.1. */
+function request(base: string, route: string, init: { method: string; token?: string; host?: string; body?: unknown }): Promise<{ status: number; body: Record<string, unknown> }> {
+  const url = new URL(`${base}${route}`)
+  const payload = init.body === undefined ? undefined : JSON.stringify(init.body)
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url)
+    const req = http.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      method: init.method,
+      headers: {
+        ...(payload === undefined ? {} : { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }),
+        ...(init.token ? { authorization: `Bearer ${init.token}` } : {}),
+        ...(init.host === undefined ? {} : { host: init.host })
+      }
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) as Record<string, unknown> : {} })
+      })
+      res.on('error', reject)
+    })
+    req.on('error', reject)
+    req.end(payload)
+  })
+}
+
+function opened(url: string, headers?: Record<string, string>): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, { headers })
     ws.once('open', () => resolve(ws))
     ws.once('error', reject)
   })
+}
+
+/** Collect the `session-request` events a member's directory socket receives, in order, and hand
+ *  them out one at a time with a bounded wait, so a missing push fails with its own message. */
+function sessionRequests(socket: WebSocket): () => Promise<Record<string, unknown>> {
+  const queue: Record<string, unknown>[] = []
+  const waiters: Array<(event: Record<string, unknown>) => void> = []
+  socket.on('message', (raw) => {
+    const event = JSON.parse(raw.toString()) as Record<string, unknown>
+    if (event.type !== 'session-request') return
+    const waiter = waiters.shift()
+    if (waiter) waiter(event)
+    else queue.push(event)
+  })
+  return () => {
+    const queued = queue.shift()
+    if (queued) return Promise.resolve(queued)
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no session-request reached the member within 2 s')), 2000)
+      waiters.push((event) => {
+        clearTimeout(timer)
+        resolve(event)
+      })
+    })
+  }
 }
 
 describe('OhLab Hub', () => {
@@ -115,17 +172,36 @@ describe('OhLab Hub', () => {
     let members = await fetch(`${base}/v1/projects/${project.projectId}/members`, { headers: { authorization: `Bearer ${owner.token}` } }).then((r) => r.json()) as Array<{ accountId: string; status: string; online: boolean }>
     expect(members.find((item) => item.accountId === member.accountId)?.status).toBe('pending')
     await post(base, `/v1/projects/${project.projectId}/members/${member.accountId}/approve`, {}, owner.token)
-    const memberDir = await opened(`${ws}/dir?session=${encodeURIComponent(member.token)}`)
+    // The member reaches the Hub through its LAN address; the `/dir` upgrade carries that Host.
+    const port = new URL(base).port
+    const memberReachableHost = `192.168.1.128:${port}`
+    const memberDir = await opened(`${ws}/dir?session=${encodeURIComponent(member.token)}`, { host: memberReachableHost })
+    const nextSessionRequest = sessionRequests(memberDir)
     await new Promise((resolve) => setTimeout(resolve, 10))
     members = await fetch(`${base}/v1/projects/${project.projectId}/members`, { headers: { authorization: `Bearer ${owner.token}` } }).then((r) => r.json()) as typeof members
     expect(members.find((item) => item.accountId === member.accountId)?.online).toBe(true)
-    const request = new Promise<Record<string, unknown>>((resolve) => memberDir.on('message', (raw) => {
-      const event = JSON.parse(raw.toString()) as Record<string, unknown>
-      if (event.type === 'session-request') resolve(event)
-    }))
-    const connection = await post<{ pairingToken: string }>(base, `/v1/projects/${project.projectId}/connect`, { toAccountId: member.accountId, machineLabel: "Owner's Mac" }, owner.token)
+
+    // Each party is told the relay through the address IT dialled. The owner on the Hub's own
+    // machine (an embedded Hub) dials loopback and is answered with loopback; the member is pushed
+    // the LAN host its own socket came in on.
+    const connection = await post<{ pairingToken: string; relayUrl: string }>(base, `/v1/projects/${project.projectId}/connect`, { toAccountId: member.accountId, machineLabel: "Owner's Mac" }, owner.token)
     expect(connection.pairingToken).toHaveLength(43)
-    expect(await request).toMatchObject({ fromAccountId: owner.accountId, machineLabel: "Owner's Mac" })
+    expect(connection.relayUrl).toBe(`ws://127.0.0.1:${port}/relay`)
+    expect(await nextSessionRequest()).toMatchObject({
+      fromAccountId: owner.accountId,
+      machineLabel: "Owner's Mac",
+      pairingToken: connection.pairingToken,
+      relayUrl: `ws://${memberReachableHost}/relay`
+    })
+    // The same owner reaching the Hub through another interface gets THAT address back, and the
+    // member's push is unaffected by how the caller dialled.
+    const ownerReachableHost = `10.0.0.7:${port}`
+    const lanConnection = await request(base, `/v1/projects/${project.projectId}/connect`, {
+      method: 'POST', token: owner.token, host: ownerReachableHost, body: { toAccountId: member.accountId, machineLabel: "Owner's Mac" }
+    })
+    expect(lanConnection.status).toBe(201)
+    expect(lanConnection.body.relayUrl).toBe(`ws://${ownerReachableHost}/relay`)
+    expect(await nextSessionRequest()).toMatchObject({ pairingToken: lanConnection.body.pairingToken, relayUrl: `ws://${memberReachableHost}/relay` })
     const unauthorized = await fetch(`${base}/v1/admin/accounts`)
     expect(unauthorized.status).toBe(401)
     const accounts = await fetch(`${base}/v1/admin/accounts`, { headers: { authorization: 'Bearer admin-secret' } }).then((r) => r.json()) as unknown[]

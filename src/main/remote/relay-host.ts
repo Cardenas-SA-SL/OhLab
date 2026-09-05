@@ -28,7 +28,7 @@ import type { KeyPair } from './e2ee'
 import type { ElectronPlatform } from '../platform-electron'
 import { registerPeerSink, unregisterPeerSink } from '../peer-registry'
 import { allocateRelayClientId, presenceHub } from '../../core/presence/hub'
-import { E_UNAUTHORIZED, parseRpcMessage, type RpcErr, type RpcOk } from '../../shared/rpc'
+import { E_UNAUTHORIZED, parseRpcMessage, type RpcCast, type RpcErr, type RpcOk, type RpcRequest } from '../../shared/rpc'
 import { IPC } from '../../shared/ipc'
 import { scopeWorkspaceToProject } from '../../shared/relay-workspace-scope'
 import type { Workspace } from '../../shared/types'
@@ -100,10 +100,21 @@ export function connectRelayHost(opts: ConnectRelayHostOptions): RelayHostSessio
   // below this connection's own contribution (an unbalanced guest unsubscribe is ignored).
   const boardLogSubs = new Map<string, number>()
 
+  // Peer frames that arrived after BOTH humans confirmed but before `open()` registered the sink.
+  // The trust gate persists the peer's pin (a disk round trip) BEFORE it fires onOpen, and a guest
+  // whose own gate settled first sends its bootstrap `workspace:load` inside that window; answering
+  // it with E_UNAUTHORIZED stranded the guest's project tab on "Awaiting mutual approval" for a peer
+  // this human had already approved. They are held here and served, in arrival order, the moment
+  // the sink exists. This never serves anything before approval: the queue only fills once
+  // `gate.isOpen()` (both confirmed) is already true, and a genuinely unapproved peer is still
+  // refused below.
+  const held: Array<RpcRequest | RpcCast> = []
+
   /** The ONE teardown, mirroring src/server/ws.ts's close path exactly: `unregisterPeerSink` IS the
    *  three steps (presenceHub.leave → onPeerGone → PtyManager.dropClient → registry prune). Do NOT
    *  re-implement them here, and do NOT call `wirePeerRegistry` — it is wired once at boot. */
   const detach = (): void => {
+    held.length = 0
     if (clientId === null) return
     // Release any board-log watches this connection still holds — a dropped guest tab never sends the
     // balancing unsubscribe, so replay one per outstanding count before the client id is gone.
@@ -170,6 +181,8 @@ export function connectRelayHost(opts: ConnectRelayHostOptions): RelayHostSessio
     presenceHub.join(id, 'desktop')
     clientId = id
     opts.onOpen(session)
+    // What the peer sent while the pin was being persisted (see `held`), in the order it arrived.
+    for (const m of held.splice(0)) serve(m)
   }
 
   /** UX scope, NOT a trust boundary: for the ONE `workspace:load` method, when this hosting session
@@ -233,6 +246,48 @@ export function connectRelayHost(opts: ConnectRelayHostOptions): RelayHostSessio
     error: { code: 'E_FORBIDDEN', message: 'GitHub Issues project is outside this relay session' }
   })
 
+  /** Route one approved peer frame into the core: a req is dispatched (and its response scoped),
+   *  a cast is cast. Only ever called with the sink registered (`clientId` set). */
+  const serve = (m: RpcRequest | RpcCast): void => {
+    const id = clientId
+    if (id === null || closed) return
+    if (m.t === 'req') {
+      if (githubIssuesOutOfScope(m.method, m.args)) {
+        socket.sendTunnelText(JSON.stringify(githubIssuesRefusal(m.id)))
+        return
+      }
+      // Board-log read/append naming a project outside this session's scope: refuse WITHOUT
+      // dispatching (the host router never resolves it), degrading exactly as an unknown project.
+      if (
+        (m.method === IPC.boardLogAppend || m.method === IPC.boardLogRead) &&
+        boardLogOutOfScope(m.args[0])
+      ) {
+        socket.sendTunnelText(JSON.stringify(boardLogRefusal(m.method, m.id)))
+        return
+      }
+      void opts.platform
+        .dispatch(id, m)
+        .then((res) => socket.sendTunnelText(JSON.stringify(scopeResponse(m.method, res))))
+      return
+    }
+    if (githubIssuesOutOfScope(m.method, m.args)) return
+    // Board-log subscribe/unsubscribe: scope-jail out-of-scope projects, and track this
+    // connection's net per-project count so a dropped guest's watch is released in detach().
+    if (m.method === IPC.boardLogSubscribe || m.method === IPC.boardLogUnsubscribe) {
+      const projectId = m.args[0]
+      if (typeof projectId !== 'string' || boardLogOutOfScope(projectId)) return
+      if (m.method === IPC.boardLogSubscribe) {
+        boardLogSubs.set(projectId, (boardLogSubs.get(projectId) ?? 0) + 1)
+      } else {
+        const cur = boardLogSubs.get(projectId) ?? 0
+        if (cur <= 0) return // this connection holds no such watch — never decrement the shared count
+        if (cur === 1) boardLogSubs.delete(projectId)
+        else boardLogSubs.set(projectId, cur - 1)
+      }
+    }
+    opts.platform.cast(id, m.method, m.args)
+  }
+
   const socket = connectRelay({
     url: opts.url,
     token: opts.token,
@@ -271,7 +326,15 @@ export function connectRelayHost(opts: ConnectRelayHostOptions): RelayHostSessio
       if (gate?.onTunnelText(json)) return
       const m = parseRpcMessage(json)
       if (!m) return
+      // res/ev from a peer are ignored (mirrors src/server/ws.ts).
+      if (m.t !== 'req' && m.t !== 'cast') return
       if (clientId === null) {
+        // Both humans confirmed and the sink is on its way (the gate is persisting the pin): hold
+        // the frame for open() rather than refusing a peer this human already approved.
+        if (gate?.isOpen() && !closed) {
+          held.push(m)
+          return
+        }
         // Not mutually approved: refuse — but ANSWER, or the peer's `await` would hang forever.
         if (m.t === 'req') {
           socket.sendTunnelText(
@@ -285,43 +348,7 @@ export function connectRelayHost(opts: ConnectRelayHostOptions): RelayHostSessio
         }
         return
       }
-      if (m.t === 'req') {
-        if (githubIssuesOutOfScope(m.method, m.args)) {
-          socket.sendTunnelText(JSON.stringify(githubIssuesRefusal(m.id)))
-          return
-        }
-        // Board-log read/append naming a project outside this session's scope: refuse WITHOUT
-        // dispatching (the host router never resolves it), degrading exactly as an unknown project.
-        if (
-          (m.method === IPC.boardLogAppend || m.method === IPC.boardLogRead) &&
-          boardLogOutOfScope(m.args[0])
-        ) {
-          socket.sendTunnelText(JSON.stringify(boardLogRefusal(m.method, m.id)))
-          return
-        }
-        const id = clientId
-        void opts.platform
-          .dispatch(id, m)
-          .then((res) => socket.sendTunnelText(JSON.stringify(scopeResponse(m.method, res))))
-      } else if (m.t === 'cast') {
-        if (githubIssuesOutOfScope(m.method, m.args)) return
-        // Board-log subscribe/unsubscribe: scope-jail out-of-scope projects, and track this
-        // connection's net per-project count so a dropped guest's watch is released in detach().
-        if (m.method === IPC.boardLogSubscribe || m.method === IPC.boardLogUnsubscribe) {
-          const projectId = m.args[0]
-          if (typeof projectId !== 'string' || boardLogOutOfScope(projectId)) return
-          if (m.method === IPC.boardLogSubscribe) {
-            boardLogSubs.set(projectId, (boardLogSubs.get(projectId) ?? 0) + 1)
-          } else {
-            const cur = boardLogSubs.get(projectId) ?? 0
-            if (cur <= 0) return // this connection holds no such watch — never decrement the shared count
-            if (cur === 1) boardLogSubs.delete(projectId)
-            else boardLogSubs.set(projectId, cur - 1)
-          }
-        }
-        opts.platform.cast(clientId, m.method, m.args)
-      }
-      // res/ev from a peer are ignored (mirrors src/server/ws.ts).
+      serve(m)
     },
     onClose: () => {
       // The peer is GONE — the same state a closed browser tab leaves the core in.

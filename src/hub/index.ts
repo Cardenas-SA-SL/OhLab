@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
-import { HubDirectory } from './directory'
+import { HubDirectory, type DirectoryLink } from './directory'
 import { createRelay } from './relay'
 import { HubTokenStore } from './tokens'
 
@@ -67,10 +67,23 @@ function routeUrl(req: IncomingMessage): URL {
   return new URL(req.url ?? '/', 'http://hub.invalid')
 }
 
+/** The relay URL to advertise to the party that sent `req`: the Hub as THAT party reached it (its
+ *  Host, honouring a TLS-terminating proxy's x-forwarded-proto), never an address chosen for it by
+ *  someone else. Loopback is only ever advertised back to a loopback caller. */
 function relayUrl(req: IncomingMessage): string {
   const forwarded = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0].trim()
   const secure = forwarded ? forwarded === 'https' : Boolean((req.socket as { encrypted?: boolean }).encrypted)
-  return `${secure ? 'wss' : 'ws'}://${req.headers.host ?? '127.0.0.1'}/relay`
+  const authority = req.headers.host?.trim()
+  if (!authority) throw new Error('request Host is required to advertise the relay')
+  const advertised = new URL(`${secure ? 'wss' : 'ws'}://${authority}/relay`)
+  const remote = req.socket.remoteAddress ?? ''
+  const remoteIsLoopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+  const advertisedIsLoopback = advertised.hostname === '127.0.0.1' || advertised.hostname === 'localhost' ||
+    advertised.hostname === '::1' || advertised.hostname === '[::1]'
+  if (!remoteIsLoopback && advertisedIsLoopback) {
+    throw new Error('request Host must be reachable by the remote member')
+  }
+  return advertised.toString()
 }
 
 export function createHub(config: HubConfig): Hub {
@@ -220,18 +233,22 @@ export function createHub(config: HubConfig): Hub {
           .slice(0, 80) || `${account!.name}'s computer`
         const peers = directory.approvedPeers(projectId, account!.accountId, toAccountId)
         if (!directory.isOnline(toAccountId)) return send(res, 409, { error: 'member is offline' })
+        // Each party gets the relay through the address IT dialled the Hub on: the caller's response
+        // carries the Host of this request, the target's `session-request` the Host of its own `/dir`
+        // socket. An embedded Hub is loopback to its owner and a LAN/Tailscale IP to everyone else.
+        const callerRelayUrl = relayUrl(req)
         const item = await tokens.mintPair()
-        const event = {
+        const delivered = directory.push(toAccountId, (link) => ({
           type: 'session-request' as const,
           projectId,
           fromAccountId: account!.accountId,
           fromPublicKeyB64: peers.from.publicKeyB64,
           pairingToken: item.token,
-          relayUrl: relayUrl(req),
+          relayUrl: link.relayUrl,
           machineLabel
-        }
-        if (!directory.push(toAccountId, event)) return send(res, 409, { error: 'member is offline' })
-        return send(res, 201, { pairingId: item.pairingId, pairingToken: item.token, exp: expSeconds(item.exp), relayUrl: relayUrl(req), toPublicKeyB64: peers.to.publicKeyB64 })
+        }))
+        if (!delivered) return send(res, 409, { error: 'member is offline' })
+        return send(res, 201, { pairingId: item.pairingId, pairingToken: item.token, exp: expSeconds(item.exp), relayUrl: callerRelayUrl, toPublicKeyB64: peers.to.publicKeyB64 })
       }
 
       send(res, 404, { error: 'not found' })
@@ -254,8 +271,20 @@ export function createHub(config: HubConfig): Hub {
         directoryWss.handleUpgrade(req, socket, head, (ws) => ws.close(4401, 'invalid session'))
         return
       }
+      // The relay URL this member can reach is fixed by how it dialled the Hub; resolve it now so a
+      // later `session-request` is shaped for this socket, and refuse a socket that cannot be given
+      // one (a non-loopback member behind a proxy that rewrote Host to loopback) instead of brokering
+      // sessions it could never join.
+      let link: DirectoryLink
+      try {
+        link = { relayUrl: relayUrl(req) }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'request Host cannot be advertised'
+        directoryWss.handleUpgrade(req, socket, head, (ws) => ws.close(4400, reason))
+        return
+      }
       directoryWss.handleUpgrade(req, socket, head, (ws) => {
-        directory.attach(account.accountId, ws)
+        directory.attach(account.accountId, ws, link)
         ws.send(JSON.stringify({ type: 'connected', accountId: account.accountId }))
       })
       return

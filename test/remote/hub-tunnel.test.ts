@@ -3,14 +3,30 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createHub } from '../../src/hub'
-import { connectRelayHost } from '../../src/main/remote/relay-host'
+import { connectRelayHost, killRelayHostsByPeerKey } from '../../src/main/remote/relay-host'
 import { connectRelayClient } from '../../src/main/remote/relay-client'
 import { genKeyPair, publicKeyToB64 } from '../../src/main/remote/e2ee'
 import { initPlatform, resetPlatformForTests } from '../../src/core/platform'
 import { peerRegistry } from '../../src/main/peer-registry'
 import { IPC } from '../../src/shared/ipc'
 import { HubClient } from '../../src/core/hub/client'
-import type { HubEvent, HubProject, Workspace } from '../../src/shared/types'
+import type { HubEvent, Workspace } from '../../src/shared/types'
+import type { RpcErr, RpcOk } from '../../src/shared/rpc'
+import { decodeOffer, encodeHubConnectOffer } from '../../src/main/remote/pairing'
+
+/** Every step of the team flow is a network round trip; bound each one and name it, so a stuck
+ *  step fails as itself instead of as the test's anonymous 30 s timeout. */
+const STEP_MS = 5_000
+
+function within<T>(what: string, ms: number, promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} did not happen within ${ms} ms`)), ms)
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (error) => { clearTimeout(timer); reject(error) }
+    )
+  })
+}
 
 describe('real Hub tunnel compatibility', () => {
   it.skipIf(process.env.CODEX_SANDBOX_NETWORK_DISABLED === '1')('bridges the existing E2EE host and client unchanged', async () => {
@@ -70,58 +86,60 @@ describe('real Hub tunnel compatibility', () => {
     const guestEvents: HubEvent[] = []
     const ownerKeys = genKeyPair()
     const guestKeys = genKeyPair()
+    let owner: HubClient | null = null
+    let guest: HubClient | null = null
     let hostSession: ReturnType<typeof connectRelayHost> | null = null
     let guestSession: ReturnType<typeof connectRelayClient> | null = null
     try {
-      const address = await hub.listen()
+      const address = await within('the Hub listening', STEP_MS, hub.listen())
       const hubUrl = `http://127.0.0.1:${address.port}`
-      const owner = new HubClient({
+      owner = new HubClient({
         hubUrl,
         accountName: 'Sebastián',
         machineLabel: "Sebastián's Mac",
         keys: ownerKeys,
         onEvent: (event) => ownerEvents.push(event)
       })
-      const guest = new HubClient({
+      guest = new HubClient({
         hubUrl,
         accountName: 'Jorge',
         machineLabel: "Jorge's Mac",
         keys: guestKeys,
         onEvent: (event) => guestEvents.push(event)
       })
-      await owner.start()
-      await guest.start()
+      expect(await within('the owner joining the Hub', STEP_MS, owner.start())).toMatchObject({ state: 'connected' })
+      expect(await within('the guest joining the Hub', STEP_MS, guest.start())).toMatchObject({ state: 'connected' })
 
+      // Share, join with the invite code, approve.
       const shared = await owner.createProject('Brothers', 'owner-project')
       await guest.joinProject(shared.inviteCode)
-      await vi.waitFor(() => expect(ownerEvents).toContainEqual(expect.objectContaining({ type: 'member-joined', projectId: shared.projectId })))
+      await vi.waitFor(() => expect(ownerEvents).toContainEqual(expect.objectContaining({ type: 'member-joined', projectId: shared.projectId })), { timeout: STEP_MS })
       const pending = (await owner.listProjects())[0].members!.find((member) => member.role !== 'owner')!
       await owner.approveMember(shared.projectId, pending.accountId)
-      await vi.waitFor(() => expect(guestEvents).toContainEqual(expect.objectContaining({ type: 'member-approved', projectId: shared.projectId })))
+      await vi.waitFor(() => expect(guestEvents).toContainEqual(expect.objectContaining({ type: 'member-approved', projectId: shared.projectId })), { timeout: STEP_MS })
 
-      const onlineOnBothSides = async (): Promise<[HubProject, HubProject]> => {
-        const ownerProject = (await owner.listProjects())[0]
-        const guestProject = (await guest.listProjects())[0]
-        return [ownerProject, guestProject]
-      }
+      // Presence: the guest reads as online, with its machine label, on both sides.
       await vi.waitFor(async () => {
-        const [ownerProject, guestProject] = await onlineOnBothSides()
-        expect(ownerProject.members?.find((member) => member.accountId === pending.accountId)).toMatchObject({ online: true, machineLabel: "Jorge's Mac" })
-        expect(guestProject.members?.find((member) => member.accountId === pending.accountId)).toMatchObject({ online: true, machineLabel: "Jorge's Mac" })
-      })
+        const [ownerProject, guestProject] = await Promise.all([owner!.listProjects(), guest!.listProjects()])
+        expect(ownerProject[0].members?.find((member) => member.accountId === pending.accountId)).toMatchObject({ online: true, machineLabel: "Jorge's Mac" })
+        expect(guestProject[0].members?.find((member) => member.accountId === pending.accountId)).toMatchObject({ online: true, machineLabel: "Jorge's Mac" })
+      }, { timeout: STEP_MS })
 
-      const requestPromise = new Promise<Extract<HubEvent, { type: 'session-request' }>>((resolve) => {
-        const poll = (): void => {
-          const request = ownerEvents.find((event): event is Extract<HubEvent, { type: 'session-request' }> => event.type === 'session-request')
-          if (request) resolve(request)
-          else setTimeout(poll, 5)
-        }
-        poll()
-      })
+      // The guest asks for a session; the Hub brokers it and pushes the request to the owner.
       const brokered = await guest.connectMember(shared.projectId, (await owner.listProjects())[0].ownerAccountId, "Jorge's Mac")
-      const request = await requestPromise
+      await vi.waitFor(() => expect(ownerEvents.some((event) => event.type === 'session-request')).toBe(true), { timeout: STEP_MS })
+      const request = ownerEvents.find((event): event is Extract<HubEvent, { type: 'session-request' }> => event.type === 'session-request')!
       expect(request.pairingToken).toBe(brokered.pairingToken)
+      const offer = encodeHubConnectOffer(brokered)
+      const decoded = decodeOffer(offer)
+      expect(decoded).toEqual({
+        relayEndpoint: brokered.relayUrl,
+        pairingToken: brokered.pairingToken,
+        hostPublicKeyB64: brokered.toPublicKeyB64
+      })
 
+      // The owner auto-hosts (what acceptSessionRequest does), the guest dials the decoded offer,
+      // and its first request over the tunnel is the project bootstrap.
       const workspace: Workspace = {
         version: 2,
         activeProjectId: shared.projectId,
@@ -141,8 +159,8 @@ describe('real Hub tunnel compatibility', () => {
         }),
         cast: vi.fn()
       }
-      let bootstrapResolve!: (workspace: Workspace) => void
-      const bootstrap = new Promise<Workspace>((resolve) => { bootstrapResolve = resolve })
+      let settleBootstrap!: { resolve: (workspace: Workspace) => void; reject: (error: Error) => void }
+      const bootstrap = new Promise<Workspace>((resolve, reject) => { settleBootstrap = { resolve, reject } })
       const closed = vi.fn()
       const opened = new Promise<void>((resolve) => {
         hostSession = connectRelayHost({
@@ -157,35 +175,41 @@ describe('real Hub tunnel compatibility', () => {
           onClose: () => {}
         })
         guestSession = connectRelayClient({
-          url: brokered.relayUrl,
-          token: brokered.pairingToken,
-          hostKeyB64: brokered.toPublicKeyB64,
+          url: decoded!.relayEndpoint,
+          token: decoded!.pairingToken,
+          hostKeyB64: decoded!.hostPublicKeyB64,
           ourKeys: guestKeys,
           onSas: (session) => session.confirm(),
           onApproved: (session) => session.send(JSON.stringify({ t: 'req', id: 1, method: IPC.workspaceLoad, args: [] })),
           onFrame: (frame) => {
-            const response = JSON.parse(frame) as { id: number; ok: boolean; result: Workspace }
-            if (response.id === 1 && response.ok) bootstrapResolve(response.result)
+            const response = JSON.parse(frame) as RpcOk | RpcErr
+            if (response.t !== 'res' || response.id !== 1) return
+            if (response.ok) settleBootstrap.resolve(response.result as Workspace)
+            else settleBootstrap.reject(new Error(`the host refused workspace:load over the relay: ${response.error.code} ${response.error.message}`))
           },
           onPtyData: () => {},
           onClose: closed
         })
       })
-      await opened
-      await expect(bootstrap).resolves.toMatchObject({ projects: [{ id: shared.projectId, name: 'Brothers' }] })
+      await within('the owner opening the hosted session', STEP_MS, opened)
+      await expect(within('the guest receiving its project bootstrap', STEP_MS, bootstrap)).resolves.toMatchObject({ projects: [{ id: shared.projectId, name: 'Brothers' }] })
+      expect(hostSession!.clientId()).not.toBeNull()
 
+      // Removal: the owner drops the member; the desktop's revoker then cuts every live session
+      // with that peer key (hub-client's memberRevoker onRevoke), and the guest's session closes.
       await owner.removeMember(shared.projectId, pending.accountId)
-      hostSession.close()
-      await vi.waitFor(() => expect(closed).toHaveBeenCalled())
+      killRelayHostsByPeerKey(publicKeyToB64(guestKeys.publicKey))
+      await vi.waitFor(() => expect(closed).toHaveBeenCalled(), { timeout: STEP_MS })
+      expect(hostSession!.clientId()).toBeNull()
       expect(await guest.listProjects()).toEqual([])
-      owner.stop()
-      guest.stop()
     } finally {
+      owner?.stop()
+      guest?.stop()
       guestSession?.close()
       hostSession?.close()
       resetPlatformForTests()
       await hub.close()
       await fs.rm(dataDir, { recursive: true, force: true })
     }
-  }, 20_000)
+  }, 30_000)
 })

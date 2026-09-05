@@ -50,14 +50,20 @@ export class HubClient {
   async start(): Promise<HubStatus> {
     this.stopped = false
     if (!normalizeHubUrl(this.options.hubUrl)) return this.setStatus({ state: 'disabled' })
+    if (!this.options.accountName.trim()) {
+      return this.setStatus({ state: 'error', error: 'Enter an account name before connecting to the Hub.' })
+    }
     this.setStatus({ state: 'connecting' })
     try {
       const auth = await this.authenticate()
+      if (this.stopped) return this.current
       this.session = auth.sessionToken
       this.accountId = auth.account.accountId
-      this.openSocket()
+      await this.openSocket()
+      if (this.stopped) return this.current
       return this.setStatus({ state: 'connected', accountId: this.accountId, accountName: auth.account.name })
     } catch (error) {
+      if (this.stopped) return this.current
       const message = error instanceof Error ? error.message : 'Could not connect to the Hub'
       this.scheduleReconnect()
       return this.setStatus({ state: 'error', error: message })
@@ -105,6 +111,8 @@ export class HubClient {
   }
 
   private async authenticate(): Promise<{ account: { accountId: string; name: string }; sessionToken: string }> {
+    const accountName = this.options.accountName.trim()
+    if (!accountName) throw new Error('Enter an account name before connecting to the Hub.')
     const publicKeyB64 = Buffer.from(this.options.keys.publicKey).toString('base64')
     const challenge = await this.requestUnauthed<{ challengeId: string; hubPublicKeyB64: string; nonceB64: string; boxB64: string }>('POST', '/v1/accounts/challenge', { publicKeyB64 })
     const plain = nacl.box.open(
@@ -115,7 +123,7 @@ export class HubClient {
     )
     if (!plain) throw new Error('Hub key challenge could not be opened')
     return this.requestUnauthed('POST', '/v1/accounts/register', {
-      name: this.options.accountName.trim() || 'Someone',
+      name: accountName,
       publicKeyB64,
       challengeId: challenge.challengeId,
       proofB64: Buffer.from(plain).toString('base64'),
@@ -155,36 +163,46 @@ export class HubClient {
     return value as T
   }
 
-  private openSocket(): void {
-    if (this.stopped || !this.session) return
+  private openSocket(): Promise<void> {
+    if (this.stopped || !this.session) return Promise.reject(new Error('Hub connection was stopped'))
     const make = this.options.webSocket ?? ((url: string): WsLike => {
       const WS = require('ws') as typeof import('ws')
       return new WS.WebSocket(url) as WsLike
     })
     const socket = make(hubDirectoryUrl(this.options.hubUrl, this.session))
     this.socket = socket
-    socket.on('open', () => { this.reconnectAttempt = 0 })
-    socket.on('message', (raw: unknown) => {
-      try {
-        const text = typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8')
-        const event = JSON.parse(text) as HubEvent | { type: 'connected' }
-        if (event.type !== 'connected') this.options.onEvent?.(event)
-      } catch {
-        // Ignore malformed directory events. They never enter the tunnel protocol.
+    return new Promise<void>((resolve, reject) => {
+      let opened = false
+      let closedOnce = false
+      socket.on('open', () => {
+        if (this.socket !== socket || this.stopped) return
+        opened = true
+        this.reconnectAttempt = 0
+        resolve()
+      })
+      socket.on('message', (raw: unknown) => {
+        try {
+          const text = typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8')
+          const event = JSON.parse(text) as HubEvent | { type: 'connected' }
+          if (event.type !== 'connected') this.options.onEvent?.(event)
+        } catch {
+          // Ignore malformed directory events. They never enter the tunnel protocol.
+        }
+      })
+      const closed = (): void => {
+        if (closedOnce) return
+        closedOnce = true
+        if (this.socket === socket) this.socket = null
+        const error = new Error('Hub directory connection closed')
+        if (!opened) reject(error)
+        if (!this.stopped) {
+          this.setStatus({ state: 'error', accountId: this.accountId, error: error.message })
+          this.scheduleReconnect()
+        }
       }
+      socket.on('close', closed)
+      socket.on('error', closed)
     })
-    const closed = (): void => {
-      if (this.socket !== socket) return
-      this.socket = null
-      if (!this.stopped) {
-        this.setStatus({ state: 'error', accountId: this.accountId, error: 'Hub directory connection closed' })
-        this.scheduleReconnect()
-      }
-    }
-    let fired = false
-    const once = (): void => { if (!fired) { fired = true; closed() } }
-    socket.on('close', once)
-    socket.on('error', once)
   }
 
   private scheduleReconnect(): void {

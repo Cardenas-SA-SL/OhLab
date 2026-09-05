@@ -44,6 +44,14 @@ export type DirectoryEvent =
       machineLabel: string
     }
 
+/** What the Hub knows about ONE directory socket: the relay URL as seen from that socket's own
+ *  side. Every member dials the Hub through its own address (loopback on the machine that embeds
+ *  it, a LAN or Tailscale IP from elsewhere), so a session brokered to a member must advertise the
+ *  relay through the authority THAT member reached the Hub on, never the one the caller used. */
+export interface DirectoryLink {
+  relayUrl: string
+}
+
 interface DirectoryFile {
   accounts: Account[]
   projects: SharedProject[]
@@ -77,7 +85,7 @@ export class HubDirectory {
   private projects = new Map<string, SharedProject>()
   private challenges = new Map<string, Challenge>()
   private sessions = new Map<string, { accountId: string; exp: number }>()
-  private sockets = new Map<string, Set<WebSocket>>()
+  private sockets = new Map<string, Map<WebSocket, DirectoryLink>>()
   private saveTail: Promise<void> = Promise.resolve()
 
   constructor(dataDir: string, private readonly now: () => number = Date.now) {
@@ -140,17 +148,25 @@ export class HubDirectory {
     ) {
       throw new Error('invalid or expired challenge proof')
     }
+    const name = input.name?.trim()
+    const machineLabel = input.machineLabel?.trim().slice(0, 80)
     let account = [...this.accounts.values()].find((item) => item.publicKeyB64 === input.publicKeyB64)
     if (!account) {
-      const name = input.name?.trim()
       if (!name) throw new Error('name is required for registration')
-      account = { accountId: randomUUID(), name, publicKeyB64: input.publicKeyB64, createdAt: this.now(), machineLabel: input.machineLabel?.trim().slice(0, 80) }
+      account = { accountId: randomUUID(), name, publicKeyB64: input.publicKeyB64, createdAt: this.now(), machineLabel }
       this.accounts.set(account.accountId, account)
       await this.save()
-    } else if ((input.name?.trim() && account.name !== input.name.trim()) || (input.machineLabel?.trim() && account.machineLabel !== input.machineLabel.trim())) {
-      if (input.name?.trim()) account.name = input.name.trim()
-      if (input.machineLabel?.trim()) account.machineLabel = input.machineLabel.trim().slice(0, 80)
-      await this.save()
+    } else {
+      let changed = false
+      if (name && account.name !== name) {
+        account.name = name
+        changed = true
+      }
+      if (machineLabel && account.machineLabel !== machineLabel) {
+        account.machineLabel = machineLabel
+        changed = true
+      }
+      if (changed) await this.save()
     }
     const sessionToken = opaque()
     const exp = this.now() + SESSION_TTL_MS
@@ -250,28 +266,29 @@ export class HubDirectory {
     return { project, from, to }
   }
 
-  attach(accountId: string, ws: WebSocket): void {
+  attach(accountId: string, ws: WebSocket, link: DirectoryLink): void {
     const wasOnline = this.isOnline(accountId)
-    const set = this.sockets.get(accountId) ?? new Set<WebSocket>()
-    set.add(ws)
-    this.sockets.set(accountId, set)
+    const links = this.sockets.get(accountId) ?? new Map<WebSocket, DirectoryLink>()
+    links.set(ws, link)
+    this.sockets.set(accountId, links)
     if (!wasOnline) this.broadcastPresence(accountId, 'member-online')
     ws.on('close', () => {
-      set.delete(ws)
-      if (set.size === 0) {
+      links.delete(ws)
+      if (links.size === 0) {
         this.sockets.delete(accountId)
         this.broadcastPresence(accountId, 'member-offline')
       }
     })
   }
 
-  push(accountId: string, event: DirectoryEvent): boolean {
+  /** Deliver an event to every open socket of an account. Pass a function to shape the event per
+   *  socket (a `session-request` carries the relay URL reachable from THAT socket's side). */
+  push(accountId: string, event: DirectoryEvent | ((link: DirectoryLink) => DirectoryEvent)): boolean {
     let delivered = false
-    for (const ws of this.sockets.get(accountId) ?? []) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(event))
-        delivered = true
-      }
+    for (const [ws, link] of this.sockets.get(accountId) ?? []) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      ws.send(JSON.stringify(typeof event === 'function' ? event(link) : event))
+      delivered = true
     }
     return delivered
   }
@@ -294,7 +311,7 @@ export class HubDirectory {
       if (project.ownerAccountId === accountId) this.projects.delete(id)
       else project.members = project.members.filter((member) => member.accountId !== accountId)
     }
-    for (const ws of this.sockets.get(accountId) ?? []) ws.close(4401, 'account deleted')
+    for (const ws of this.sockets.get(accountId)?.keys() ?? []) ws.close(4401, 'account deleted')
     this.sockets.delete(accountId)
     await this.save()
   }

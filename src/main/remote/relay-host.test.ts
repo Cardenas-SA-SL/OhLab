@@ -51,9 +51,14 @@ vi.mock('../main-window', () => ({
 // The on-disk pin store, in memory (relay-trust's default load/save path).
 import { emptyApprovedDevices, type ApprovedDevices } from './approved-devices-core'
 let disk: ApprovedDevices = emptyApprovedDevices()
+/** When set, the host's pin write (relay-trust's default save) waits on it — that is the window
+ *  between "both humans confirmed" and "the peer is a client", which the hold-until-open test
+ *  below widens so the race a real disk produces is reproduced on purpose. */
+let pinWriteGate: Promise<void> | null = null
 vi.mock('./approved-devices', () => ({
   loadApprovedDevices: async () => disk,
   saveApprovedDevices: async (s: ApprovedDevices) => {
+    if (pinWriteGate) await pinWriteGate
     disk = s
   }
 }))
@@ -97,6 +102,8 @@ function openHostAgainstFakeRelay(opts?: {
   peerSendsTunnelText: (json: string) => void
   /** The relay drops the socket under the host (what a vanished peer looks like). */
   dropSocket: () => void
+  /** The OTHER human presses Confirm (its confirm rides the encrypted tunnel to the host). */
+  peerConfirms: () => void
   /** Both humans press Confirm; resolves once the peer is a platform client. */
   openMutually: () => Promise<void>
 } {
@@ -208,6 +215,7 @@ function openHostAgainstFakeRelay(opts?: {
       peerSocket.sendTunnelText(json)
     },
     dropSocket: () => hostOnClose?.(),
+    peerConfirms: () => peerGate!.confirmHere(),
     openMutually: async () => {
       session.confirm() // this human
       peerGate!.confirmHere() // the other human, over the ENCRYPTED tunnel
@@ -221,6 +229,7 @@ beforeEach(() => {
   h.sent = []
   h.clientIds = [1] // the main window (a webContents client)
   disk = emptyApprovedDevices()
+  pinWriteGate = null
   flow = []
   gone = []
   capture = 'CURRENT SCREEN'
@@ -512,6 +521,39 @@ describe('relay host — nothing is served before mutual approval', () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(s.session.clientId()).toBeNull()
     expect(peerRegistry().ids()).toEqual([])
+  })
+
+  it('a request sent after BOTH confirmed, while the pin is still being persisted, is HELD and served once open — never refused', async () => {
+    // The trust gate writes the peer's pin to disk BEFORE it fires onOpen. A guest whose own gate
+    // settled first sends its bootstrap request inside that window; it must land in the core once
+    // the sink exists, not come back as E_UNAUTHORIZED to a peer this human already approved.
+    platform.handle('fs:list', async (dir: string) => [`${dir}/a.ts`])
+    let releasePin!: () => void
+    pinWriteGate = new Promise<void>((resolve) => {
+      releasePin = resolve
+    })
+    const s = openHostAgainstFakeRelay()
+    const frames = (): Array<{ id?: number; ok?: boolean; result?: unknown; error?: { code: string } }> =>
+      s.textFrames.map((j) => JSON.parse(j))
+
+    // Only this human has confirmed: still unapproved, so a request is refused (not held).
+    s.session.confirm()
+    s.peerSendsTunnelText(JSON.stringify({ t: 'req', id: 1, method: 'fs:list', args: ['/early'] }))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(frames().find((m) => m.id === 1)).toMatchObject({ ok: false, error: { code: E_UNAUTHORIZED } })
+
+    // The peer's confirm lands: both agreed, the host is persisting the pin, and there is no client yet.
+    s.peerConfirms()
+    expect(s.session.clientId()).toBeNull()
+    s.peerSendsTunnelText(JSON.stringify({ t: 'req', id: 2, method: 'fs:list', args: ['/p'] }))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(frames().some((m) => m.id === 2)).toBe(false) // held: neither refused nor answered yet
+    expect(s.session.clientId()).toBeNull()
+
+    releasePin()
+    await vi.waitFor(() => expect(s.session.clientId()).not.toBeNull())
+    await vi.waitFor(() => expect(frames().find((m) => m.id === 2)).toMatchObject({ ok: true, result: ['/p/a.ts'] }))
+    expect(s.opens).toHaveLength(1)
   })
 })
 

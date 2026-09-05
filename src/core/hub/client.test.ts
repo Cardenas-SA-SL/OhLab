@@ -43,11 +43,13 @@ describe('HubClient', () => {
     const socket = new FakeSocket()
     const client = new HubClient({
       hubUrl: 'http://hub.test:8791', accountName: 'Ada', keys,
-      webSocket: () => socket
+      webSocket: () => {
+        queueMicrotask(() => socket.emit('open'))
+        return socket
+      }
     })
 
     expect(await client.start()).toMatchObject({ state: 'connected', accountId: 'a1' })
-    socket.emit('open')
     await client.createProject('Demo', 'local-project')
     expect(calls.at(-1)?.body).toEqual({ name: 'Demo', projectId: 'local-project' })
     client.stop()
@@ -81,9 +83,14 @@ describe('HubClient', () => {
       return new Response(JSON.stringify([]), { status: 200 })
     }))
     const socket = new FakeSocket()
-    const client = new HubClient({ hubUrl: 'http://hub.test:8791', accountName: 'Ada', keys, webSocket: () => socket })
+    const client = new HubClient({
+      hubUrl: 'http://hub.test:8791', accountName: 'Ada', keys,
+      webSocket: () => {
+        queueMicrotask(() => socket.emit('open'))
+        return socket
+      }
+    })
     await client.start()
-    socket.emit('open')
 
     await expect(client.listProjects()).resolves.toEqual([])
     expect(registrations).toBe(2)
@@ -92,6 +99,18 @@ describe('HubClient', () => {
     // A second 401 in a row is a real refusal, not a lost session: no third registration.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'nope' }), { status: 401 })))
     await expect(client.listProjects()).rejects.toThrow('nope')
+    client.stop()
+  })
+
+  it('refuses to register a placeholder identity when the account name is empty', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const client = new HubClient({ hubUrl: 'http://hub.test:8791', accountName: '  ', keys: nacl.box.keyPair() })
+    await expect(client.start()).resolves.toMatchObject({
+      state: 'error',
+      error: 'Enter an account name before connecting to the Hub.'
+    })
+    expect(fetch).not.toHaveBeenCalled()
     client.stop()
   })
 })

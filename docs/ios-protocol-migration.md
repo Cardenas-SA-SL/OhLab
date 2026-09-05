@@ -369,9 +369,13 @@ sessionId)`), so a confirm from one session physically cannot cross into another
    session (`recordApproval` refuses unless both confirmed, and pins only the key
    carried by the state). Each end pins the **other's** key.
 6. Only now does the host register the phone as a `CorePlatform` client and start
-   serving RPC. Before that, any `req` from the phone is answered
+   serving RPC. Until both humans have confirmed, any `req` from the phone is answered
    `{t:'res', ok:false, error:{code:"E_UNAUTHORIZED", message:"Awaiting mutual
-   approval."}}` (`relay-host.ts` 191–200) — iOS must expect and surface this.
+   approval."}}` (`relay-host.ts`) — iOS must expect and surface this. A `req` that
+   arrives after both confirmed but before the host has finished persisting the pin
+   (step 5 is a disk round trip) is not refused: the host holds it and serves it in
+   order as soon as the client is registered, so a peer whose own gate settled first
+   never sees its bootstrap request bounced.
 
 ### 3.4 Persistent device key + pinning
 
