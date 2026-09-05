@@ -425,6 +425,7 @@ import {
   presenceForProject,
   setActiveSession,
   disposeSession,
+  projectForSession,
 } from '../session/session'
 import {
   openRelayTab,
@@ -432,6 +433,10 @@ import {
   reconnectRelayTab,
   type RelayTab,
 } from '../session/relay-tab'
+import { relayNode, relayNodesOf } from '../session/relay-nodes'
+import { hubMemberTabs } from '../session/hub-auto-connect'
+import { findNodeHome, messageRouteFor, preferredSourceTitle, relayListRows, type NodeSummary } from '../lib/nodeHome'
+import { registerActiveReload } from '../state/activeReload'
 import { buildBackgroundLinkMaps, buildContextLinkNote, buildLinkMap, buildNotePushMessage, classifyLink, hiddenLinkIds, linkIdsCoveredByRopes, pairKey, planBridges, type LinkEndpoint } from '../lib/noteLink'
 import {
   launchesToFire,
@@ -2661,6 +2666,10 @@ export function Canvas() {
     preserveViewportRef.current = true
     useProjects.getState().requestReload()
   }, [])
+  // Same seam as registerWorkspaceDirty, for the in-place reload a member tab needs when it
+  // reconnects while on screen (session/hub-auto-connect.ts): camera preserved, nodes re-read
+  // from the store the reconnect just refreshed.
+  useEffect(() => registerActiveReload(reloadActiveProject), [reloadActiveProject])
 
   /** Put nodes that arrived from ANOTHER device onto the live canvas immediately.
    *
@@ -3438,7 +3447,6 @@ export function Canvas() {
         const remoteProject = useProjects
           .getState()
           .projects.find((p) => p.nodes.some((candidate) => candidate.id === id))
-        const rn = remoteProject?.nodes.find((candidate) => candidate.id === id)
         const resolved = workspaceSessions().find((s) =>
           s.source === 'relay' &&
             (s.id === persistedRemote.sessionId ||
@@ -3446,6 +3454,10 @@ export function Canvas() {
                 s.hostAccountId === persistedRemote.hostAccountId &&
                 s.remoteProjectId === persistedRemote.remoteProjectId))
         )
+        // The store's copy first; the session's LIVE set second (a node the member added while
+        // their tab is on screen is only there until the next switch-away commit).
+        const rn = remoteProject?.nodes.find((candidate) => candidate.id === id) ??
+          (resolved ? relayNode(resolved.id, id) : undefined)
         const status = resolved?.status ?? 'offline'
         const remoteStatus = resolved
           ? getSessionStores(resolved.id).agentStatus.store.getState().byId[id]
@@ -3495,7 +3507,6 @@ export function Canvas() {
           const saved = bridge.remote
           if (!saved) return undefined
           const remoteProject = projects.find((p) => p.nodes.some((n) => n.id === id))
-          const node = remoteProject?.nodes.find((n) => n.id === id)
           const resolved = workspaceSessions().find((s) =>
             s.source === 'relay' &&
               (s.id === saved.sessionId ||
@@ -3503,6 +3514,8 @@ export function Canvas() {
                   s.hostAccountId === saved.hostAccountId &&
                   s.remoteProjectId === saved.remoteProjectId))
           )
+          const node = remoteProject?.nodes.find((n) => n.id === id) ??
+            (resolved ? relayNode(resolved.id, id) : undefined)
           const remoteStatus = resolved
             ? getSessionStores(resolved.id).agentStatus.store.getState().byId[id]
             : undefined
@@ -4026,6 +4039,10 @@ export function Canvas() {
   // path), so a cancelled/failed reconnect leaves the offline tab still bound and reconnectable.
   const reconnectRelay = useCallback(
     (projectId: string) => {
+      // A team member's tab is brokered through the Hub — no pairing code to paste. The mutual
+      // auto-connect controller owns it and re-dials on click; only a manual "Remote host" tab
+      // takes the prompt below.
+      if (hubMemberTabs()?.reconnect(projectId)) return
       const label = useProjects.getState().getProject(projectId)?.name ?? 'Remote host'
       const bound = sessionForProject(projectId)
       const staleSessionId = bound.source === 'relay' ? bound.id : undefined
@@ -7625,7 +7642,10 @@ export function Canvas() {
           const remoteSession = sessionForProject(project.id)
           if (remoteSession.source !== 'relay' || remoteSession.status !== 'connected' || project.unavailable)
             return []
-          return project.nodes
+          // Store copy + the session's live set (deduped, live wins) — the same union `list` shows.
+          const byId = new Map(project.nodes.map((node) => [node.id, node]))
+          for (const node of relayNodesOf(remoteSession.id)) byId.set(node.id, node)
+          return [...byId.values()]
             .filter((node) => !!node.agentId && canContextLink(node.agentId as AgentId))
             .map((node): MenuItem => ({
               label: `${remoteSession.memberName ?? remoteSession.label} / ${node.title || node.id}`,
@@ -9035,24 +9055,40 @@ export function Canvas() {
     return localApi.onAgentControl(async ({ requestId, sourceNodeId, verb, args }) => {
       const reply = (r: { ok: boolean; message?: string; result?: unknown; error?: string }) =>
         localApi.sendAgentControlResult({ requestId, ...r })
-      const relayRows = () => useProjects.getState().projects.flatMap((project) => {
-        const owner = sessionForProject(project.id)
-        if (owner.source !== 'relay') return []
-        return project.nodes.map((node) => ({
-          id: node.id,
-          kind: node.kind ?? 'terminal',
-          title: node.title ?? '',
-          member: owner.memberName ?? owner.label,
-          machine: owner.machineLabel ?? owner.label,
-          online: owner.status === 'connected' && !project.unavailable,
-          linked: useProjects.getState().projects.some((candidate) =>
-            (candidate.bridges ?? []).some((bridge) =>
-              !!bridge.remote &&
-              ((bridge.source === sourceNodeId && bridge.target === node.id) ||
-                (bridge.target === sourceNodeId && bridge.source === node.id))
-            )
+      // WHERE a node lives — the ONE resolver `list`/`link`/`send`/`reply`/`notify` share
+      // (lib/nodeHome.ts): the serialized store, then the live canvas (only for the project React
+      // Flow actually holds — `nodesProjectIdRef`, never the merely-active id, so a switch in
+      // flight cannot attribute the old canvas to the new tab), then every relay session's live
+      // node set. The verbs used to look in different places and disagreed about a node.
+      const liveSummaries = (): NodeSummary[] => nodesRef.current.map((n) => ({
+        id: n.id,
+        kind: n.type ?? 'terminal',
+        title: (n.data.title as string | undefined) ?? '',
+        agentId: n.data.agentId as AgentId | undefined,
+        accountId: n.data.accountId as string | undefined,
+        titleAuto: n.data.titleAuto as boolean | undefined
+      }))
+      const nodeHomeOf = (id: string) => findNodeHome(id, {
+        projects: useProjects.getState().projects,
+        activeProjectId: nodesProjectIdRef.current ?? '',
+        liveNodes: liveSummaries(),
+        sessionForProject,
+        sessions: workspaceSessions,
+        relayNodes: relayNodesOf,
+        projectForSession
+      })
+      const relayRows = () => relayListRows({
+        projects: useProjects.getState().projects,
+        sessionForProject,
+        relayNodes: relayNodesOf,
+        unavailable: (project) => !!project.unavailable,
+        linked: (nodeId) => useProjects.getState().projects.some((candidate) =>
+          (candidate.bridges ?? []).some((bridge) =>
+            !!bridge.remote &&
+            ((bridge.source === sourceNodeId && bridge.target === nodeId) ||
+              (bridge.target === sourceNodeId && bridge.source === nodeId))
           )
-        }))
+        )
       })
       // `--dry-run` (issue #532): validate + report, mutate nothing. Only DRY_RUN_VERBS reach
       // this process with the flag set — main's setControlHandler refuses it for every other
@@ -9101,30 +9137,41 @@ export function Canvas() {
           reply({ ok: false, error: 'source node is not a control-capable agent' })
           return
         }
-        const targetProject = useProjects
-          .getState()
-          .projects.find((p) => p.nodes.some((n) => n.id === targetId))
-        const targetSession = targetProject ? sessionForProject(targetProject.id) : undefined
-        if (targetSession?.source === 'relay') {
-          if (targetSession.status !== 'connected' || targetProject?.unavailable) {
+        // The target's home decides the route. A node ANY relay session lists goes to that
+        // member's core — the local PtyManager has no such session and used to answer
+        // `targetGone` for a node the host created after the tab opened (the two-instance bug).
+        const route = messageRouteFor(
+          nodeHomeOf(targetId),
+          (projectId) => !!useProjects.getState().getProject(projectId)?.unavailable
+        )
+        if (route.kind === 'relay') {
+          const targetSession = route.session
+          if (!route.online) {
             reply(memberOfflineReply(targetSession.memberName))
             return
           }
-          const sourceTitle =
-            (live?.data.title as string | undefined) ?? stored?.title ?? sourceNodeId
-          const sourceProject = useProjects
-            .getState()
-            .projects.find((p) => p.nodes.some((n) => n.id === sourceNodeId))
+          // What the other member's agent reads in `from:`. The source title prefers a name the
+          // user typed, then the agent's own session name, over an auto-tracked first-prompt
+          // title; the machine label is the one this app REGISTERED with the Hub (its hostname),
+          // never a session label like "This Mac" that is only true on this screen. The host
+          // overwrites both member facts from its peer registry anyway (agent-collaboration-host).
+          const sourceTitle = preferredSourceTitle(
+            {
+              id: sourceNodeId,
+              title: (live?.data.title as string | undefined) ?? stored?.title ?? '',
+              titleAuto: (live?.data.titleAuto as boolean | undefined) ?? stored?.titleAuto
+            },
+            useAgentStatus.getState().byId[sourceNodeId]?.session
+          )
+          const hubStatus = hubMemberTabs()?.status()
           const remoteReply = await targetSession.api.agentMessage.deliver({
             verb,
             sourceNodeId,
             targetNodeId: targetId,
             body: args.text ?? '',
             remoteOrigin: {
-              memberName: useSettings.getState().settings.hubAccountName || 'Remote member',
-              machineLabel: sourceProject
-                ? sessionForProject(sourceProject.id).label
-                : 'this computer',
+              memberName: hubStatus?.accountName || useSettings.getState().settings.hubAccountName || 'Remote member',
+              machineLabel: hubStatus?.machineLabel || 'another computer',
               sourceTitle
             }
           }).catch(() => memberOfflineReply(targetSession.memberName))
@@ -10559,28 +10606,27 @@ export function Canvas() {
             const remoteLinked: string[] = []
             const remoteSkipped: Array<{ id: string; why: string }> = []
             for (const targetId of targets.filter((id) => !localTargets.includes(id))) {
-              const remoteProject = useProjects
-                .getState()
-                .projects.find((project) => project.nodes.some((node) => node.id === targetId))
-              const remoteNode = remoteProject?.nodes.find((node) => node.id === targetId)
-              const remoteSession = remoteProject ? sessionForProject(remoteProject.id) : undefined
+              // The same resolver `send` uses: a node the host added a moment ago is linkable
+              // through the relay session's live set even before the store or the canvas has it.
+              const home = nodeHomeOf(targetId)
+              const remoteSession = home?.session
               if (
-                !remoteProject ||
-                !remoteNode?.agentId ||
-                !canContextLink(remoteNode.agentId as AgentId) ||
+                !home ||
+                !home.node.agentId ||
+                !canContextLink(home.node.agentId) ||
                 remoteSession?.source !== 'relay'
               ) {
                 remoteSkipped.push({ id: targetId, why: 'no such context-link-capable node' })
                 continue
               }
-              if (remoteSession.status !== 'connected' || remoteProject.unavailable) {
+              if (remoteSession.status !== 'connected' || useProjects.getState().getProject(home.projectId)?.unavailable) {
                 remoteSkipped.push({ id: targetId, why: 'member offline' })
                 continue
               }
               const remote: NonNullable<BridgeLink['remote']> = {
                 endpoint: 'target',
                 sessionId: remoteSession.id,
-                remoteProjectId: remoteSession.remoteProjectId ?? remoteProject.id,
+                remoteProjectId: remoteSession.remoteProjectId ?? home.projectId,
                 hostAccountId: remoteSession.hostAccountId ?? remoteSession.id,
                 memberName: remoteSession.memberName ?? remoteSession.label,
                 machineLabel: remoteSession.machineLabel ?? remoteSession.label
