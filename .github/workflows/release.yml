@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - 'v*'
+  # Manual re-run for an existing tag (the tag's own run picks up the workflow file AT the tag, so a
+  # workflow fix can only be exercised through this trigger or a new tag).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and publish (e.g. v0.4.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,9 +20,15 @@ jobs:
   release-mac:
     name: macOS packages
     runs-on: macos-14
+    env:
+      # The two-arch electron-vite + electron-builder run exceeded Node's default ~2 GB heap on the
+      # 7 GB macos-14 runner (v0.4.0's first run died with "JavaScript heap out of memory").
+      NODE_OPTIONS: --max-old-space-size=5120
     steps:
       - name: Check out tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -50,6 +64,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: true
           repository: Cardenas-SA-SL/OhLab
           files: |
