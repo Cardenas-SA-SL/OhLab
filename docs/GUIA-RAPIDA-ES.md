@@ -270,23 +270,24 @@ Cerrar la pestaña (`⌘W` o la x) es distinto: significa "ahora no". OhLab lo r
 no vuelve a abrirse sola hasta que pulses **Open** en esa fila. El botón **Close** de Team hace lo
 mismo que cerrar la pestaña.
 
-### Verificación de identidad (el "código de verificación")
+### Verificación de identidad (el "verify code")
 
-En el flujo de equipo no aparece ningún código que comparar, y es a propósito. Al pulsar
-**Approve**, el Hub fija la llave pública del hermano; cada sesión entre los dos Macs es un túnel
-cifrado de extremo a extremo cuya identidad se comprueba automáticamente contra esa llave en los
-dos lados (el cliente confirma solo, y el anfitrión rechaza cualquier túnel cuya llave no coincida
-con la del directorio). El Hub solo presenta a los dos; no puede leer terminales, conversaciones ni
-el lienzo.
+Al pulsar **Approve**, el Hub fija la llave pública del hermano y cada sesión entre los dos Macs
+es un túnel cifrado de extremo a extremo que se comprueba contra esa llave en los dos lados: el
+cliente confirma solo y el anfitrión rechaza cualquier túnel cuya llave no coincida con la del
+directorio. El Hub solo presenta a los dos; no puede leer terminales, conversaciones ni el lienzo.
 
-El diálogo "Verify this code matches the one shown on the host:" seguido de un código corto, que
-los dos humanos comparan en voz alta, solo aparece con los **códigos de emparejamiento manuales**
-de Ajustes > Remote (campo **Pairing code**), pensados para el teléfono o para una sesión
-puntual. No lo verás al usar invitaciones del Hub.
+Para que no tengas que confiar a ciegas en el Hub, desde la primera sesión entre ustedes la fila
+de cada miembro en **Team** muestra `· verify code 123 456`. Ese número se deriva de las llaves
+de los dos y es el mismo en las dos pantallas solo si el Hub le dio a cada uno la llave real del
+otro. Compárenlo una vez por WhatsApp o teléfono; si no coincide, pulsa **Remove** en esa fila,
+**Regenerate** y comparte el código nuevo solo con tu hermano. Si la llave de un miembro cambia
+más adelante (por ejemplo, reinstaló OhLab), la app rechaza la sesión, te avisa con una
+notificación y muestra el motivo en rojo en Team: hay que quitarlo y volver a invitarlo.
 
-Si quieres confirmar quién está al otro lado, compara en Team el nombre de cuenta y el nombre del
-Mac que aparece junto a él. Ante cualquier duda, pulsa **Remove** en esa fila, pulsa
-**Regenerate** y comparte el código nuevo solo con tu hermano.
+El diálogo "Verify this code matches the one shown on the host:" solo aparece con los **códigos de
+emparejamiento manuales** de Ajustes > Remote (campo **Pairing code**), pensados para el teléfono
+o para una sesión puntual. No lo verás al usar invitaciones del Hub.
 
 ## 5. Que los agentes se hablen
 
