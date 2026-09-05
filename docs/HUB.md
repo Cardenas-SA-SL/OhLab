@@ -2,6 +2,8 @@
 
 The Hub lets two OhLab installations find each other and broker end-to-end encrypted relay sessions. It stores team names, public keys, project membership, presence, and join requests, but it cannot read terminal, transcript, canvas, or RPC payloads.
 
+Guía rápida en español: [GUIA-RAPIDA-ES.md](./GUIA-RAPIDA-ES.md).
+
 ## Two brothers, two homes
 
 Tailscale is the easiest and safest way to make one computer reachable from another home. Install Tailscale on both computers and sign them into the same tailnet first. No router port forwarding is needed.
