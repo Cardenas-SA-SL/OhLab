@@ -2,6 +2,7 @@ import { Notification, type BrowserWindow } from 'electron'
 import { IPC } from '../shared/ipc'
 import type { HubEvent, HubProject, HubStatus, Settings } from '../shared/types'
 import { HubClient } from '../core/hub/client'
+import { sharingUpdates } from '../core/hub/sharing'
 import type { ElectronPlatform } from './platform-electron'
 import { loadOrCreatePeerKeyPair } from './remote/peer-identity'
 import { connectRelayHost, killRelayHostsByPeerKey, type RelayHostSession } from './remote/relay-host'
@@ -46,6 +47,12 @@ export function initHubClient(
   let configuredAccountName = ''
   let syncTail: Promise<HubStatus> = Promise.resolve({ state: 'disabled' })
   const hosted = new Map<string, RelayHostSession>()
+  // The renderer's word on which local project is this machine's side of a shared project,
+  // consulted BEFORE the on-disk workspace: the renderer persists the binding through its
+  // debounced workspace save, and a member's session request (or the sharing flag we publish) must
+  // not depend on that save having landed. `null` is an explicit unbind. Cleared on `stop()`.
+  const bindings = new Map<string, string | null>()
+  const machineLabel = hostname()
   const memberRevoker = createRevoker({
     load: loadApprovedDevices,
     save: saveApprovedDevices,
@@ -57,8 +64,31 @@ export function initHubClient(
     if (!win.isDestroyed()) win.webContents.send(IPC.hubEvent, event)
   }
   const updateStatus = (next: HubStatus): void => {
-    status = next
-    send({ type: 'status', status: next })
+    status = next.state === 'connected' ? { ...next, machineLabel } : next
+    send({ type: 'status', status })
+  }
+
+  /** The local side of a shared project: the renderer's live binding first, then the workspace on
+   *  disk (`resolveLocalSide` in index.ts — bound id, then the legacy id match). */
+  const localSideOf = async (project: HubProject): Promise<string | null> => {
+    if (bindings.has(project.projectId)) return bindings.get(project.projectId) ?? null
+    return resolveLocalProjectId(project)
+  }
+
+  /** Tell the Hub which of our member rows have a local side, so the other members' auto-connect
+   *  knows whether there is a canvas to open. Best effort — a failed publish is retried on the next
+   *  sync/bind, and a wrong flag only delays an auto-connect; it never grants anything. */
+  async function publishSharing(onlyProjectId?: string): Promise<void> {
+    if (!client || status.state !== 'connected' || !status.accountId) return
+    const hub = client
+    const projects = (await hub.listProjects()).filter((project) => !onlyProjectId || project.projectId === onlyProjectId)
+    const sides = new Map<string, boolean>()
+    for (const project of projects) sides.set(project.projectId, !!(await localSideOf(project)))
+    for (const update of sharingUpdates(projects, status.accountId, (project) => sides.get(project.projectId) === true)) {
+      await hub.setSharing(update.projectId, update.sharing).catch((error) =>
+        console.warn('[hub] could not publish the sharing flag:', error)
+      )
+    }
   }
 
   async function acceptSessionRequest(event: SessionRequest): Promise<void> {
@@ -70,12 +100,13 @@ export function initHubClient(
       console.warn('[hub] refused session request from a non-approved project member')
       return
     }
-    const localProjectId = await resolveLocalProjectId(project)
+    const localProjectId = await localSideOf(project)
     if (!localProjectId) {
       console.warn('[hub] refused session request because the shared project has no local copy')
       return
     }
     const keys = await loadOrCreatePeerKeyPair()
+    const hostedKey = `${project.projectId}:${member.accountId}`
     let session: RelayHostSession
     session = connectRelayHost({
       url: event.relayUrl,
@@ -83,10 +114,13 @@ export function initHubClient(
       ourKeys: keys,
       platform,
       sharedProjectId: localProjectId,
+      // The label other members' agents are attributed to is the one the member REGISTERED with
+      // the Hub (its hostname) — the directory row is the authority. The request's label is the
+      // Hub's own fallback for a member that registered none; it is never a renderer's "this Mac".
       peerScope: {
         accountId: member.accountId,
         memberName: member.name,
-        machineLabel: event.machineLabel || `${member.name}'s computer`
+        machineLabel: member.machineLabel || event.machineLabel || `${member.name}'s computer`
       },
       onPeerPending: (pending) => {
         if (pending.peerKeyB64() !== event.fromPublicKeyB64) {
@@ -98,10 +132,13 @@ export function initHubClient(
         pending.confirm()
       },
       onOpen: () => {},
-      onClose: () => hosted.delete(member.accountId)
+      onClose: () => { if (hosted.get(hostedKey) === session) hosted.delete(hostedKey) }
     })
-    hosted.get(member.accountId)?.close()
-    hosted.set(member.accountId, session)
+    // One hosting session per member PER shared project: a member in two projects with us holds
+    // two, and a re-dial for one project must not cut the other. A re-dial for the same pair
+    // replaces the stale session (the guest's old socket is dead or about to be).
+    hosted.get(hostedKey)?.close()
+    hosted.set(hostedKey, session)
   }
 
   async function syncNow(): Promise<HubStatus> {
@@ -132,7 +169,7 @@ export function initHubClient(
     client = new HubClient({
       hubUrl: url,
       accountName,
-      machineLabel: hostname(),
+      machineLabel,
       keys,
       onStatus: updateStatus,
       onEvent: (event) => {
@@ -161,7 +198,11 @@ export function initHubClient(
         }
       }
     })
-    return client.start()
+    const started = await client.start()
+    // Every (re)connect re-asserts our local sides: the Hub's copy of the flag is what the other
+    // members' auto-connect reads, and it must not lag a binding made while we were offline.
+    void publishSharing().catch((error) => console.warn('[hub] sharing publish failed:', error))
+    return started
   }
 
   function sync(): Promise<HubStatus> {
@@ -198,10 +239,16 @@ export function initHubClient(
       const revoked = await memberRevoker.revoke(member.publicKeyB64)
       if (!revoked.persisted || !revoked.killed) throw new Error('The member was removed, but relay access could not be fully revoked. Retry before sharing this project again.')
     }
-    hosted.delete(String(accountId))
+    for (const key of [...hosted.keys()]) if (key.endsWith(`:${String(accountId)}`)) hosted.delete(key)
     return result
   })
   platform.handle(IPC.hubInviteRegenerate, async (projectId: unknown) => (await needClient()).regenerateInvite(String(projectId)))
+  platform.handle(IPC.hubProjectsBind, async (hubProjectId: unknown, localProjectId: unknown) => {
+    const shared = String(hubProjectId ?? '')
+    if (!shared) return
+    bindings.set(shared, typeof localProjectId === 'string' && localProjectId ? localProjectId : null)
+    await publishSharing(shared)
+  })
   platform.handle(IPC.hubProjectsConnect, async (projectId: unknown, toAccountId: unknown, machineLabel?: unknown) => {
     const hub = await needClient()
     const result = await hub.connectMember(
@@ -223,6 +270,7 @@ export function initHubClient(
       client = null
       configuredUrl = ''
       configuredAccountName = ''
+      bindings.clear()
       for (const session of hosted.values()) session.close()
       hosted.clear()
     }

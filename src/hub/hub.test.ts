@@ -228,6 +228,64 @@ describe('OhLab Hub', () => {
   })
 })
 
+describe('symmetric sharing on the wire', () => {
+  /** Register with the machine label the desktop sends (its hostname). */
+  async function accountOn(base: string, name: string, machineLabel: string): Promise<{ token: string; accountId: string }> {
+    const keys = nacl.box.keyPair()
+    const publicKeyB64 = Buffer.from(keys.publicKey).toString('base64')
+    const challenge = await post<{ challengeId: string; hubPublicKeyB64: string; nonceB64: string; boxB64: string }>(base, '/v1/accounts/challenge', { publicKeyB64 })
+    const proof = nacl.box.open(Buffer.from(challenge.boxB64, 'base64'), Buffer.from(challenge.nonceB64, 'base64'), Buffer.from(challenge.hubPublicKeyB64, 'base64'), keys.secretKey)
+    const auth = await post<{ sessionToken: string; account: { accountId: string } }>(base, '/v1/accounts/register', {
+      name, publicKeyB64, challengeId: challenge.challengeId, proofB64: Buffer.from(proof!).toString('base64'), machineLabel
+    })
+    return { token: auth.sessionToken, accountId: auth.account.accountId }
+  }
+
+  it.skipIf(process.env.CODEX_SANDBOX_NETWORK_DISABLED === '1')('publishes each member\'s sharing flag and attributes a session to the caller\'s REGISTERED machine', async () => {
+    const { base, ws } = await boot()
+    const owner = await accountOn(base, 'Sebastián', "Sebastián's MacBook")
+    const guest = await accountOn(base, 'Jorge', "Jorge's PC")
+    const project = await post<{ projectId: string; inviteCode: string }>(base, '/v1/projects', { name: 'Horacio Team' }, owner.token)
+    await post(base, '/v1/projects/join', { inviteCode: project.inviteCode }, guest.token)
+    // A pending guest may already declare its local side (it binds at join time).
+    await post(base, `/v1/projects/${project.projectId}/sharing`, { sharing: true }, guest.token)
+    await post(base, `/v1/projects/${project.projectId}/members/${guest.accountId}/approve`, {}, owner.token)
+
+    const ownerDir = await opened(`${ws}/dir?session=${encodeURIComponent(owner.token)}`)
+    const guestDir = await opened(`${ws}/dir?session=${encodeURIComponent(guest.token)}`)
+    const ownerEvents: Array<Record<string, unknown>> = []
+    ownerDir.on('message', (raw) => ownerEvents.push(JSON.parse(raw.toString()) as Record<string, unknown>))
+    const nextGuestRequest = sessionRequests(guestDir)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    // The owner binds its side: every approved member is told, and the listing carries the flag.
+    await post(base, `/v1/projects/${project.projectId}/sharing`, { sharing: true }, owner.token)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const members = await fetch(`${base}/v1/projects/${project.projectId}/members`, { headers: { authorization: `Bearer ${guest.token}` } })
+      .then((r) => r.json()) as Array<{ accountId: string; sharing: boolean; machineLabel?: string }>
+    expect(members.find((m) => m.accountId === owner.accountId)).toMatchObject({ sharing: true, machineLabel: "Sebastián's MacBook" })
+    expect(members.find((m) => m.accountId === guest.accountId)).toMatchObject({ sharing: true, machineLabel: "Jorge's PC" })
+    // Re-asserting the same flag is not an event; flipping it is.
+    await post(base, `/v1/projects/${project.projectId}/sharing`, { sharing: true }, owner.token)
+    await post(base, `/v1/projects/${project.projectId}/sharing`, { sharing: false }, owner.token)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const sharingEvents = ownerEvents.filter((e) => e.type === 'member-sharing')
+    expect(sharingEvents).toEqual([
+      expect.objectContaining({ projectId: project.projectId, accountId: owner.accountId, sharing: true }),
+      expect.objectContaining({ projectId: project.projectId, accountId: owner.accountId, sharing: false })
+    ])
+    // A member may only set its OWN flag.
+    await expect(post(base, `/v1/projects/nope/sharing`, { sharing: true }, owner.token)).rejects.toThrow(/project not found/)
+
+    // The connect request carries the caller's REGISTERED label, never the label its renderer
+    // typed for itself ("This Mac" is true on the caller's screen and wrong on the guest's).
+    await post(base, `/v1/projects/${project.projectId}/connect`, { toAccountId: guest.accountId, machineLabel: 'This Mac' }, owner.token)
+    expect(await nextGuestRequest()).toMatchObject({ fromAccountId: owner.accountId, machineLabel: "Sebastián's MacBook" })
+    ownerDir.close()
+    guestDir.close()
+  })
+})
+
 describe('token expiry on the wire', () => {
   it.skipIf(process.env.CODEX_SANDBOX_NETWORK_DISABLED === '1')('reports exp in UNIX seconds, the unit the desktop standing host multiplies by 1000', async () => {
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ohlab-hub-exp-'))

@@ -18,6 +18,9 @@ export type ProjectMember = {
   role: 'owner' | 'member'
   status: 'pending' | 'approved'
   joinedAt: number
+  /** The member's app has bound a local project as its side of this shared project, so there is
+   *  an agent canvas for the other members to open. Reported by the member itself; absent = no. */
+  sharing?: boolean
 }
 
 export interface SharedProject {
@@ -34,6 +37,7 @@ export type DirectoryEvent =
   | { type: 'member-approved'; projectId: string; accountId: string }
   | { type: 'member-declined'; projectId: string; accountId: string }
   | { type: 'member-online' | 'member-offline'; accountId: string }
+  | { type: 'member-sharing'; projectId: string; accountId: string; sharing: boolean }
   | {
       type: 'session-request'
       projectId: string
@@ -248,13 +252,31 @@ export class HubDirectory {
     return project
   }
 
-  members(projectId: string, accountId: string): Array<ProjectMember & { name: string; publicKeyB64: string; online: boolean; machineLabel?: string }> {
+  members(projectId: string, accountId: string): Array<ProjectMember & { name: string; publicKeyB64: string; online: boolean; machineLabel?: string; sharing: boolean }> {
     const project = this.projectForMember(projectId, accountId)
     if (!project) throw new Error('project not found')
     return project.members.flatMap((member) => {
       const account = this.accounts.get(member.accountId)
-      return account ? [{ ...member, name: account.name, publicKeyB64: account.publicKeyB64, online: this.isOnline(account.accountId), machineLabel: account.machineLabel }] : []
+      return account ? [{ ...member, name: account.name, publicKeyB64: account.publicKeyB64, online: this.isOnline(account.accountId), machineLabel: account.machineLabel, sharing: member.sharing === true }] : []
     })
+  }
+
+  /**
+   * A member says whether its app has a local side for this project. Any member (pending ones
+   * included — a guest binds at join time, before approval) may set its OWN flag and nobody
+   * else's. Approved members are told, because that flag is what their auto-connect decides on.
+   */
+  async setSharing(projectId: string, accountId: string, sharing: boolean): Promise<SharedProject> {
+    const project = this.projectForMember(projectId, accountId)
+    const member = project?.members.find((item) => item.accountId === accountId)
+    if (!project || !member) throw new Error('project not found')
+    if ((member.sharing === true) !== sharing) {
+      if (sharing) member.sharing = true
+      else delete member.sharing
+      await this.save()
+      this.pushProject(project, { type: 'member-sharing', projectId, accountId, sharing })
+    }
+    return project
   }
 
   approvedPeers(projectId: string, fromId: string, toId: string): { project: SharedProject; from: Account; to: Account } {

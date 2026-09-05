@@ -222,12 +222,23 @@ export function createHub(config: HubConfig): Hub {
       if (method === 'POST' && approve) return send(res, 200, await directory.approve(decodeURIComponent(approve[1]), account!.accountId, decodeURIComponent(approve[2])))
       const remove = /^\/v1\/projects\/([^/]+)\/members\/([^/]+)$/.exec(url.pathname)
       if (method === 'DELETE' && remove) return send(res, 200, await directory.removeMember(decodeURIComponent(remove[1]), account!.accountId, decodeURIComponent(remove[2])))
+      const sharing = /^\/v1\/projects\/([^/]+)\/sharing$/.exec(url.pathname)
+      if (method === 'POST' && sharing) {
+        const body = await json(req)
+        return send(res, 200, await directory.setSharing(decodeURIComponent(sharing[1]), account!.accountId, body.sharing === true))
+      }
       const connect = /^\/v1\/projects\/([^/]+)\/connect$/.exec(url.pathname)
       if (method === 'POST' && connect) {
         const body = await json(req)
         const projectId = decodeURIComponent(connect[1])
         const toAccountId = String(body.toAccountId ?? '')
-        const machineLabel = String(body.machineLabel ?? `${account!.name}'s computer`)
+        // The label the TARGET shows for the caller's machine is the one the caller REGISTERED
+        // (its hostname, `Account.machineLabel`) — never a label the caller's renderer typed for
+        // itself. The renderer's own word for its machine is "this Mac"/"this PC", which is true
+        // on the caller's screen and wrong on everyone else's: that is how a delivered envelope
+        // read "on This Mac". The body's label is only a fallback for a caller that never
+        // registered one.
+        const machineLabel = String(account!.machineLabel || body.machineLabel || `${account!.name}'s computer`)
           .replace(/[\r\n\t]+/g, ' ')
           .trim()
           .slice(0, 80) || `${account!.name}'s computer`

@@ -106,6 +106,11 @@ export class HubClient {
     return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/invite`)
   }
 
+  /** Publish whether THIS app has a local side for the shared project (see HubProjectMember.sharing). */
+  setSharing(projectId: string, sharing: boolean): Promise<HubProject> {
+    return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/sharing`, { sharing })
+  }
+
   connectMember(projectId: string, toAccountId: string, machineLabel?: string): Promise<{ pairingToken: string; relayUrl: string; toPublicKeyB64: string }> {
     return this.request('POST', `/v1/projects/${encodeURIComponent(projectId)}/connect`, { toAccountId, machineLabel })
   }

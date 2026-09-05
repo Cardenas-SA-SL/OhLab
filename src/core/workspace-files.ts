@@ -212,6 +212,12 @@ export interface IndexEntryV3 {
    * `closedSessions` — this file is hand-editable input too.
    */
   closedSessions?: ClosedSessionEntry[]
+  /**
+   * MACHINE-LOCAL Hub binding: this entry is THIS machine's side of that shared team project.
+   * Same rule as `capabilityAck`: a repo must never carry it (a clone would bind itself to
+   * somebody's team), so it is never read from the project file and never written into it.
+   */
+  hubProjectId?: string
   cwd?: string
   ssh?: Project['ssh']
   cache?: ProjectFileV1
@@ -460,6 +466,8 @@ export function fileToProject(
      *  WITHOUT them — an adopted/cloned folder, a probe — gets the safe defaults, never the file's
      *  own `shell`/`ssh.extraArgs`. */
     localExec?: LocalNodeExecMap
+    /** This machine's Hub binding for this entry (never from the file). */
+    hubProjectId?: string
   }
 ): Project {
   const defaultAccountId = base.defaultAccountId ?? f.defaultAccountId
@@ -508,7 +516,10 @@ export function fileToProject(
     ...(base.breadcrumbs?.length ? { breadcrumbs: base.breadcrumbs } : {}),
     // Machine-local, from the index entry ONLY, same rule as `breadcrumbs`: a file field named
     // `closedSessions` is never read here — the shared file cannot carry this machine's trash can.
-    ...(base.closedSessions?.length ? { closedSessions: base.closedSessions } : {})
+    ...(base.closedSessions?.length ? { closedSessions: base.closedSessions } : {}),
+    // Machine-local, from the index entry ONLY: a file field named `hubProjectId` is a clone
+    // trying to bind itself to a team, and is never read.
+    ...(base.hubProjectId ? { hubProjectId: base.hubProjectId } : {})
   }
 }
 
@@ -620,14 +631,17 @@ export function splitWorkspace(
       // written back uncapped.
       ...(p.closedSessions?.length
         ? { closedSessions: p.closedSessions.slice(0, CLOSED_SESSIONS_CAP) }
-        : {})
+        : {}),
+      // The Hub binding is machine-local by definition (see IndexEntryV3.hubProjectId).
+      ...(p.hubProjectId ? { hubProjectId: p.hubProjectId } : {})
     }
     if (p.unavailable) {
       // Placeholder (folder missing / server unreachable at load): its nodes:[] is not real
       // data. Emit a header-only ref preserving the ref shape — NEVER a file and NEVER an ssh
       // cache built from the placeholder, so a later save can't clobber the on-disk source.
-      if (p.ssh) entries.push({ ...header, ssh: p.ssh })
-      else if (p.cwd) entries.push({ ...header, cwd: p.cwd })
+      const binding = p.hubProjectId ? { hubProjectId: p.hubProjectId } : {}
+      if (p.ssh) entries.push({ ...header, ...binding, ssh: p.ssh })
+      else if (p.cwd) entries.push({ ...header, ...binding, cwd: p.cwd })
       else {
         const { unavailable: _u, ...inline } = p
         entries.push({ ...header, project: inline })
