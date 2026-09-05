@@ -34,6 +34,16 @@ export interface ProjectInput {
   icon?: ProjectIcon
   cwd?: string
   nodes: SessionNodeInput[]
+  /** A team member's tab (a relay session): who runs these sessions, on which machine, and
+   *  whether they are reachable right now. Absent for every local project. */
+  member?: SessionMember
+}
+
+/** The member a relay tab belongs to — what the sidebar groups the tab under. */
+export interface SessionMember {
+  name: string
+  machine: string
+  online: boolean
 }
 
 export type StatusKind = 'working' | 'attention' | 'done' | 'unknown'
@@ -285,6 +295,8 @@ export interface SessionGroup {
   projectIcon?: ProjectIcon
   cwd?: string
   isActive: boolean
+  /** Set for a team member's tab: the sidebar shows the sessions under the member's name. */
+  member?: SessionMember
   /** Canvas group frames in this project, each with its member sessions. */
   groups: GroupBucket[]
   /** Sessions not inside any canvas group. */
@@ -441,6 +453,7 @@ export function buildSessionList(
       projectIcon: p.icon,
       cwd: p.cwd,
       isActive,
+      ...(p.member ? { member: p.member } : {}),
       groups: buckets,
       ungrouped
     }

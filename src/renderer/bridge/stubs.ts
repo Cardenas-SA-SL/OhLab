@@ -253,6 +253,7 @@ export function buildStubApi(): Omit<
       approveMember: U('hub.approveMember'),
       removeMember: U('hub.removeMember'),
       connectMember: U('hub.connectMember'),
+      bindProject: U('hub.bindProject'),
       regenerateInvite: U('hub.regenerateInvite'),
       onEvent: noopUnsub
     },

@@ -278,6 +278,7 @@ import {
 import { initRelayHost } from './remote/relay-host-service'
 import { initHubClient, type MainHubClient } from './hub-client'
 import { rememberVerifyCode } from './hub-verify-codes'
+import { resolveLocalSide } from '../shared/hub-local-side'
 import { createRevoker } from './remote/revocation'
 import { loadApprovedDevices, saveApprovedDevices } from './remote/approved-devices'
 import { publicKeyToB64 } from './remote/e2ee'
@@ -3676,11 +3677,13 @@ app.whenReady().then(async () => {
   // Revocation reaches its sessions via `killRelayHostsByPeerKey` (peerRevoker, above).
   initRelayHost(win, corePlatform, { getHubUrl: () => settingsStore.get().hubUrl })
   mainHubClient?.stop()
+  // The on-disk answer to "which local project is this machine's side of that shared project":
+  // the persisted binding (`IndexEntryV3.hubProjectId`), then the legacy id match — one resolver
+  // shared with the renderer (@shared/hub-local-side), so main never hosts a canvas the Team
+  // panel does not say is shared.
   mainHubClient = initHubClient(win, corePlatform, () => settingsStore.get(), async (shared) => {
     const workspace = await workspaceStore.load({ sideline: false })
-    return workspace.projects.find((project) => project.id === shared.projectId)?.id
-      ?? workspace.projects.find((project) => project.name === shared.name)?.id
-      ?? null
+    return resolveLocalSide(shared.projectId, workspace.projects)
   })
   void embeddedHubHost?.stop()
   embeddedHubHost = createEmbeddedHubHost(app.getPath('userData'), (status) => {

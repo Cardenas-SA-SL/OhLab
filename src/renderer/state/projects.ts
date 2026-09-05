@@ -60,8 +60,9 @@ interface ProjectsState {
   openSshProject(label: string, ssh: NonNullable<Project['ssh']>): Project
   /** Registers a probed project (from a folder's .nodeterm file). The probe already minted the id
    *  — the shared file carries none — so this only defends against a collision with an existing
-   *  project (node ids untouched). Activates it. */
-  adoptProject(project: Project): Project
+   *  project (node ids untouched). Activates it — unless `activate: false`, the mutual
+   *  auto-connect path, where a member's tab must appear WITHOUT taking the user's view. */
+  adoptProject(project: Project, opts?: { activate?: boolean }): Project
   /** Replaces one project's data wholesale (external file change). Keeps activeProjectId. */
   replaceProject(project: Project): void
   renameProject(id: string, name: string): void
@@ -75,6 +76,14 @@ interface ProjectsState {
    *  persisted (see the toWorkspace tripwire). Set true when a relay tab's socket drops (Stage 4
    *  Task 7) so it stays reconnectable; cleared when it reconnects. */
   setProjectUnavailable(id: string, unavailable: boolean): void
+  /**
+   * Binds (or, with undefined, unbinds) a local project as THIS machine's side of a Hub shared
+   * project. MACHINE-LOCAL by construction: `Project.hubProjectId` rides `IndexEntryV3.hubProjectId`
+   * through splitWorkspace and is never written into .nodeterm/project.json. Schedules the
+   * workspace save itself — a binding that only lives in memory would be forgotten on relaunch,
+   * and the other members would then see this member as "not sharing" again.
+   */
+  setProjectHubBinding(id: string, hubProjectId: string | undefined): void
   /** Sets (or clears, with undefined) the project's default Claude account for new nodes. */
   setProjectDefaultAccount(id: string, accountId: string | undefined): void
   /** Sets (or clears, with undefined = fall back to the global setting) the project's default
@@ -347,7 +356,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     return project
   },
 
-  adoptProject(project) {
+  adoptProject(project, opts) {
     const taken = get().projects.some((p) => p.id === project.id)
     // `probeFolder` mints the id (the folder's project.json no longer names one), so a collision
     // here means the id was minted against a store this renderer had not hydrated yet — derive a
@@ -361,7 +370,10 @@ export const useProjects = create<ProjectsState>((set, get) => ({
             get().projects.some((p) => p.id === c))
         }
       : project
-    set((s) => ({ projects: [...s.projects, adopted], activeProjectId: adopted.id }))
+    set((s) => ({
+      projects: [...s.projects, adopted],
+      ...(opts?.activate === false ? {} : { activeProjectId: adopted.id })
+    }))
     return adopted
   },
 
@@ -399,6 +411,18 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? { ...p, unavailable } : p))
     }))
+  },
+
+  setProjectHubBinding(id, hubProjectId) {
+    if (!get().projects.some((p) => p.id === id)) return
+    set((s) => ({
+      projects: s.projects.map((p) => {
+        if (p.id !== id) return p
+        const { hubProjectId: _old, ...rest } = p
+        return hubProjectId ? { ...rest, hubProjectId } : rest
+      })
+    }))
+    markWorkspaceDirty()
   },
 
   setProjectDefaultAccount(id, accountId) {

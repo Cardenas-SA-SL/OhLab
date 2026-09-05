@@ -793,6 +793,14 @@ export interface Project {
    */
   unavailable?: boolean
   /**
+   * MACHINE-LOCAL binding to a Hub shared project: THIS machine's side of that team project.
+   * Rides `IndexEntryV3.hubProjectId`, never the shared project file — a repo must not be able
+   * to bind a clone to somebody's team, and two members' copies of one shared project are two
+   * independent local projects that happen to point at the same Hub id. Resolved through
+   * `resolveLocalSide` (@shared/hub-local-side) on both shells.
+   */
+  hubProjectId?: string
+  /**
    * This tab is a LIVE relay connection to another machine's project — not a workspace on
    * THIS disk. Runtime-only, never persisted: set by `openRelayTab` (see relay-tab.ts) and
    * excluded from both `toWorkspace()` and the on-disk index (see the `splitWorkspace` skip in
@@ -1586,6 +1594,14 @@ export interface Settings {
   hubHostEnabled: boolean
   /** TCP port for the embedded Hub. It always binds all interfaces, never loopback only. */
   hubHostPort: number
+  /**
+   * MACHINE-LOCAL: team members whose tab this user closed by hand, as `<hubProjectId>:<accountId>`
+   * keys (`memberTabKey`). Mutual auto-connect (renderer/session/hub-auto-connect.ts) reopens a
+   * member's copy whenever they come online; closing the tab is the one gesture that says "not
+   * now", and it holds until the user clicks Open in Settings > Team again. Validated at the point
+   * of use (`mutedMemberKeys`): settings.json is hand-editable.
+   */
+  hubMutedMembers: string[]
   /** Send APNs push notifications to relay-paired phones when an agent needs approval, asks a
    *  question, or finishes a turn (spec: apns-push). Default on — it only fires for users who
    *  have paired a phone. Toggle in Settings → Notifications. */
@@ -1758,6 +1774,7 @@ export const DEFAULT_SETTINGS: Settings = {
   hubAccountName: '',
   hubHostEnabled: false,
   hubHostPort: 8791,
+  hubMutedMembers: [],
   mobilePushEnabled: true,
   mobilePushNeedsYou: true,
   mobilePushDone: true,
@@ -2857,6 +2874,9 @@ export interface HubStatus {
   state: HubConnectionState
   accountId?: string
   accountName?: string
+  /** The machine label this app registered with the Hub (its hostname) — what other members see
+   *  as the origin of this machine's agents, so attribution never says "this computer". */
+  machineLabel?: string
   error?: string
   /** The SAS ("NNN NNN") of every relay session this desktop has been on, keyed by the peer's
    *  public key (base64). Same on both computers of a pair unless someone sat between them, so
@@ -2887,6 +2907,10 @@ export interface HubProjectMember {
   joinedAt: number
   online: boolean
   machineLabel?: string
+  /** This member has bound a local project as their side of the shared project (and so hosts an
+   *  agent canvas the other members can open). Reported by the member's own app; absent on a Hub
+   *  older than the flag, which reads as "not sharing yet". */
+  sharing?: boolean
 }
 
 export interface HubProject {
@@ -2902,6 +2926,7 @@ export type HubEvent =
   | { type: 'member-joined' | 'member-approved'; projectId: string; accountId: string }
   | { type: 'member-declined'; projectId: string; accountId: string }
   | { type: 'member-online' | 'member-offline'; accountId: string }
+  | { type: 'member-sharing'; projectId: string; accountId: string; sharing: boolean }
   | { type: 'session-request'; projectId: string; fromAccountId: string; machineLabel?: string }
   | { type: 'status'; status: HubStatus }
   | { type: 'host-status'; status: HubHostStatus }
@@ -2916,6 +2941,13 @@ export interface HubApi {
   approveMember(projectId: string, accountId: string): Promise<HubProject>
   removeMember(projectId: string, accountId: string): Promise<HubProject>
   connectMember(projectId: string, toAccountId: string, machineLabel?: string): Promise<{ offer: string }>
+  /**
+   * Tell main which LOCAL project is this machine's side of a shared project (or `null` to unbind).
+   * The renderer persists the binding itself (`Project.hubProjectId` → the index entry); this call
+   * is what lets main answer a member's session request before that save lands, and what publishes
+   * the `sharing` flag to the Hub so the other members know there is a canvas to open.
+   */
+  bindProject(hubProjectId: string, localProjectId: string | null): Promise<void>
   regenerateInvite(projectId: string): Promise<HubProject>
   hostStatus(): Promise<HubHostStatus>
   pendingInvite(): Promise<string | null>

@@ -17,6 +17,7 @@ import { resolveTerminalRenderer } from '../shared/webgl'
 import { resolveTerminalTheme } from './terminal/themes'
 import { resolveUiScale } from '../shared/ui-scale'
 import { useAppTheme } from './state/useAppTheme'
+import { mountHubAutoConnect } from './session/hub-auto-connect'
 
 export default function App() {
   // Apply the terminal-rendering setting to the two GPU coordinators, live. 'auto' is
@@ -69,6 +70,12 @@ export default function App() {
   useEffect(() => {
     useViewMode.getState().setDefaultView(defaultView === 'kanban' ? 'kanban' : 'canvas')
   }, [defaultView])
+
+  // Mutual auto-connect for Hub team projects: every other online member's copy opens as a
+  // background tab, and theirs opens ours (session/hub-auto-connect.ts). Mounted at the root
+  // because it outlives any canvas: it listens to the Hub directory, not to the view. In the
+  // Server Edition the stubbed `hub` reports `disabled` and the controller stays inert.
+  useEffect(() => mountHubAutoConnect(), [])
 
   return (
     <SessionProvider session={localSession}>

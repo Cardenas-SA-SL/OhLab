@@ -559,6 +559,7 @@ export const IPC = {
   hubProjectsApprove: 'hub:projects:approve',
   hubProjectsRemove: 'hub:projects:remove',
   hubProjectsConnect: 'hub:projects:connect',
+  hubProjectsBind: 'hub:projects:bind',
   hubInviteRegenerate: 'hub:invite:regenerate',
   hubEvent: 'hub:event',
   relayClientConfirm: 'relay:client:confirm',

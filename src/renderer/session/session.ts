@@ -19,6 +19,9 @@ export interface WorkspaceSession {
   hostAccountId?: string
   memberName?: string
   machineLabel?: string
+  /** The Hub shared project this relay session is a member tab of (mutual auto-connect). With
+   *  `hostAccountId` it is the de-duplication key: never two tabs for one member+project. */
+  hubProjectId?: string
 }
 
 /** The per-session renderer store instances (the multiplayer tables that must not be shared
@@ -204,6 +207,13 @@ export function sessionForProject(projectId: string): WorkspaceSession {
 
 export function sessionById(sessionId: string): WorkspaceSession | undefined {
   return SESSIONS.get(sessionId)?.session
+}
+
+/** The project tab bound to a remote session (the inverse of `sessionForProject`), or undefined
+ *  for the local session and for a session no tab binds. */
+export function projectForSession(sessionId: string): string | undefined {
+  for (const [projectId, sid] of PROJECT_BINDINGS) if (sid === sessionId) return projectId
+  return undefined
 }
 
 export function workspaceSessions(): WorkspaceSession[] {

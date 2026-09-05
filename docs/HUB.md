@@ -8,11 +8,22 @@ Tailscale is the easiest and safest way to make one computer reachable from anot
 
 1. Sebastián opens Settings > Team, enables **Host a hub on this computer**, and leaves port `8791` selected.
 2. OhLab shows the Tailscale address when one is available. If it only shows a local-network address, confirm Tailscale is connected before continuing.
-3. Sebastián opens the project, returns to Settings > Team, selects **Share this project**, and copies the `ohlab-invite:...` code.
-4. His brother installs the OhLab DMG, opens Settings > Team, pastes the code under **Join with an invite code**, enters his name, and selects **Join**.
-5. Sebastián receives a notification and approves the pending row in Settings > Team. Decline rejects it instead.
+3. Sebastián opens the project, returns to Settings > Team, selects **Share this project**, and copies the `ohlab-invite:...` code. Sharing binds the open project as his side of the team project and starts hosting it for approved members.
+4. His brother installs the OhLab DMG, opens Settings > Team, pastes the code under **Join with an invite code**, enters his name, chooses his side of the project (**Create an empty project named "..."**, the default, or **Use the current project as my side**), and selects **Join**.
+5. Sebastián receives a notification and approves the pending row in Settings > Team. Decline rejects it instead. Approving connects both ways at once.
 6. Both enable **Agent messaging for this project** in Team. The setting is deliberately per-project and must be on at both ends.
-7. Each member now appears with a live online indicator. Select **Open** to open the other computer's project as a tab.
+7. Each member now appears with a live online indicator, their machine, and the agents they are running. Nobody clicks Open: whenever a member is online, their copy of the project opens here as a tab named `<project> · <member>`, and yours opens for them.
+
+## Symmetric sharing
+
+A shared project has one copy per member, each on that member's own machine, and every member sees every other member's copy:
+
+- Sebastián sees his own tab plus **Horacio Team · Jorge** and **Horacio Team · Ana**; Jorge sees his own plus Sebastián's and Ana's. The tabs open in the background and never take the view you are working in.
+- A member who goes offline is a greyed tab that reconnects by itself when they are back. Agent reads and sends against a greyed tab are refused with "member offline".
+- Closing a member's tab is remembered on this computer (`hubMutedMembers` in `settings.json`): it does not reopen until you select **Open** on that member in Team. **Close** in Team does the same.
+- A member who has not bound a local project yet is listed as "not sharing an agent canvas yet". Their tab appears the moment they share or join with a side of their own.
+- The binding between a local project and the team project is machine-local (`hubProjectId` on the workspace index entry). It is never written into the shared `.nodeterm/project.json`, so cloning a repository never enrolls the clone in a team.
+- `ohlab list` on any member shows every other member's agents with the member and machine on each row; `link --to <id>` reads them and `send`/`reply` talk to them.
 
 The embedded Hub binds all interfaces. OhLab does not use UPnP or open router ports. A plain LAN address only works within one home unless you configure Tailscale or a port forward yourself.
 
@@ -53,7 +64,9 @@ One residual worth knowing: a standing (phone) host token is minted from a publi
 | --- | --- |
 | Cannot reach Hub | Confirm the host says **listening**, both computers are online in Tailscale, port `8791` is allowed by the host firewall, and the invite contains the shown Tailscale address rather than `127.0.0.1` or a home-only LAN address. |
 | Join stays pending forever | The owner must be online and select **Approve** in Settings > Team. Regenerating an invite invalidates the old code. |
-| Member is offline | Open OhLab on that computer and confirm Settings > Team says connected. **Open** remains disabled while the directory socket is offline. |
+| Member is offline | Open OhLab on that computer and confirm Settings > Team says connected. Their tab greys out here and reconnects on its own; **Open** stays disabled while they are offline. |
+| Member listed as "not sharing an agent canvas yet" | That member has no local side bound: they need to select **Share this project** (owner) or join with a side chosen in the Join dialog. |
+| A member's tab does not reappear | You closed it, so it is muted on this computer. Select **Open** on that member in Settings > Team. |
 | Agent messages are refused | Enable agent messaging for the shared project on both computers. After restarting OhLab, restart a warm-attached agent from its node menu before messaging it. |
 
 ## Privacy and authentication

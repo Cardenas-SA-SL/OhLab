@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { HubHostStatus, HubProject, HubStatus } from '@shared/types'
+import type { HubHostStatus, HubProject, HubProjectMember, HubStatus, Project } from '@shared/types'
 import { decodeHubInvite, encodeHubInvite } from '@shared/hub-invite'
+import { memberTabKey, mutedMemberKeys, resolveLocalSide } from '@shared/hub-local-side'
 import { useSettings } from '../../../state/settings'
 import { useProjects } from '../../../state/projects'
+import { useAgentStatus, type AgentNodeStatus } from '../../../state/agentStatus'
 import { loadIdentity } from '../../../state/presence'
-import { openRelayTab } from '../../../session/relay-tab'
+import { getSessionStores, sessionById } from '../../../session/session'
+import { relayNodesOf } from '../../../session/relay-nodes'
+import { hubMemberTabs, type HubMemberTab } from '../../../session/hub-auto-connect'
+import { memberCanvasState, type MemberCanvasState } from '../../../lib/hubAutoConnect'
 import { SettingsSection } from '../SettingsSection'
 import { SearchableRow } from '../SearchableRow'
 import { FieldRow } from '../FieldRow'
@@ -20,9 +25,81 @@ const ROW = {
   keywords: ['team', 'hub', 'invite', 'share', 'collaborate', 'remote', 'member']
 }
 
+/** One agent node as the Team panel lists it under a member: its title and what it is doing. */
+export interface TeamAgentRow {
+  id: string
+  title: string
+  state: 'RUNNING' | 'NEEDS YOU' | 'idle'
+}
+
+/** The agent rows for a set of nodes + their status table — the same RUNNING / NEEDS YOU rule the
+ *  kanban card uses (SessionCard), so a member's panel row never contradicts their card. */
+export function teamAgentRows(
+  nodes: ReadonlyArray<{ id: string; kind?: string; title?: string; agentId?: string }>,
+  statusById: Record<string, AgentNodeStatus | undefined>
+): TeamAgentRow[] {
+  return nodes
+    .filter((node) => (node.kind ?? 'terminal') === 'terminal' && !!node.agentId)
+    .map((node) => {
+      const status = statusById[node.id]
+      const state: TeamAgentRow['state'] =
+        status?.state === 'working' ? 'RUNNING'
+          : status?.state === 'waiting' || status?.state === 'blocked' ? 'NEEDS YOU'
+            : 'idle'
+      return { id: node.id, title: status?.session || node.title || node.id, state }
+    })
+}
+
+/** What a member's row says beside their name, per `memberCanvasState`. */
+export function memberCanvasCopy(state: MemberCanvasState, machine: string): string {
+  switch (state) {
+    case 'self': return machine
+    case 'pending': return 'waiting for approval'
+    case 'not-sharing': return 'not sharing an agent canvas yet'
+    case 'offline': return 'offline'
+    case 'muted': return 'tab closed'
+    case 'available': return 'connecting…'
+    case 'open': return ''
+  }
+}
+
+/** Re-render on any change to the controller's tabs or to the agent status of any listed session. */
+function useTeamLiveTick(tabs: readonly HubMemberTab[]): number {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const bump = (): void => setTick((n) => n + 1)
+    const unsubs: Array<() => void> = []
+    const controller = hubMemberTabs()
+    if (controller) unsubs.push(controller.subscribe(bump))
+    unsubs.push(useAgentStatus.subscribe(bump))
+    for (const tab of tabs) {
+      if (!sessionById(tab.sessionId)) continue
+      unsubs.push(getSessionStores(tab.sessionId).agentStatus.store.subscribe(bump))
+    }
+    return () => unsubs.forEach((un) => un())
+  }, [tabs.map((tab) => tab.sessionId).join('|')])
+  return tick
+}
+
+function AgentList({ rows }: { rows: TeamAgentRow[] }): React.JSX.Element | null {
+  if (rows.length === 0) return <p className="text-xs text-muted">No agents open.</p>
+  return (
+    <ul className="space-y-0.5">
+      {rows.map((row) => (
+        <li key={row.id} className="flex items-center gap-2 text-xs">
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${row.state === 'RUNNING' ? 'bg-green-500' : row.state === 'NEEDS YOU' ? 'bg-amber-500' : 'bg-muted'}`} />
+          <span className="truncate">{row.title}</span>
+          <span className="text-muted">{row.state}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: () => void }): React.JSX.Element {
   const settings = useSettings((state) => state.settings)
   const updateSettings = useSettings((state) => state.update)
+  const localProjects = useProjects((state) => state.projects)
   const activeProject = useProjects((state) => state.projects.find((project) => project.id === state.activeProjectId))
   const setProjectCapability = useProjects((state) => state.setProjectCapability)
   const [hubUrl, setHubUrl] = useState(settings.hubUrl)
@@ -32,9 +109,16 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
   const [projects, setProjects] = useState<HubProject[]>([])
   const [joinCode, setJoinCode] = useState('')
   const [joinName, setJoinName] = useState(accountName)
+  // Which local project becomes MY side of the project I am joining. "Create" is the default: a
+  // fresh, empty canvas named after the shared project, so joining never binds a repo the user
+  // happened to have open to somebody's team.
+  const [joinSide, setJoinSide] = useState<'create' | 'current'>('create')
   const [waiting, setWaiting] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const controller = hubMemberTabs()
+  const memberTabs = controller?.tabs() ?? []
+  useTeamLiveTick(memberTabs)
 
   const refresh = async (): Promise<void> => {
     const next = await window.nodeTerminal.hub.listProjects()
@@ -59,7 +143,7 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
       else if (event.type === 'host-status') setHostStatus(event.status)
       else if (event.type === 'invite-prefill') setJoinCode(event.invite)
       else if (event.type === 'member-approved') {
-        setWaiting('Approved. You can now open the owner\'s project.')
+        setWaiting('Approved. The owner\'s agents open as a tab as soon as they are online, and yours open for them.')
         void refresh().catch(() => {})
       } else if (event.type === 'member-declined') {
         setWaiting('The owner declined this join request.')
@@ -71,11 +155,15 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     return unsub
   }, [isActive, settings.hubUrl])
 
+  const localSides = useMemo(() => localProjects.filter((project) => !project.remote), [localProjects])
+  // The Hub project whose local side is the ACTIVE project — through the one resolver main uses.
   const myHubProject = useMemo(
-    () => projects.find((project) => project.projectId === activeProject?.id || project.name === activeProject?.name),
-    [projects, activeProject]
+    () => activeProject ? projects.find((project) => resolveLocalSide(project.projectId, localSides) === activeProject.id) : undefined,
+    [projects, activeProject, localSides]
   )
   const canManageActiveProject = canManageHubProject(myHubProject, status)
+  const muted = useMemo(() => mutedMemberKeys(settings.hubMutedMembers), [settings.hubMutedMembers])
+  const invite = useMemo(() => decodeHubInvite(joinCode), [joinCode])
 
   const run = async (action: () => Promise<void>): Promise<void> => {
     setBusy(true)
@@ -100,9 +188,15 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     void window.nodeTerminal.settings.save(next)
   }
 
+  /** Bind a local project as this machine's side of a shared project: the store persists it
+   *  (machine-local), main is told so it hosts and publishes the `sharing` flag at once. */
+  const bindLocalSide = async (hubProjectId: string, localProjectId: string): Promise<void> => {
+    useProjects.getState().setProjectHubBinding(localProjectId, hubProjectId)
+    await window.nodeTerminal.hub.bindProject(hubProjectId, localProjectId)
+  }
+
   const join = (): void => {
     void run(async () => {
-      const invite = decodeHubInvite(joinCode)
       if (!invite) throw new Error('That invite code is invalid or incomplete.')
       const configured = settings.hubUrl.trim()
       if (configured && configured !== invite.hub && !window.confirm(`This invite uses ${invite.hub}. Switch from ${configured}?`)) return
@@ -114,7 +208,24 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
       await window.nodeTerminal.settings.save(next)
       applyStatus(await window.nodeTerminal.hub.connect())
       const project = await window.nodeTerminal.hub.joinProject(invite.code)
-      setWaiting(`Waiting for the owner to approve ${project.name}. Both sides need agent messaging enabled.`)
+      // Every member has a local side: bind it now, so the moment the owner approves, both
+      // directions connect without a second step here.
+      const store = useProjects.getState()
+      const localProjectId = joinSide === 'current' && activeProject
+        ? activeProject.id
+        : store.addProject(project.name).id
+      await bindLocalSide(project.projectId, localProjectId)
+      const sideName = store.getProject(localProjectId)?.name ?? project.name
+      setWaiting(`Waiting for the owner to approve ${project.name}. "${sideName}" is your side of it; both computers also need agent messaging enabled.`)
+      await refresh()
+    })
+  }
+
+  const share = (): void => {
+    void run(async () => {
+      if (!activeProject) return
+      const created = await window.nodeTerminal.hub.createProject(activeProject.name, activeProject.id)
+      await bindLocalSide(created.projectId, activeProject.id)
       await refresh()
     })
   }
@@ -129,29 +240,74 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     name: myHubProject.name
   }) : ''
 
-  const openMember = (project: HubProject, accountId: string, label: string): void => {
-    void run(async () => {
-      const { offer } = await window.nodeTerminal.hub.connectMember(
-        project.projectId,
-        accountId,
-        thisMachineCap()
-      )
-      const connectionId = await window.nodeTerminal.relayClient.connect(offer, { autoConfirm: true })
-      const mounting = openRelayTab(connectionId, label, {
-        relayClient: window.nodeTerminal.relayClient,
-        addProject: (name) => useProjects.getState().addProject(name),
-        adoptProject: (remote) => useProjects.getState().adoptProject(remote),
-        setActiveProject: (id) => useProjects.getState().setActive(id),
-        hostAccountId: accountId,
-        memberName: project.members?.find((m) => m.accountId === accountId)?.name ?? label,
-        machineLabel: `${label}'s computer`
-      })
-      await mounting
-    })
+  const myMachine = status.machineLabel || thisMachineCap()
+
+  /** The agent rows for one member row: ours from the bound local project, theirs from the open tab. */
+  const agentRowsFor = (project: HubProject, member: HubProjectMember, tab: HubMemberTab | undefined): TeamAgentRow[] | null => {
+    if (member.accountId === status.accountId) {
+      const localId = resolveLocalSide(project.projectId, localSides)
+      const local = localId ? localSides.find((candidate) => candidate.id === localId) : undefined
+      if (!local) return null
+      return teamAgentRows(local.nodes, useAgentStatus.getState().byId)
+    }
+    if (!tab || !sessionById(tab.sessionId)) return null
+    const remote = useProjects.getState().getProject(tab.projectId)
+    const byId = new Map<string, Project['nodes'][number]>()
+    for (const node of remote?.nodes ?? []) byId.set(node.id, node)
+    for (const node of relayNodesOf(tab.sessionId)) byId.set(node.id, node)
+    return teamAgentRows([...byId.values()], getSessionStores(tab.sessionId).agentStatus.store.getState().byId)
+  }
+
+  const renderMember = (project: HubProject, member: HubProjectMember): React.JSX.Element => {
+    const isOwner = project.ownerAccountId === status.accountId
+    const key = memberTabKey(project.projectId, member.accountId)
+    const tab = memberTabs.find((candidate) => candidate.key === key)
+    const canvasState = memberCanvasState(member, { myAccountId: status.accountId, muted: muted.has(key), open: !!tab })
+    const rows = canvasState === 'self' || canvasState === 'open' ? agentRowsFor(project, member, tab) : null
+    const machine = member.accountId === status.accountId ? myMachine : (member.machineLabel ?? '')
+    const detail = memberCanvasCopy(canvasState, machine)
+    const canToggle = member.accountId !== status.accountId && member.status === 'approved' && member.sharing === true
+    return (
+      <div key={member.accountId} className="space-y-1 rounded-md border border-border/60 p-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate">
+            <span aria-label={member.online ? 'online' : 'offline'} className={`mr-2 inline-block h-2 w-2 rounded-full ${member.online ? 'bg-green-500' : 'bg-muted'}`} />
+            <strong>{member.name}</strong>
+            <span className="ml-1 text-xs text-muted">
+              {member.accountId !== status.accountId && member.machineLabel ? `· ${member.machineLabel} ` : ''}
+              · {member.role} · {member.status}
+            </span>
+            {tab?.status === 'offline' ? <span className="ml-1 text-xs text-amber-500">· reconnecting</span> : null}
+            {detail ? <span className="ml-1 text-xs text-muted">· {detail}</span> : null}
+            {status.verifyCodes?.[member.publicKeyB64] ? <span className="ml-1 text-xs text-muted" title="The code both computers derived for this pair of identities. Compare it with this member once, out of band: it is the same on both screens only if the Hub gave each side the other's real key.">· verify code <strong className="font-mono">{status.verifyCodes[member.publicKeyB64]}</strong></span> : null}
+          </span>
+          <div className="flex shrink-0 gap-2">
+            {member.status === 'pending' && isOwner ? <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.approveMember(project.projectId, member.accountId); await refresh() })}>Approve</Button> : null}
+            {member.status === 'pending' && isOwner ? <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.removeMember(project.projectId, member.accountId); await refresh() })}>Decline</Button> : null}
+            {member.role !== 'owner' && member.status === 'approved' && isOwner ? <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.removeMember(project.projectId, member.accountId); await refresh() })}>Remove</Button> : null}
+            {canToggle && tab ? (
+              <Button onClick={() => controller?.close(project.projectId, member.accountId)}>Close</Button>
+            ) : canToggle ? (
+              <Button
+                title={!member.online ? 'This member is offline' : undefined}
+                disabled={!member.online || !controller}
+                onClick={() => void run(() => controller!.open(project.projectId, member.accountId))}
+              >Open</Button>
+            ) : null}
+          </div>
+        </div>
+        {rows ? (
+          <div className="pl-4">
+            <p className="text-xs text-muted">{rows.length} agent{rows.length === 1 ? '' : 's'}</p>
+            <AgentList rows={rows} />
+          </div>
+        ) : null}
+      </div>
+    )
   }
 
   return (
-    <SettingsSection id="team-access" title="Team" description="Connect to your self-hosted OhLab Hub and share projects with approved members." isActive={isActive} searchEntries={[ROW]}>
+    <SettingsSection id="team-access" title="Team" description="Connect to your self-hosted OhLab Hub and share projects with approved members. Every member sees every other member's agents." isActive={isActive} searchEntries={[ROW]}>
       <SearchableRow {...ROW}>
         <div className="space-y-6">
           <div className="space-y-3">
@@ -189,7 +345,7 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
             <FieldRow label="Account name" control={<Input className="w-80" value={accountName} placeholder="Your name" onChange={(event) => setAccountName(event.target.value)} />} />
             <div className="flex items-center gap-3">
               <Button variant="primary" disabled={busy || !hubUrl.trim()} onClick={connect}>Connect</Button>
-              <span className="text-sm text-muted">{status.state}{status.accountName ? ` as ${status.accountName}` : ''}</span>
+              <span className="text-sm text-muted">{status.state}{status.accountName ? ` as ${status.accountName}` : ''}{status.state === 'connected' && status.machineLabel ? ` on ${status.machineLabel}` : ''}</span>
             </div>
           </div>
 
@@ -200,6 +356,18 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
               <Input className="w-44" value={joinName} onChange={(event) => setJoinName(event.target.value)} placeholder="Your name" />
               <Button disabled={busy || !joinCode.trim()} onClick={join}>Join</Button>
             </div>
+            <fieldset className="space-y-1 text-sm">
+              <legend className="text-xs text-muted">My side of {invite?.name ? `"${invite.name}"` : 'the shared project'}</legend>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="hub-join-side" checked={joinSide === 'create'} onChange={() => setJoinSide('create')} />
+                <span>Create an empty project named {invite?.name ? `"${invite.name}"` : 'after it'}</span>
+              </label>
+              <label className={`flex items-center gap-2${activeProject ? '' : ' opacity-60'}`}>
+                <input type="radio" name="hub-join-side" disabled={!activeProject} checked={joinSide === 'current'} onChange={() => setJoinSide('current')} />
+                <span>Use the current project as my side{activeProject ? ` ("${activeProject.name}")` : ''}</span>
+              </label>
+              <p className="text-xs text-muted">Members see the agents on your side; you see theirs. The binding stays on {thisMachineCap().toLowerCase()} and is never written into the shared project file.</p>
+            </fieldset>
             {waiting ? <p className="text-sm text-muted">{waiting}</p> : null}
           </div>
 
@@ -215,7 +383,10 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
                       <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.regenerateInvite(myHubProject.projectId); await refresh() })}>Regenerate</Button>
                     </div>
                   ) : (
-                    <Button disabled={busy || !activeProject} onClick={() => void run(async () => { await window.nodeTerminal.hub.createProject(activeProject?.name ?? 'Shared project', activeProject?.id); await refresh() })}>Share this project</Button>
+                    <>
+                      <Button disabled={busy || !activeProject} onClick={share}>Share this project</Button>
+                      <p className="text-xs text-muted">Hosts the current project for approved members and opens each member's copy as a tab here, as soon as they are online. Approving a member connects both ways.</p>
+                    </>
                   )}
                 </div>
               ) : null}
@@ -230,22 +401,22 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
               />
 
               <div className="space-y-4">
-                {projects.map((project) => (
-                  <div key={project.projectId} className="space-y-2 rounded-lg border border-border p-3">
-                    <div className="flex items-center justify-between"><strong className="text-sm">{project.name}</strong><span className="text-xs text-muted">{project.members?.length ?? 0} members</span></div>
-                    {project.members?.map((member) => (
-                      <div key={member.accountId} className="flex items-center justify-between gap-3 text-sm">
-                        <span><span aria-label={member.online ? 'online' : 'offline'} className={`mr-2 inline-block h-2 w-2 rounded-full ${member.online ? 'bg-green-500' : 'bg-muted'}`} />{member.name} <span className="text-xs text-muted">{member.machineLabel ? `· ${member.machineLabel} ` : ''}· {member.role} · {member.status}</span>{status.verifyCodes?.[member.publicKeyB64] ? <span className="ml-2 text-xs text-muted" title="The code both computers derived for this pair of identities. Compare it with this member once, out of band: it is the same on both screens only if the Hub gave each side the other's real key.">verify code <strong className="font-mono">{status.verifyCodes[member.publicKeyB64]}</strong></span> : null}</span>
-                        <div className="flex gap-2">
-                          {member.status === 'pending' && project.ownerAccountId === status.accountId ? <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.approveMember(project.projectId, member.accountId); await refresh() })}>Approve</Button> : null}
-                          {member.status === 'pending' && project.ownerAccountId === status.accountId ? <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.removeMember(project.projectId, member.accountId); await refresh() })}>Decline</Button> : null}
-                          {member.role !== 'owner' && member.status === 'approved' && project.ownerAccountId === status.accountId ? <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.removeMember(project.projectId, member.accountId); await refresh() })}>Remove</Button> : null}
-                          {member.accountId !== status.accountId && member.status === 'approved' ? <Button title={!member.online ? 'This member is offline' : undefined} disabled={!member.online} onClick={() => openMember(project, member.accountId, member.name)}>Open</Button> : null}
-                        </div>
+                {projects.map((project) => {
+                  const localId = resolveLocalSide(project.projectId, localSides)
+                  const local = localId ? localSides.find((candidate) => candidate.id === localId) : undefined
+                  return (
+                    <div key={project.projectId} className="space-y-2 rounded-lg border border-border p-3">
+                      <div className="flex items-center justify-between">
+                        <strong className="text-sm">{project.name}</strong>
+                        <span className="text-xs text-muted">
+                          {local ? `your side: "${local.name}" · ` : 'no local side yet · '}
+                          {project.members?.length ?? 0} members
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                ))}
+                      {project.members?.map((member) => renderMember(project, member))}
+                    </div>
+                  )
+                })}
               </div>
             </>
           ) : null}

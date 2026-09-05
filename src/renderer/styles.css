@@ -7649,6 +7649,10 @@ button.group-node__setup:disabled {
 .ss-group__name { font-size: 12px; font-weight: 600; color: var(--text); }
 .ss-group.is-active .ss-group__name { color: var(--accent); }
 .ss-group__branch { font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A team member's tab: the member the sessions belong to, with their reachability. */
+.ss-group__member { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-group__member-dot { width: 6px; height: 6px; border-radius: 50%; background: #34c759; flex: none; }
+.ss-group__member--offline .ss-group__member-dot { background: var(--muted); }
 .ss-group__count { font-size: 10px; color: var(--muted); }
 /* Signal badges on the project header: 🔔 needs-you count / ✓ unread count. Visible even
    while the group is collapsed — that's their main job. */

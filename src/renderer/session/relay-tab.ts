@@ -28,6 +28,7 @@ import {
 } from './session'
 import { useProjects } from '../state/projects'
 import { markWorkspaceDirty } from '../state/workspaceDirty'
+import { applyRelayNodeMutation, clearRelayNodes, seedRelayNodes } from './relay-nodes'
 
 /** Backstop for a `ready()` that neither approves nor closes (the network vanished without a FIN). */
 const APPROVAL_TIMEOUT_MS = 60_000
@@ -52,6 +53,22 @@ export interface RelayTabDeps {
   hostAccountId?: string
   memberName?: string
   machineLabel?: string
+  /** The Hub shared project this tab is a member tab of (mutual auto-connect). Recorded on the
+   *  session so `hostAccountId` + this pair de-duplicates tabs per member+project. */
+  hubProjectId?: string
+  /** The tab's name. Default: the host's own project name (the manual "Remote host" flow). A
+   *  member tab passes "<project> · <member>" so three members' copies of one shared project do
+   *  not all read as the same tab. */
+  tabName?: string
+  /** Make the tab active once it is live (default true — the manual flow, where the human just
+   *  asked for it). Mutual auto-connect passes FALSE: a member coming online must never steal
+   *  the user's view (the same rule an agent's `open-*` follows — never move the camera on a
+   *  background event's say-so). */
+  activate?: boolean
+  /** RECONNECT ONLY: the host's current project, so the reused tab's serialized nodes are brought
+   *  back in step with the host (a member who was offline for an hour has changed their canvas).
+   *  Omitted on the manual reconnect path, which keeps its pre-existing behaviour. */
+  refreshProject?: (projectId: string, hostProject: Project) => void
 }
 
 export interface RelayTab {
@@ -102,13 +119,27 @@ export async function openRelayTab(
     const hostProject = ws.projects[0]
     const projectId =
       hostProject && deps.adoptProject
-        ? deps.adoptProject({ ...hostProject, remote: true }).id
+        ? deps.adoptProject({
+            ...hostProject,
+            ...(deps.tabName ? { name: deps.tabName } : {}),
+            remote: true
+          }).id
         : deps.addProject(label).id
+    // A reconnect reuses the tab (no adopt lever), so its serialized nodes are whatever the tab
+    // held when the socket dropped; the host has moved on since. Bring them back in step now, from
+    // the same bootstrap a first connect adopts.
+    if (hostProject && !deps.adoptProject) deps.refreshProject?.(projectId, hostProject)
     bindProjectToSession(projectId, session.id)
+    // The session's LIVE node set (relay-nodes.ts): seeded from the bootstrap and fed by every peer
+    // mutation below, whichever tab is active — the leg that answers "does any relay session list
+    // this node?" for `send`/`link`/`list` without a canvas at either end (lib/nodeHome.ts).
+    seedRelayNodes(session.id, hostProject?.nodes ?? [])
+    holdSessionTeardown(session.id, () => clearRelayNodes(session.id))
     // Keep a relay project's serialized canvas current even while another tab is active. Canvas
     // owns the live React Flow array only when this tab is visible; without this per-session leg,
     // agent-facing `ohlab list` read the stale project store until the human switched tabs.
     holdSessionTeardown(session.id, handle.api.canvas.onMutation((_remoteProjectId, mutation) => {
+      applyRelayNodeMutation(session.id, mutation)
       const projects = useProjects.getState()
       if (projects.activeProjectId === projectId) return
       if (projects.applyNodeMutation(projectId, mutation)) markWorkspaceDirty()
@@ -117,8 +148,11 @@ export async function openRelayTab(
     session.hostAccountId = deps.hostAccountId
     session.memberName = deps.memberName ?? label
     session.machineLabel = deps.machineLabel ?? label
-    setActiveSession(session.id)
-    deps.setActiveProject(projectId)
+    session.hubProjectId = deps.hubProjectId
+    if (deps.activate !== false) {
+      setActiveSession(session.id)
+      deps.setActiveProject(projectId)
+    }
 
     return {
       sessionId: session.id,

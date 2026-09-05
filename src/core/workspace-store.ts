@@ -344,6 +344,7 @@ export class WorkspaceStore {
               breadcrumbs: e.breadcrumbs,
               closedSessions: e.closedSessions,
               capabilityAck: e.capabilityAck,
+              hubProjectId: e.hubProjectId,
               localExec: this.execOverlay(e, p)
             })
           })
@@ -366,6 +367,7 @@ export class WorkspaceStore {
               breadcrumbs: e.breadcrumbs,
               closedSessions: e.closedSessions,
               capabilityAck: e.capabilityAck,
+              hubProjectId: e.hubProjectId,
               localExec: this.execOverlay(e, e.cache)
             })
           })
@@ -851,6 +853,7 @@ export class WorkspaceStore {
       breadcrumbs: e.breadcrumbs,
       closedSessions: e.closedSessions,
       capabilityAck: e.capabilityAck,
+      hubProjectId: e.hubProjectId,
       localExec: this.execOverlay(e, read.file)
     })
     e.project = project
@@ -973,6 +976,9 @@ export class WorkspaceStore {
         // The clone-notice acknowledgment must also survive an unavailable window: forgetting it
         // would re-raise a notice the user already answered the moment the folder remounts.
         if (old?.capabilityAck) e.capabilityAck = old.capabilityAck
+        // The Hub binding must survive an unavailable window too: forgetting it would silently
+        // un-share the project from its team the moment its folder is briefly unmounted.
+        if (old?.hubProjectId) e.hubProjectId = old.hubProjectId
         // A data-ref placeholder (its file was unreadable at load) must stay a data-ref. Without
         // this the entry comes back as a PRE-FILE inline entry holding the placeholder's
         // `nodes: []` — the empty canvas becomes the stored truth and the file it named is
@@ -1220,6 +1226,7 @@ export class WorkspaceStore {
       breadcrumbs: e.breadcrumbs,
       closedSessions: e.closedSessions,
       capabilityAck: e.capabilityAck,
+      hubProjectId: e.hubProjectId,
       localExec: e.localExec
     })
   }
@@ -1878,13 +1885,16 @@ function nodesMissingFrom(base: CanvasNodeState[], from: CanvasNodeState[]): Can
 }
 
 /** A labeled grey placeholder for a ref whose file can't be read right now. */
-function unavailableProject(e: { id: string; name: string; color: string; closed?: boolean; closedAt?: number; cwd?: string; ssh?: Project['ssh'] }): Project {
+function unavailableProject(e: { id: string; name: string; color: string; closed?: boolean; closedAt?: number; cwd?: string; ssh?: Project['ssh']; hubProjectId?: string }): Project {
   return {
     id: e.id, name: e.name, color: e.color,
     viewport: { x: 0, y: 0, zoom: 1 }, nodes: [],
     ...(e.cwd ? { cwd: e.cwd } : {}), ...(e.ssh ? { ssh: e.ssh } : {}),
     ...(e.closed ? { closed: true } : {}),
     ...(e.closedAt ? { closedAt: e.closedAt } : {}),
+    // The Hub binding is identity-adjacent, not content: a greyed placeholder still IS this
+    // machine's side of its team project (the Team panel keeps saying so while the folder is away).
+    ...(e.hubProjectId ? { hubProjectId: e.hubProjectId } : {}),
     unavailable: true
   }
 }

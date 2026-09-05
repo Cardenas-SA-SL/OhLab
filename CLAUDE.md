@@ -228,7 +228,7 @@ Persistence has two layers:
 
   In all three the file carries CONTENT and the entry carries the machine-local half — project
   `id`, `viewport`, `defaultAccountId`, `breadcrumbs`, `closedSessions`, `localApprovalId`,
-  `localExec`, `localSettings` (the #510 rule). The renderer contract is untouched: `workspace.load()/save()` still
+  `localExec`, `localSettings`, `hubProjectId` (the #510 rule). The renderer contract is untouched: `workspace.load()/save()` still
   speak an assembled v2-shaped `Workspace`; all fan-out lives in `core/workspace-store.ts` +
   pure `core/workspace-files.ts`. v2 files migrate on first save (backup `workspace.v2.bak`,
   one-time renderer note). Outside edits (git pull/sync) are detected by
@@ -3168,6 +3168,46 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   fail-safe is to do nothing, which is indistinguishable from the feature working.
 - **Theme**: macOS dark palette as CSS tokens in `styles.css` `:root` (`--accent` = systemBlue,
   label/separator opacities, SF font stack). Canvas background is black with dot grid.
+
+## Hub team projects (symmetric sharing)
+
+A shared project on the OhLab Hub (`docs/HUB.md`) has N members and N copies — one local project
+per member, on that member's own machine; "a canvas never holds nodes from two machines" stands.
+Every member's app hosts its copy for the others and opens each other online member's copy as a
+remote tab, for BOTH sides, without anyone clicking Open. The rules that make this hold:
+
+- **The binding is machine-local: `Project.hubProjectId` rides `IndexEntryV3.hubProjectId` and is
+  never written into `.nodeterm/project.json`** — a repo must not be able to enrol a clone in a
+  team (`workspace-files.hub-binding.test.ts` pins both directions). ONE resolver answers "which
+  local project is my side": `resolveLocalSide` (`@shared/hub-local-side`; bound id, then the
+  legacy id match Task 1's owners have, never a name match), asked by main's session-request
+  acceptance, by the `sharing` flag main publishes to the Hub, and by the Team panel.
+- **The other side's binding is a Hub fact** (`HubProjectMember.sharing`, `POST
+  /v1/projects/:id/sharing`, the `member-sharing` event): a member without a local side is shown
+  as "not sharing an agent canvas yet" and is never dialled — dialling them would hang on a
+  refused session request for the whole approval timeout.
+- **Auto-connect decides purely and dials effectfully.** `renderer/lib/hubAutoConnect.ts`
+  (approved + online + sharing + both bound + not muted + not already open/in flight, keyed
+  `memberTabKey(hubProjectId, accountId)`) is the decision; `session/hub-auto-connect.ts` owns
+  sockets, tabs and the bounded backoff (`RECONNECT_DELAYS_MS`, `MAX_DIAL_ATTEMPTS`). A drop greys
+  the tab and reconnects IN PLACE (never a second tab); a member going offline waits for their
+  `member-online`, not a timer. Closing a member's tab is the user's "not now":
+  `settings.hubMutedMembers` (machine-local) holds it until Open in Team.
+- **Member tabs open in the BACKGROUND** (`openRelayTab` `activate: false`, `adoptProject(…,
+  {activate:false})`) — the same rule as an agent's `open-*`: a member coming online is a
+  background event and must never move the user's view.
+- **Every agent verb that names a node asks `findNodeHome`** (`renderer/lib/nodeHome.ts`): the
+  serialized store, then the live canvas (only for `nodesProjectIdRef`'s project), then every
+  relay session's LIVE node set (`session/relay-nodes.ts`, seeded from the host's bootstrap and
+  fed by every `canvas:mut` whichever tab is active). The two-instance run found `send` reading
+  only the store — a node the host added while the guest's tab was on screen was "listed" by
+  `list` and answered `targetGone` by `send`, because the miss fell through to the LOCAL
+  PtyManager. A node any relay session lists never routes local (`messageRouteFor`, pinned).
+- **Attribution names the sender's REGISTERED machine**: the Hub's `connect` route advertises the
+  caller's `Account.machineLabel` (its hostname) over the body's label, main's `peerScope` prefers
+  the directory row's label, and the renderer never sends its own "This Mac" — that label is true
+  on the sender's screen and wrong on every other. The source title prefers a user-typed title,
+  then the agent's session name, over an auto-tracked first-prompt title (`preferredSourceTitle`).
 
 ## Remote access (phone relay) — free, not Pro
 

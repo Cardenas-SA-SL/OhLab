@@ -465,6 +465,7 @@ const api: NodeTerminalApi = {
     connectMember: (projectId, accountId, machineLabel) => machineLabel === undefined
       ? ipcRenderer.invoke(IPC.hubProjectsConnect, projectId, accountId)
       : ipcRenderer.invoke(IPC.hubProjectsConnect, projectId, accountId, machineLabel),
+    bindProject: (hubProjectId, localProjectId) => ipcRenderer.invoke(IPC.hubProjectsBind, hubProjectId, localProjectId),
     regenerateInvite: (projectId) => ipcRenderer.invoke(IPC.hubInviteRegenerate, projectId),
     onEvent: subscribeHubEvent
   },

@@ -26,7 +26,7 @@ import { useProjects } from '../state/projects'
 import { useSettings } from '../state/settings'
 import { useAgentStatus } from '../state/agentStatus'
 import { useSessionNaming } from '../state/sessionNaming'
-import { useSession } from '../session/session'
+import { sessionForProject, useSession } from '../session/session'
 
 const HISTORY_COLLAPSE_KEY = 'history'
 
@@ -83,7 +83,24 @@ export function SessionsSidebar(props: SessionsSidebarProps): JSX.Element | null
   const { open, pinned, liveActiveNodes } = props
   const allProjects = useProjects((s) => s.projects)
   // Closed projects are hidden from the tab bar; hide them from the sidebar too.
-  const projects = useMemo(() => allProjects.filter((p) => !p.closed), [allProjects])
+  // A team member's tab (a relay session) is grouped under the MEMBER, not just the tab name:
+  // three members' copies of one shared project would otherwise be three rows that all read as
+  // the project. Resolved through the session registry — the binding is runtime-only.
+  const projects = useMemo(
+    () => allProjects.filter((p) => !p.closed).map((p) => {
+      const owner = sessionForProject(p.id)
+      if (owner.source !== 'relay') return p
+      return {
+        ...p,
+        member: {
+          name: owner.memberName ?? owner.label,
+          machine: owner.machineLabel ?? owner.label,
+          online: owner.status === 'connected' && !p.unavailable
+        }
+      }
+    }),
+    [allProjects]
+  )
   const activeProjectId = useProjects((s) => s.activeProjectId)
   const statusById = useAgentStatus((s) => s.byId)
   const namingById = useSessionNaming((s) => s.byId)
@@ -663,6 +680,15 @@ export function SessionsSidebar(props: SessionsSidebarProps): JSX.Element | null
                   className="ss-group__monogram"
                 />
                 <span className="ss-group__name">{g.projectName}</span>
+                {g.member && (
+                  <span
+                    className={`ss-group__member${g.member.online ? '' : ' ss-group__member--offline'}`}
+                    title={`${g.member.name}'s sessions on ${g.member.machine}${g.member.online ? '' : ' (offline)'}`}
+                  >
+                    <span aria-label={g.member.online ? 'online' : 'offline'} className="ss-group__member-dot" />
+                    {g.member.name}
+                  </span>
+                )}
                 {branches[g.projectId] && (
                   <span className="ss-group__branch">⎇ {branches[g.projectId]}</span>
                 )}
