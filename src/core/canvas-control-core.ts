@@ -15,6 +15,21 @@ import { NODE_COLORS } from '@shared/node-colors'
 import { codexThreadIdentityResolverSh } from './codex-thread-identity-sh'
 
 /**
+ * The symmetric team model in two sentences, carried by BOTH agent-facing bodies (the skill and
+ * the marker block) so an orchestrator on any member's machine reads the same contract. A shared
+ * project has one tab per member and every member's tab lists that member's agents; a member who
+ * is offline is a greyed tab, and reads/sends against it are refused with "member offline".
+ * `canvas-control-core.test.ts` pins these lines in both bodies.
+ */
+export const TEAM_TABS_LINES = [
+  'Team projects (OhLab Hub) are symmetric: every member of a shared project has their own tab here,',
+  'and each member\'s tab lists that member\'s agents — use `list` to find them (rows carry the',
+  'member and machine), `link --to <id>` to read them, and `send`/`reply` to talk to them. A member',
+  'who is offline is a greyed tab: reads and sends to their nodes are refused with "member offline"',
+  'until their tab reconnects on its own.'
+] as const
+
+/**
  * The messaging verbs' retry guidance, RENDERED from `RETRYABLE` — the table is the source, and
  * re-typing it in prose is how the skill text and the code drift (the `Record` type keeps the
  * table exhaustive, so a new outcome kind lands in these lines the day it is added).
@@ -28,6 +43,7 @@ function messagingGuidanceLines(): string[] {
     'Messaging outcomes (send/reply/notify): every reply names a typed outcome and says whether',
     '`list` also shows nodes in open relay tabs with member, machine and online state. Cross-machine',
     '`send`/`reply` use the same receipts; "member offline" is final until that tab reconnects.',
+    ...TEAM_TABS_LINES,
     'retrying can help — believe the reply over your instincts:',
     `- Worth retrying, after the wait the reply names: ${yes.join(', ')}.`,
     `- NOT worth retrying — the cause will not clear on its own: ${no.join(', ')}.`,

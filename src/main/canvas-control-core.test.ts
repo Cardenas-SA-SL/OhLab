@@ -5,6 +5,7 @@ import {
   mergeCanvasControlBlock,
   buildCanvasControlInstructions,
   buildCanvasSkillBody,
+  TEAM_TABS_LINES,
   CONTROL_SHIM_SCRIPT,
   CONTROL_UNREACHABLE_MSG
 } from '../core/canvas-control-core'
@@ -231,6 +232,18 @@ describe('parseControlRequest', () => {
     expect(skill).toContain('group --nodes <id,id> [--label "Frontend Team"] [--color C]')
     expect(skill).toContain('color --node <id,id> --color C')
     expect(body.toLowerCase()).toContain('confirm')
+  })
+
+  // Symmetric sharing (Task 4): both agent-facing bodies must explain the team model — one tab
+  // per member listing that member's agents, `list`/`link`/`send` across them, and "member
+  // offline" as the refusal against a greyed tab — or an orchestrator on a guest machine keeps
+  // asking the user to relay what it could have read itself.
+  it('both agent-facing texts explain the symmetric team model', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/ohlab.sh')]) {
+      for (const line of TEAM_TABS_LINES) expect(body).toContain(line)
+      expect(body).toMatch(/every member of a shared project has their own tab/)
+      expect(body).toContain('"member offline"')
+    }
   })
 
   // The parser change in this commit's sibling is only half a fix: an agent that never learns the
