@@ -48,6 +48,18 @@ function rms(chunk: Float32Array): number {
   return Math.min(1, Math.sqrt(sumSquares / chunk.length))
 }
 
+export interface PcmCaptureOptions {
+  /** Live per-chunk delivery (mono 16 kHz Float32; a worklet block is 128 samples = 8 ms). The
+   *  voice-conversation VAD listens here instead of waiting for `stop()`. */
+  onChunk?: (chunk: Float32Array) => void
+  /** The audio track ended OUTSIDE our control — device unplugged, permission revoked mid-run,
+   *  another app took the device. Never fired by our own `stop()`/`cancel()`. */
+  onEnded?: () => void
+  /** Keep every chunk for `stop()` (default true — dictation's whole-take model). A continuous
+   *  listener passes false so an hour of listening does not hold an hour of audio. */
+  retain?: boolean
+}
+
 /**
  * Captures the default microphone as mono 16 kHz PCM until `stop()`.
  * `teardown()` resets to constructor state, so a fresh `start()` after
@@ -57,6 +69,11 @@ export class PcmCapture {
   private chunks: Float32Array[] = []
   private lastChunk: Float32Array = new Float32Array(0)
   private running = false
+  private readonly opts: PcmCaptureOptions
+
+  constructor(opts: PcmCaptureOptions = {}) {
+    this.opts = opts
+  }
 
   private stream: MediaStream | null = null
   private audioContext: AudioContext | null = null
@@ -83,14 +100,23 @@ export class PcmCapture {
       // able to stop these tracks — a live mic (OS indicator lit) must never
       // outlive a failed start().
       this.stream = stream
+      // `ended` is dispatched only for an END WE DID NOT CAUSE (the spec exempts our own
+      // `track.stop()`), so the `running` guard below is belt-and-braces, not the mechanism.
+      for (const track of stream.getAudioTracks()) {
+        track.addEventListener('ended', () => {
+          if (this.running) this.opts.onEnded?.()
+        })
+      }
       const audioContext = new AudioContext({ sampleRate: CAPTURE_SAMPLE_RATE })
       this.audioContext = audioContext
       const sourceNode = audioContext.createMediaStreamSource(stream)
       this.sourceNode = sourceNode
 
+      const retain = this.opts.retain !== false
       const onChunk = (chunk: Float32Array): void => {
         this.lastChunk = chunk
-        this.chunks.push(chunk)
+        if (retain) this.chunks.push(chunk)
+        this.opts.onChunk?.(chunk)
       }
 
       try {
@@ -183,6 +209,8 @@ export class PcmCapture {
   }
 
   private teardown(): void {
+    // First, so a late `ended` from a track we are stopping right now is never reported as a loss.
+    this.running = false
     if (this.workletNode) this.workletNode.port.onmessage = null
     this.workletNode?.disconnect()
     this.workletNode = null
