@@ -126,9 +126,24 @@ describe.skipIf(sandboxed)('Hub front door hardening', () => {
   })
 
   it('refuses an oversized body by its declared length before reading it', async () => {
-    const { base } = await boot()
-    const response = await post(base, '/v1/pair/token', { pad: 'x'.repeat(2 * 1024 * 1024) })
-    expect(response.status).toBe(413)
+    const { port } = await boot()
+    // Headers only, body never sent: the 413 must arrive on the declared length alone. Streaming
+    // the whole 2 MB through `fetch` raced the Hub's own close - the unread body still in the
+    // socket's receive buffer turns that close into a TCP reset, and undici lost the race between
+    // parsing the answer and seeing the reset often enough to fail this test on an idle machine.
+    const outcome = await new Promise<{ response: string; ms: number }>((resolve) => {
+      const started = Date.now()
+      let response = ''
+      const socket = net.connect(port, '127.0.0.1')
+      socket.on('connect', () => socket.write(`POST /v1/pair/token HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: ${2 * 1024 * 1024}\r\n\r\n`))
+      socket.on('data', (chunk) => { response += chunk.toString() })
+      socket.on('error', () => {})
+      socket.on('close', () => resolve({ response, ms: Date.now() - started }))
+    })
+    expect(outcome.response).toMatch(/^HTTP\/1\.1 413/)
+    expect(outcome.response).toMatch(/request body is too large/)
+    expect(outcome.response).toMatch(/connection: close/i)
+    expect(outcome.ms).toBeLessThan(3000)
   })
 
   it('meters WebSocket upgrades per address', async () => {
