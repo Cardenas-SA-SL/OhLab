@@ -226,6 +226,18 @@ describe('setProjectColor', () => {
   })
 })
 
+describe('setProjectHubBinding', () => {
+  it('keeps a shared project bound to exactly one local project', () => {
+    const first = useProjects.getState().addProject('First')
+    const second = useProjects.getState().addProject('Second')
+    useProjects.getState().setProjectHubBinding(first.id, 'hub-1')
+    useProjects.getState().setProjectHubBinding(second.id, 'hub-1')
+
+    expect(useProjects.getState().getProject(first.id)?.hubProjectId).toBeUndefined()
+    expect(useProjects.getState().getProject(second.id)?.hubProjectId).toBe('hub-1')
+  })
+})
+
 // Issue #318: the AgentsSection capability toggle (and the clone-notice answers) mutate the store
 // only — nothing scheduled a workspace save, so the choice was lost on restart unless an unrelated
 // canvas edit happened to dirty the workspace afterwards. The setters own the persist now, through

@@ -83,6 +83,7 @@ describe('TeamAccessSection', () => {
     expect(host.textContent).toContain('Jorge')
     expect(host.textContent).not.toContain('Share this project')
     expect(host.textContent).not.toContain('Regenerate')
+    expect(host.textContent).toContain('This project is your side of "Brothers"')
     const account = host.querySelector<HTMLInputElement>('input[placeholder="Your name"]')
     expect(account?.value).toBe('jorge')
   })
@@ -91,7 +92,8 @@ describe('TeamAccessSection', () => {
     stubHub('owner', 'sebastian')
     await mount()
 
-    expect(host.textContent).toContain('Share this project')
+    expect(host.textContent).toContain('Project sharing')
+    expect(host.textContent).toContain('This project is your side of "Brothers"')
     expect(host.textContent).toContain('Regenerate')
     expect(host.textContent).toContain('your side: "Brothers"')
   })
@@ -106,6 +108,47 @@ describe('TeamAccessSection', () => {
     expect(opens).toHaveLength(1)
     // Our own row names the machine the Hub registered and lists our agents.
     expect(host.textContent).toContain('my-host')
+  })
+
+  it('recovers a pre-binding membership from its project card without creating a duplicate Hub project', async () => {
+    useProjects.setState({
+      projects: [{ id: 'local-old', name: 'Project 1', color: '#fff', viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] }],
+      activeProjectId: 'local-old'
+    } as never)
+    stubHub('guest', 'jorge')
+    await mount()
+
+    expect(host.textContent).toContain('no local side yet')
+    expect(host.textContent).toContain('choose your side below to connect')
+    expect(host.textContent).toContain('Choose this project\'s team from the cards below')
+    expect([...host.querySelectorAll('button')].filter((item) => item.textContent === 'Share this project')).toHaveLength(0)
+    expect([...host.querySelectorAll('button')].filter((item) => item.textContent === 'Open')).toHaveLength(0)
+
+    await act(async () => { button('Use this project as my side').click() })
+    await act(async () => undefined)
+
+    expect(hub.createProject).not.toHaveBeenCalled()
+    expect(hub.bindProject).toHaveBeenCalledWith('p1', 'local-old')
+    expect(useProjects.getState().getProject('local-old')?.hubProjectId).toBe('p1')
+    expect(host.textContent).toContain('This project is your side of "Brothers"')
+  })
+
+  it('can create a fresh local side from an unbound project card without changing the active tab', async () => {
+    useProjects.setState({
+      projects: [{ id: 'scratch', name: 'Scratch', color: '#fff', viewport: { x: 0, y: 0, zoom: 1 }, nodes: [] }],
+      activeProjectId: 'scratch'
+    } as never)
+    stubHub('guest', 'jorge')
+    await mount()
+
+    await act(async () => { button('Create a new project as my side').click() })
+    await act(async () => undefined)
+
+    const created = useProjects.getState().projects.find((project) => project.id !== 'scratch')
+    expect(created).toMatchObject({ name: 'Brothers', hubProjectId: 'p1' })
+    expect(hub.bindProject).toHaveBeenCalledWith('p1', created!.id)
+    expect(hub.createProject).not.toHaveBeenCalled()
+    expect(useProjects.getState().activeProjectId).toBe('scratch')
   })
 
   it('"Share this project" binds the active project as this machine\'s side and tells main', async () => {
@@ -193,6 +236,7 @@ describe('team panel helpers', () => {
   it('memberCanvasCopy names every state', () => {
     expect(memberCanvasCopy('self', 'host-1')).toBe('host-1')
     expect(memberCanvasCopy('not-sharing', '')).toBe('not sharing an agent canvas yet')
+    expect(memberCanvasCopy('local-side-required', '')).toBe('choose your side below to connect')
     expect(memberCanvasCopy('pending', '')).toBe('waiting for approval')
     expect(memberCanvasCopy('offline', '')).toBe('offline')
     expect(memberCanvasCopy('muted', '')).toBe('tab closed')

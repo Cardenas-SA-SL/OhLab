@@ -108,15 +108,16 @@ export function shouldRetry(
 }
 
 /** How the Team panel describes a member's canvas: what to show beside their name. */
-export type MemberCanvasState = 'self' | 'pending' | 'not-sharing' | 'offline' | 'muted' | 'open' | 'available'
+export type MemberCanvasState = 'self' | 'pending' | 'not-sharing' | 'local-side-required' | 'offline' | 'muted' | 'open' | 'available'
 
 export function memberCanvasState(
   member: HubProjectMember,
-  ctx: { myAccountId: string | undefined; muted: boolean; open: boolean }
+  ctx: { myAccountId: string | undefined; muted: boolean; open: boolean; hasLocalSide?: boolean }
 ): MemberCanvasState {
   if (member.accountId === ctx.myAccountId) return 'self'
   if (member.status !== 'approved') return 'pending'
   if (member.sharing !== true) return 'not-sharing'
+  if (ctx.hasLocalSide === false) return 'local-side-required'
   if (!member.online) return 'offline'
   if (ctx.open) return 'open'
   if (ctx.muted) return 'muted'

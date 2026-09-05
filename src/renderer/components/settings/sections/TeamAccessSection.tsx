@@ -56,6 +56,7 @@ export function memberCanvasCopy(state: MemberCanvasState, machine: string): str
     case 'self': return machine
     case 'pending': return 'waiting for approval'
     case 'not-sharing': return 'not sharing an agent canvas yet'
+    case 'local-side-required': return 'choose your side below to connect'
     case 'offline': return 'offline'
     case 'muted': return 'tab closed'
     case 'available': return 'connecting…'
@@ -161,6 +162,13 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     () => activeProject ? projects.find((project) => resolveLocalSide(project.projectId, localSides) === activeProject.id) : undefined,
     [projects, activeProject, localSides]
   )
+  const unboundMemberships = useMemo(
+    () => projects.filter((project) =>
+      !resolveLocalSide(project.projectId, localSides) &&
+      project.members?.some((member) => member.accountId === status.accountId && member.status === 'approved')
+    ),
+    [projects, localSides, status.accountId]
+  )
   const canManageActiveProject = canManageHubProject(myHubProject, status)
   const muted = useMemo(() => mutedMemberKeys(settings.hubMutedMembers), [settings.hubMutedMembers])
   const invite = useMemo(() => decodeHubInvite(joinCode), [joinCode])
@@ -195,6 +203,24 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     await window.nodeTerminal.hub.bindProject(hubProjectId, localProjectId)
   }
 
+  const useCurrentSide = (project: HubProject): void => {
+    void run(async () => {
+      if (!activeProject || activeProject.remote) return
+      await bindLocalSide(project.projectId, activeProject.id)
+      setWaiting(`"${activeProject.name}" is now your side of ${project.name}. Member tabs will open automatically.`)
+      await refresh()
+    })
+  }
+
+  const createLocalSide = (project: HubProject): void => {
+    void run(async () => {
+      const local = useProjects.getState().addProject(project.name)
+      await bindLocalSide(project.projectId, local.id)
+      setWaiting(`Created "${local.name}" as your side of ${project.name}. Member tabs will open automatically.`)
+      await refresh()
+    })
+  }
+
   const join = (): void => {
     void run(async () => {
       if (!invite) throw new Error('That invite code is invalid or incomplete.')
@@ -224,6 +250,10 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
   const share = (): void => {
     void run(async () => {
       if (!activeProject) return
+      if (myHubProject) return
+      if (unboundMemberships.length > 0) {
+        throw new Error('Choose a local side for the shared project below before creating another one.')
+      }
       const created = await window.nodeTerminal.hub.createProject(activeProject.name, activeProject.id)
       await bindLocalSide(created.projectId, activeProject.id)
       await refresh()
@@ -262,11 +292,12 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
     const isOwner = project.ownerAccountId === status.accountId
     const key = memberTabKey(project.projectId, member.accountId)
     const tab = memberTabs.find((candidate) => candidate.key === key)
-    const canvasState = memberCanvasState(member, { myAccountId: status.accountId, muted: muted.has(key), open: !!tab })
+    const hasLocalSide = !!resolveLocalSide(project.projectId, localSides)
+    const canvasState = memberCanvasState(member, { myAccountId: status.accountId, muted: muted.has(key), open: !!tab, hasLocalSide })
     const rows = canvasState === 'self' || canvasState === 'open' ? agentRowsFor(project, member, tab) : null
     const machine = member.accountId === status.accountId ? myMachine : (member.machineLabel ?? '')
     const detail = memberCanvasCopy(canvasState, machine)
-    const canToggle = member.accountId !== status.accountId && member.status === 'approved' && member.sharing === true
+    const canToggle = hasLocalSide && member.accountId !== status.accountId && member.status === 'approved' && member.sharing === true
     return (
       <div key={member.accountId} className="space-y-1 rounded-md border border-border/60 p-2 text-sm">
         <div className="flex items-center justify-between gap-3">
@@ -373,23 +404,28 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
 
           {status.state === 'connected' ? (
             <>
-              {!myHubProject || canManageActiveProject ? (
-                <div className="space-y-3">
-                  <h4 className="text-[13px] font-medium text-text">Share this project</h4>
-                  {myHubProject ? (
+              <div className="space-y-3">
+                <h4 className="text-[13px] font-medium text-text">Project sharing</h4>
+                {myHubProject ? (
+                  <>
+                    <p className="text-sm text-muted">This project is your side of "{myHubProject.name}".</p>
+                    {canManageActiveProject ? (
                     <div className="flex items-center gap-2">
                       <Input className="w-72" readOnly value={inviteString} onFocus={(event) => event.target.select()} />
                       <CopyButton text={inviteString} label="Copy invite" />
                       <Button onClick={() => void run(async () => { await window.nodeTerminal.hub.regenerateInvite(myHubProject.projectId); await refresh() })}>Regenerate</Button>
                     </div>
-                  ) : (
+                    ) : null}
+                  </>
+                ) : unboundMemberships.length > 0 ? (
+                  <p className="text-xs text-muted">Choose this project's team from the cards below before creating another shared project.</p>
+                ) : (
                     <>
                       <Button disabled={busy || !activeProject} onClick={share}>Share this project</Button>
                       <p className="text-xs text-muted">Hosts the current project for approved members and opens each member's copy as a tab here, as soon as they are online. Approving a member connects both ways.</p>
                     </>
-                  )}
-                </div>
-              ) : null}
+                )}
+              </div>
 
               <FieldRow
                 label="Agent messaging for this project"
@@ -413,6 +449,16 @@ export function TeamAccessSection({ isActive }: { isActive: boolean; onClose?: (
                           {project.members?.length ?? 0} members
                         </span>
                       </div>
+                      {!local ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            disabled={busy || !activeProject || !!activeProject.remote}
+                            title={activeProject?.remote ? 'A remote tab cannot be your local side' : undefined}
+                            onClick={() => useCurrentSide(project)}
+                          >Use this project as my side</Button>
+                          <Button disabled={busy} onClick={() => createLocalSide(project)}>Create a new project as my side</Button>
+                        </div>
+                      ) : null}
                       {project.members?.map((member) => renderMember(project, member))}
                     </div>
                   )

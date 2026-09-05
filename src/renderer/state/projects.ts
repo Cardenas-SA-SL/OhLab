@@ -417,9 +417,17 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     if (!get().projects.some((p) => p.id === id)) return
     set((s) => ({
       projects: s.projects.map((p) => {
-        if (p.id !== id) return p
-        const { hubProjectId: _old, ...rest } = p
-        return hubProjectId ? { ...rest, hubProjectId } : rest
+        if (p.id === id) {
+          const { hubProjectId: _old, ...rest } = p
+          return hubProjectId ? { ...rest, hubProjectId } : rest
+        }
+        // One shared project has exactly one local side on this machine. Clear a stale binding
+        // before selecting another canvas, or the resolver's array order would choose at random.
+        if (hubProjectId && p.hubProjectId === hubProjectId) {
+          const { hubProjectId: _old, ...rest } = p
+          return rest
+        }
+        return p
       })
     }))
     markWorkspaceDirty()

@@ -63,6 +63,11 @@ let projects: HubProject[] = []
 const fakeHub = {
   approveMember: vi.fn(async () => projects[0]),
   removeMember: vi.fn(async () => projects[0]),
+  setSharing: vi.fn(async (projectId: string, sharing: boolean) => {
+    const project = projects.find((candidate) => candidate.projectId === projectId)!
+    project.members = project.members?.map((candidate) => candidate.accountId === 'me' ? { ...candidate, sharing } : candidate)
+    return project
+  }),
   connectMember: vi.fn(async () => ({ pairingToken: 'tok', relayUrl: 'ws://127.0.0.1:8791/relay', toPublicKeyB64: 'OWNER-KEY' }))
 }
 let clientOptions: { onStatus?: (status: HubStatus) => void; onEvent?: (event: HubEvent) => void } | null = null
@@ -80,6 +85,7 @@ vi.mock('../core/hub/client', () => ({
     async listProjects(): Promise<HubProject[]> { return projects }
     approveMember = fakeHub.approveMember
     removeMember = fakeHub.removeMember
+    setSharing = fakeHub.setSharing
     connectMember = fakeHub.connectMember
   }
 }))
@@ -115,7 +121,9 @@ function sessionRequest(overrides: Partial<{ projectId: string; relayUrl: string
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20))
 
-async function boot(): Promise<{ handlers: Record<string, (...args: unknown[]) => unknown>; sent: Array<{ channel: string; event: HubEvent }>; emit: (event: HubEvent) => Promise<void>; stop: () => void }> {
+async function boot(
+  resolveLocalProjectId: (shared: HubProject) => Promise<string | null> = async (shared) => `local:${shared.projectId}`
+): Promise<{ handlers: Record<string, (...args: unknown[]) => unknown>; sent: Array<{ channel: string; event: HubEvent }>; emit: (event: HubEvent) => Promise<void>; stop: () => void }> {
   const handlers: Record<string, (...args: unknown[]) => unknown> = {}
   const sent: Array<{ channel: string; event: HubEvent }> = []
   const win = { isDestroyed: () => false, webContents: { send: (channel: string, event: HubEvent) => sent.push({ channel, event }) } }
@@ -124,7 +132,7 @@ async function boot(): Promise<{ handlers: Record<string, (...args: unknown[]) =
     win as never,
     platform as never,
     () => ({ hubUrl: HUB_URL, hubAccountName: 'Me' }) as unknown as Settings,
-    async (shared) => `local:${shared.projectId}`
+    resolveLocalProjectId
   )
   await client.sync()
   return {
@@ -143,6 +151,7 @@ beforeEach(async () => {
   hostSessions.length = 0
   notifications.length = 0
   approvedDisk = { pubkeys: [] }
+  fakeHub.setSharing.mockClear()
   clearVerifyCodesForTests()
   vi.mocked(connectRelayHost).mockClear()
   await fs.rm(path.join(userData, 'hub-member-pins.json'), { force: true })
@@ -254,6 +263,26 @@ describe('initHubClient brokered sessions', () => {
     await hub.handlers[IPC.hubProjectsRemove]('p1', 'owner')
     fakeHub.connectMember.mockResolvedValueOnce({ pairingToken: 'tok', relayUrl: 'ws://127.0.0.1:8791/relay', toPublicKeyB64: 'SUBSTITUTED-KEY' })
     await expect(hub.handlers[IPC.hubProjectsConnect]('p1', 'owner')).resolves.toMatchObject({ offer: expect.any(String) })
+    hub.stop()
+  })
+
+  it('rebinding one local canvas stops advertising an accidental second Hub project', async () => {
+    const me = (sharing: boolean) => ({
+      accountId: 'me', name: 'Me', publicKeyB64: 'ME-KEY', role: 'member' as const,
+      status: 'approved' as const, joinedAt: 1, online: true, sharing
+    })
+    projects = [
+      { ...project('intended', [me(false)]), ownerAccountId: 'owner' },
+      { ...project('accidental', [me(true)]), ownerAccountId: 'me' }
+    ]
+    const hub = await boot(async () => 'same-local-canvas')
+    await flush()
+    fakeHub.setSharing.mockClear()
+
+    await hub.handlers[IPC.hubProjectsBind]('intended', 'same-local-canvas')
+
+    expect(fakeHub.setSharing.mock.calls).toEqual([['accidental', false]])
+    expect(projects.find((project) => project.projectId === 'intended')?.members?.[0].sharing).toBe(true)
     hub.stop()
   })
 })

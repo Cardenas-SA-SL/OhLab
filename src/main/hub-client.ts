@@ -299,8 +299,29 @@ export function initHubClient(
   platform.handle(IPC.hubProjectsBind, async (hubProjectId: unknown, localProjectId: unknown) => {
     const shared = String(hubProjectId ?? '')
     if (!shared) return
-    bindings.set(shared, typeof localProjectId === 'string' && localProjectId ? localProjectId : null)
-    await publishSharing(shared)
+    const local = typeof localProjectId === 'string' && localProjectId ? localProjectId : null
+    let replacedAnotherSide = false
+    if (local) {
+      // A local canvas can be one member's side of one Hub project. This matters when somebody
+      // joined before bindings existed, then accidentally used Share and created a second Hub
+      // project: choosing the intended card must also stop advertising the accidental one.
+      for (const [projectId, boundLocal] of bindings) {
+        if (projectId !== shared && boundLocal === local) {
+          bindings.set(projectId, null)
+          replacedAnotherSide = true
+        }
+      }
+      if (client && status.state === 'connected') {
+        for (const project of await client.listProjects()) {
+          if (project.projectId !== shared && await localSideOf(project) === local) {
+            bindings.set(project.projectId, null)
+            replacedAnotherSide = true
+          }
+        }
+      }
+    }
+    bindings.set(shared, local)
+    await publishSharing(replacedAnotherSide ? undefined : shared)
   })
   platform.handle(IPC.hubProjectsConnect, async (projectId: unknown, toAccountId: unknown, machineLabel?: unknown) => {
     const hub = await needClient()

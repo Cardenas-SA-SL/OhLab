@@ -135,6 +135,7 @@ describe('memberCanvasState', () => {
     expect(memberCanvasState(member({ accountId: 'me' }), ctx)).toBe('self')
     expect(memberCanvasState(member({ accountId: 'p', status: 'pending' }), ctx)).toBe('pending')
     expect(memberCanvasState(member({ accountId: 'n', sharing: false }), ctx)).toBe('not-sharing')
+    expect(memberCanvasState(member({ accountId: 'u' }), { ...ctx, hasLocalSide: false })).toBe('local-side-required')
     expect(memberCanvasState(member({ accountId: 'o', online: false }), ctx)).toBe('offline')
     expect(memberCanvasState(member({ accountId: 'a' }), { ...ctx, open: true })).toBe('open')
     expect(memberCanvasState(member({ accountId: 'a' }), { ...ctx, muted: true })).toBe('muted')
