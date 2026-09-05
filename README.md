@@ -52,6 +52,8 @@ started, concepts, agents, remote access, troubleshooting.
 
 Host a Hub inside OhLab, share one project with an invite code, approve teammates, and open each other's projects as live tabs across machines. Start with the [two-computer walkthrough and Tailscale setup](./docs/HUB.md).
 
+Guía rápida en español: [docs/GUIA-RAPIDA-ES.md](./docs/GUIA-RAPIDA-ES.md).
+
 ## ✨ Features
 
 <table>
