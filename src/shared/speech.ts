@@ -305,10 +305,12 @@ export function normalizeSpeechReplySettings(speech: {
   replyVoice?: unknown
   replyRate?: unknown
   speakReplies?: unknown
-}): { replyVoice: string; replyRate: number; speakReplies: boolean } {
+  voicePromptPrefix?: unknown
+}): { replyVoice: string; replyRate: number; speakReplies: boolean; voicePromptPrefix: boolean } {
   return {
     replyVoice: typeof speech.replyVoice === 'string' ? speech.replyVoice : '',
     replyRate: normalizeReplyRate(speech.replyRate),
-    speakReplies: typeof speech.speakReplies === 'boolean' ? speech.speakReplies : true
+    speakReplies: typeof speech.speakReplies === 'boolean' ? speech.speakReplies : true,
+    voicePromptPrefix: typeof speech.voicePromptPrefix === 'boolean' ? speech.voicePromptPrefix : true
   }
 }

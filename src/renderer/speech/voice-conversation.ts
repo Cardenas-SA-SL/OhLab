@@ -59,6 +59,9 @@ export interface VoiceState {
   speaking: boolean
   /** The last accepted transcription. */
   heard: string | null
+  /** The last reply made speakable — what the overlay shows while it is (or was) being spoken.
+   *  Cleared when the next prompt is submitted. */
+  replyText: string | null
   notice: VoiceNotice | null
   /** Fatal for this session (mic denied/lost, model missing); the toggle stays on so the chip can
    *  say why, and a resume/start retries. */
@@ -79,6 +82,7 @@ export const INITIAL_VOICE_STATE: VoiceState = {
   attentionSpoken: false,
   speaking: false,
   heard: null,
+  replyText: null,
   notice: null,
   error: null
 }
@@ -229,7 +233,7 @@ export function reduce(s: VoiceState, e: VoiceEvent, opts: ReduceOptions = DEFAU
       if (!s.active || s.paused) return same(s)
       if (!e.ok) return same({ ...s, notice: 'not-delivered' })
       return {
-        state: { ...s, awaitingReply: true, submittedAt: e.at, attentionSpoken: false, notice: null },
+        state: { ...s, awaitingReply: true, submittedAt: e.at, attentionSpoken: false, notice: null, replyText: null },
         effects: [{ kind: 'arm-reply-timeout', submittedAt: e.at }]
       }
     }
@@ -258,9 +262,9 @@ export function reduce(s: VoiceState, e: VoiceEvent, opts: ReduceOptions = DEFAU
     case 'reply': {
       if (!s.active || s.paused) return same(s)
       if (!e.text) return same({ ...s, reading: false, notice: 'no-reply' })
-      if (!opts.speakReplies) return same({ ...s, reading: false })
+      if (!opts.speakReplies) return same({ ...s, reading: false, replyText: e.text })
       const effects: VoiceEffect[] = []
-      const next = silence({ ...s, reading: false }, effects)
+      const next = silence({ ...s, reading: false, replyText: e.text }, effects)
       effects.push({ kind: 'guard-vad', on: true }, { kind: 'speak', text: e.text })
       return { state: { ...next, speaking: true }, effects }
     }

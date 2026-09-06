@@ -115,7 +115,8 @@ describe('SettingsStore nested-default merge', () => {
       // Fields added since (voice conversation) are FILLED, never a reason to touch the rest.
       replyVoice: '',
       replyRate: 1,
-      speakReplies: true
+      speakReplies: true,
+      voicePromptPrefix: true
     })
   })
 

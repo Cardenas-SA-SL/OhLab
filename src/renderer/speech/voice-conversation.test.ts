@@ -83,6 +83,21 @@ describe('voice conversation reducer', () => {
     ])
   })
 
+  it('keeps the spoken reply for the overlay until the next prompt goes out', () => {
+    const spoken = play([...ONE_TURN, { type: 'agent-done', at: 5000 }, { type: 'reply', text: 'Hay dos archivos.' }]).state
+    expect(spoken.replyText).toBe('Hay dos archivos.')
+    const after = play([{ type: 'speak-end' }], DEFAULT_REDUCE_OPTIONS, spoken).state
+    expect(after.replyText).toBe('Hay dos archivos.') // still readable while listening
+    const next = play([{ type: 'submitted', ok: true, at: 9000 }], DEFAULT_REDUCE_OPTIONS, after).state
+    expect(next.replyText).toBeNull()
+    // With speaking off the text is still shown — the overlay is the fallback for the ear.
+    const quiet = play(
+      [...ONE_TURN, { type: 'agent-done', at: 5000 }, { type: 'reply', text: 'Solo en pantalla.' }],
+      { minWords: 2, speakReplies: false }
+    ).state
+    expect(quiet.replyText).toBe('Solo en pantalla.')
+  })
+
   it('shows Heard "…" while thinking (the last accepted transcription)', () => {
     const { state } = play(ONE_TURN)
     expect(state.heard).toBe('hola Codex, muéstrame los archivos')

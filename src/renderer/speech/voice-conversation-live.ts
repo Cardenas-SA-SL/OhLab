@@ -8,16 +8,20 @@
  * injection, the record of every utterance handed to the synthesizer), installed only for a
  * `NT_MULTI` dev instance or a vite dev build — see `installVoiceTestSeam`.
  */
-import type { NodeTerminalApi } from '@shared/types'
+import type { ClaudeAccount, NodeTerminalApi, ObservedClaudeAccount } from '@shared/types'
+import { canVoiceConverse, createdAgentId } from '@shared/agents/config'
 import { hasSpeechModel, type LastReply, type LastReplyQuery } from '@shared/speech'
 import { decodeWavPcm16 } from '@shared/wav'
-import { agentEnvSnapshot } from '../lib/agentEnv'
+import { effectiveAccountId } from '../lib/accountChip'
+import { agentEnvReady, agentEnvSnapshot, refreshAgentEnv } from '../lib/agentEnv'
+import { readsClaudeTranscript } from '../lib/transcriptGates'
 import { PcmCapture } from '../lib/pcm-capture'
 import { agentStatusForApi } from '../state/agentStatus'
 import { useSettings } from '../state/settings'
 import { useVoiceConversation } from '../state/voiceConversation'
 import { phrasesFor, speakable } from './speakable'
-import { pickReplyVoice, replyLanguage, SynthSpeaker, type SpokenRecord } from './tts'
+import { ChunkedSpeaker, pickReplyVoice, replyLanguage, SynthSpeaker, type ReplySpeaker, type SpokenRecord } from './tts'
+import { voicePrompt } from './voice-prompt'
 import { VoiceConversation, type VoiceCapture, type VoiceDeps, type VoicePhase, type VoiceState } from './voice-conversation'
 
 /** Everything the loop needs to know about the node it talks to. `sessionId` is re-read from the
@@ -30,6 +34,34 @@ export interface VoiceTarget {
   cwd?: string
   accountId?: string
   agentSessionId?: string
+}
+
+/**
+ * The ONE decision "can this node hold a voice conversation, and as what": the header toggle, the
+ * kanban card modal, the node menu and the registry command all ask here, so none of them can
+ * disagree about the gate (`canVoiceConverse`) or about which account's transcript is read (the
+ * OBSERVED claude account for claude-shaped readers, the node's own for everyone else — the same
+ * split the ⌘M view makes). `null` = not an agent this feature can talk to.
+ */
+export function voiceTargetFor(
+  nodeId: string,
+  data: { agentId?: unknown; tags?: unknown; title?: unknown; cwd?: unknown; accountId?: unknown; agentSessionId?: unknown },
+  observedAccount: ObservedClaudeAccount | undefined,
+  claudeAccounts: readonly ClaudeAccount[]
+): VoiceTarget | null {
+  const agentId = createdAgentId(data)
+  if (!agentId || !canVoiceConverse(agentId)) return null
+  const dataAccount = typeof data.accountId === 'string' ? data.accountId : undefined
+  return {
+    nodeId,
+    agentId,
+    title: typeof data.title === 'string' && data.title ? data.title : 'Untitled',
+    cwd: typeof data.cwd === 'string' ? data.cwd : undefined,
+    accountId: readsClaudeTranscript(agentId)
+      ? effectiveAccountId(dataAccount, observedAccount, claudeAccounts)
+      : dataAccount,
+    agentSessionId: typeof data.agentSessionId === 'string' ? data.agentSessionId : undefined
+  }
 }
 
 interface Live {
@@ -50,11 +82,15 @@ class FakeCapture implements VoiceCapture {
   stop(): void {}
 }
 
-function speaker(): SynthSpeaker {
-  return new SynthSpeaker(window.speechSynthesis, undefined, undefined, undefined, (r) => {
-    spoken.push(r)
-    if (spoken.length > 50) spoken.shift()
-  })
+/** The mouth: sentence-chunked over the system synthesizer. `ReplySpeaker` is the seam an optional
+ *  cloud TTS would replace — one line here, nothing in the state machine. */
+function speaker(): ReplySpeaker {
+  return new ChunkedSpeaker(
+    new SynthSpeaker(window.speechSynthesis, undefined, undefined, undefined, (r) => {
+      spoken.push(r)
+      if (spoken.length > 50) spoken.shift()
+    })
+  )
 }
 
 function replyLang(): string {
@@ -68,7 +104,14 @@ function buildDeps(api: NodeTerminalApi, target: VoiceTarget): VoiceDeps {
     const speech = useSettings.getState().settings.speech
     const lang = replyLang()
     const voice = pickReplyVoice(window.speechSynthesis.getVoices(), speech.replyVoice, lang)
-    synth.speak({ text, voice, rate: speech.replyRate, lang }, onEnd)
+    synth.speak(
+      { text, voice, rate: speech.replyRate, lang },
+      () => {
+        useVoiceConversation.getState().setSpokenChunk(null)
+        onEnd()
+      },
+      (chunk) => useVoiceConversation.getState().setSpokenChunk(chunk)
+    )
   }
   return {
     createCapture: (onChunk, onEnded) =>
@@ -95,7 +138,13 @@ function buildDeps(api: NodeTerminalApi, target: VoiceTarget): VoiceDeps {
       if (!fakeMic && !(await api.speech.micConsent())) throw new Error(MIC_DENIED)
     },
     transcribe: async (pcm) => (await api.speech.transcribe(pcm)).text,
-    submit: (text) => api.pty.sendText(target.nodeId, text, { enter: true }),
+    // What the agent receives: the utterance wrapped in the "answer for speech" instruction when
+    // the prefix is on (renderer/speech/voice-prompt.ts). The chip/overlay keep showing the bare
+    // utterance as `heard`.
+    submit: (text) => {
+      const speech = useSettings.getState().settings.speech
+      return api.pty.sendText(target.nodeId, voicePrompt(text, replyLang(), speech.voicePromptPrefix), { enter: true })
+    },
     readReply: () => {
       const sessionId = status.getState().byId[target.nodeId]?.sessionId ?? target.agentSessionId
       if (!sessionId) return Promise.resolve(null)
@@ -221,12 +270,8 @@ export async function installVoiceTestSeam(api: NodeTerminalApi): Promise<boolea
   if (typeof window === 'undefined' || window.__ohlabVoiceTest) return !!window?.__ohlabVoiceTest
   let dev = import.meta.env.DEV
   if (!dev) {
-    try {
-      const env = await agentEnvSnapshot()
-      dev = !!env.NT_MULTI
-    } catch {
-      dev = false
-    }
+    if (!agentEnvReady()) await refreshAgentEnv()
+    dev = !!agentEnvSnapshot().NT_MULTI
   }
   if (!dev) return false
   window.__ohlabVoiceTest = {

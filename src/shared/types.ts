@@ -1278,6 +1278,10 @@ export interface SpeechSettings {
   /** Voice conversation: read the agent's reply aloud when its turn ends. Off = the loop still
    *  listens and submits, but the reply is only on screen. */
   speakReplies: boolean
+  /** Voice conversation: prefix every spoken prompt with a short "answer for speech" instruction
+   *  (1-3 short sentences, no code/lists/markdown, offer the screen for anything longer) in the
+   *  reply language — see renderer/speech/voice-prompt.ts. Off = the transcription goes as-is. */
+  voicePromptPrefix: boolean
 }
 
 /** xterm cursor shapes, mirrored here so `Settings` doesn't depend on the xterm typings (which
@@ -1812,7 +1816,8 @@ export const DEFAULT_SETTINGS: Settings = {
     // Voice conversation: system voice picked per reply language, natural rate, replies spoken.
     replyVoice: '',
     replyRate: 1,
-    speakReplies: true
+    speakReplies: true,
+    voicePromptPrefix: true
   },
 }
 

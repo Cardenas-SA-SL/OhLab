@@ -49,7 +49,8 @@ describe('whisper model catalog', () => {
       // Voice conversation: system voice per reply language, natural rate, replies spoken.
       replyVoice: '',
       replyRate: 1,
-      speakReplies: true
+      speakReplies: true,
+      voicePromptPrefix: true
     })
   })
 
@@ -65,15 +66,16 @@ describe('whisper model catalog', () => {
 
     it('reads a hand-edited settings.json defensively: strings stay strings, booleans stay booleans', () => {
       expect(
-        normalizeSpeechReplySettings({ replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 1.5, speakReplies: false })
-      ).toEqual({ replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 1.5, speakReplies: false })
+        normalizeSpeechReplySettings({ replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 1.5, speakReplies: false, voicePromptPrefix: false })
+      ).toEqual({ replyVoice: 'com.apple.voice.compact.es-MX.Paulina', replyRate: 1.5, speakReplies: false, voicePromptPrefix: false })
       // A truthy string is NOT "on": the switch could not render it and the loop would speak anyway.
-      expect(normalizeSpeechReplySettings({ replyVoice: 42, replyRate: '2', speakReplies: 'yes' })).toEqual({
+      expect(normalizeSpeechReplySettings({ replyVoice: 42, replyRate: '2', speakReplies: 'yes', voicePromptPrefix: 'no' })).toEqual({
         replyVoice: '',
         replyRate: REPLY_RATE_DEFAULT,
-        speakReplies: true
+        speakReplies: true,
+        voicePromptPrefix: true
       })
-      expect(normalizeSpeechReplySettings({})).toEqual({ replyVoice: '', replyRate: 1, speakReplies: true })
+      expect(normalizeSpeechReplySettings({})).toEqual({ replyVoice: '', replyRate: 1, speakReplies: true, voicePromptPrefix: true })
     })
   })
 

@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  ChunkedSpeaker,
   normalizeLang,
   pickReplyVoice,
   replyLanguage,
+  splitSentences,
   SynthSpeaker,
   voicesForLanguage,
   type SpokenRecord,
@@ -142,5 +144,94 @@ describe('SynthSpeaker', () => {
     expect(first).toHaveBeenCalledTimes(1)
     expect(second).not.toHaveBeenCalled()
     expect(h.spoken.map((u) => u.text)).toEqual(['one', 'two'])
+  })
+})
+
+describe('voice quality ranking', () => {
+  it('prefers Premium, then Enhanced, then compact — and keeps region order inside a tier', () => {
+    const list: VoiceLike[] = [
+      v('Mónica', 'es_ES'),
+      v('Paulina (Enhanced)', 'es_MX'),
+      v('Paulina', 'es_MX'),
+      v('Mónica (Premium)', 'es_ES'),
+      v('Eddy (español (Chile))', 'es_CL')
+    ]
+    expect(voicesForLanguage(list, 'es-CL').map((x) => x.name)).toEqual([
+      'Mónica (Premium)',
+      'Paulina (Enhanced)',
+      'Eddy (español (Chile))',
+      'Paulina',
+      'Mónica'
+    ])
+    expect(pickReplyVoice(list, '', 'es-CL')?.name).toBe('Mónica (Premium)')
+  })
+})
+
+describe('splitSentences', () => {
+  it('cuts at sentence ends, glues tiny fragments, splits run-on sentences at a comma', () => {
+    expect(splitSentences('Hay dos archivos. El primero es package.json! ¿Quieres verlos? OK.')).toEqual([
+      'Hay dos archivos.',
+      'El primero es package.json!',
+      '¿Quieres verlos? OK.'
+    ])
+    expect(splitSentences('')).toEqual([])
+    const long = Array.from({ length: 12 }, (_, i) => `parte número ${i + 1} de una frase interminable`).join(', ')
+    const pieces = splitSentences(long, 12, 100)
+    expect(pieces.length).toBeGreaterThan(2)
+    for (const p of pieces) expect(p.length).toBeLessThanOrEqual(100)
+    expect(pieces.join(' ').replace(/\s+/g, ' ')).toBe(long)
+  })
+})
+
+describe('ChunkedSpeaker', () => {
+  function inner() {
+    const spoken: { text: string; end: () => void }[] = []
+    const speaker = {
+      speak: vi.fn((req: { text: string }, onEnd: () => void) => {
+        spoken.push({ text: req.text, end: onEnd })
+      }),
+      cancel: vi.fn(),
+      speaking: () => false
+    }
+    return { speaker, spoken }
+  }
+
+  it('speaks one sentence at a time, announcing each, and ends once after the last', () => {
+    const h = inner()
+    const s = new ChunkedSpeaker(h.speaker)
+    const chunks: string[] = []
+    const onEnd = vi.fn()
+    s.speak({ text: 'Uno largo aquí. Dos largo aquí. Tres largo aquí.', rate: 1, lang: 'es' }, onEnd, (t) => chunks.push(t))
+    expect(h.spoken.map((x) => x.text)).toEqual(['Uno largo aquí.'])
+    expect(s.speaking()).toBe(true)
+    h.spoken[0].end()
+    h.spoken[1].end()
+    expect(onEnd).not.toHaveBeenCalled()
+    h.spoken[2].end()
+    expect(chunks).toEqual(['Uno largo aquí.', 'Dos largo aquí.', 'Tres largo aquí.'])
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(s.speaking()).toBe(false)
+  })
+
+  it('cancel drops the queue and the piece in flight, settling onEnd exactly once (barge-in)', () => {
+    const h = inner()
+    const s = new ChunkedSpeaker(h.speaker)
+    const onEnd = vi.fn()
+    s.speak({ text: 'Primera frase larga. Segunda frase larga. Tercera frase larga.', rate: 1, lang: 'es' }, onEnd)
+    s.cancel()
+    expect(h.speaker.cancel).toHaveBeenCalledTimes(1)
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    // A late end from the cancelled piece must not resurrect the queue.
+    h.spoken[0].end()
+    expect(h.spoken).toHaveLength(1)
+    expect(onEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it('an empty reply ends immediately', () => {
+    const h = inner()
+    const onEnd = vi.fn()
+    new ChunkedSpeaker(h.speaker).speak({ text: '   ', rate: 1, lang: 'es' }, onEnd)
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    expect(h.spoken).toEqual([])
   })
 })
