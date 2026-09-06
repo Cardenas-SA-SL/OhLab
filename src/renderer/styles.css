@@ -12777,7 +12777,8 @@ body.focus-mode .dock:hover {
   padding: 24px 28px;
   text-align: center;
   color: var(--text);
-  background: rgba(12, 12, 14, 0.82);
+  /* The theme's content ground, mostly opaque: dark on the dark theme, parchment on the light one. */
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   cursor: default;
@@ -12801,7 +12802,7 @@ body.focus-mode .dock:hover {
 }
 
 .voice-orb__core {
-  background: radial-gradient(circle at 38% 34%, rgba(255, 255, 255, 0.75), var(--orb) 55%, color-mix(in srgb, var(--orb) 55%, #000) 100%);
+  background: radial-gradient(circle at 38% 34%, rgba(255, 255, 255, 0.75), var(--orb) 55%, color-mix(in srgb, var(--orb) 55%, var(--bg)) 100%);
   box-shadow: 0 0 40px 6px color-mix(in srgb, var(--orb) 55%, transparent);
   animation: voice-breathe 3.2s ease-in-out infinite;
 }
