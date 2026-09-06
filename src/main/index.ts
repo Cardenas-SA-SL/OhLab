@@ -235,6 +235,7 @@ import { WhisperModelStore } from '../core/speech/whisper-models'
 import { SpeechService } from '../core/speech/speech-service'
 import { registerSpeechIpc } from '../core/speech/register-ipc'
 import { registerLastReplyIpc } from '../core/speech/last-reply'
+import { installVoiceModeInstructions } from '../core/voice-mode-instructions'
 import { initClaudeAccounts } from './claude-accounts'
 import { initCodexAccounts } from './codex-accounts'
 import { claudeCliCaps, registerClaudeCliIpc, type ClaudeCliCaps } from '../core/claude-cli'
@@ -2507,6 +2508,9 @@ app.whenReady().then(async () => {
   )
 
   installManagedAgentHooks()
+  // Voice conversation's "answer for speech" rules, merged into each agent's global instructions
+  // (core/voice-mode-instructions.ts) — the same marker-block idiom as the context-link note.
+  installVoiceModeInstructions()
   // Managed accounts each carry their own settings.json AND skills/ (Claude Code resolves both
   // relative to CLAUDE_CONFIG_DIR) — re-install the hook + canvas skill there too (idempotent),
   // so an app update's new versions reach every account dir. The loop is shared with the Server

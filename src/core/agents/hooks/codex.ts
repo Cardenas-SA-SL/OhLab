@@ -28,6 +28,7 @@ import { randomUUID } from 'crypto'
 import { renameAtomicSync } from '../../fs-atomic'
 import { buildManagedScript } from './managed-script'
 import { normalizeHookCommand } from './install-helper'
+import { systemCodexHome } from '../../codex-accounts-core'
 import { buildCodexWindowsWrapper, CODEX_WINDOWS_WRAPPER_FILE } from './codex-windows-wrapper'
 import {
   computeTrustedHash,
@@ -80,8 +81,11 @@ type HookDefinition = { hooks?: HookCommandConfig[]; [k: string]: unknown }
 export type HooksConfig = { hooks?: Record<string, HookDefinition[]>; [k: string]: unknown }
 
 function codexHome(): string {
-  // Default CODEX_HOME. We intentionally write into the user's REAL ~/.codex.
-  return path.join(homedir(), '.codex')
+  // The CLI's OWN home: `$CODEX_HOME` when the user (or a dev instance) relocated it, else the
+  // real `~/.codex` — never a managed account's home, which gets its hooks by env at launch. This
+  // used to ignore `$CODEX_HOME`, so a relocated codex loaded no hooks.json at all and reported
+  // nothing (measured on a dev instance run with an isolated home: no RUNNING badge, no done).
+  return systemCodexHome()
 }
 
 function hooksJsonPath(): string {

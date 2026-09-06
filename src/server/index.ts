@@ -97,6 +97,7 @@ import { WhisperModelStore } from '../core/speech/whisper-models'
 import { SpeechService } from '../core/speech/speech-service'
 import { registerSpeechIpc } from '../core/speech/register-ipc'
 import { registerLastReplyIpc } from '../core/speech/last-reply'
+import { installVoiceModeInstructions } from '../core/voice-mode-instructions'
 import { getStoredEntitlement } from '../core/license'
 
 // Same env-override + default as src/core/check.ts / license.ts / src/main/telemetry.ts — each
@@ -569,6 +570,7 @@ export async function startServer(
     try {
       // Fail-open: installManagedAgentHooks is itself best-effort, but a throw must never block boot.
       installManagedAgentHooks()
+      installVoiceModeInstructions()
     } catch (e) {
       console.warn('[nodeterm-server] managed hook install failed', e)
     }
