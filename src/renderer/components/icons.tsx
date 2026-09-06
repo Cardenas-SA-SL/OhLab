@@ -368,3 +368,12 @@ export const IconRestoreSize = () => (
     <path d="M4 20l6-6" />
   </svg>
 )
+
+/** Voice conversation (talk to an agent node, hear its replies): a headset. */
+export const IconHeadset = () => (
+  <svg {...S}>
+    <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+    <path d="M4 14h3v6H5.5A1.5 1.5 0 0 1 4 18.5V14zM20 14h-3v6h1.5a1.5 1.5 0 0 0 1.5-1.5V14z" />
+    <path d="M17 20v1.5a1.5 1.5 0 0 1-1.5 1.5H12" />
+  </svg>
+)

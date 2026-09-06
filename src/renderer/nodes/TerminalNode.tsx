@@ -135,7 +135,11 @@ import {
 import { shouldAutoWake, shouldColdResume } from '../terminal/hibernation-policy'
 import { WakeInputBuffer } from '../terminal/wake-input-buffer'
 import { FindBar } from '../components/FindBar'
-import { IconSearch, IconChat, IconMic, IconReload, IconEye, IconEyeOff, IconGrid } from '../components/icons'
+import { IconSearch, IconChat, IconMic, IconReload, IconEye, IconEyeOff, IconGrid, IconHeadset } from '../components/icons'
+import { VoiceChip } from '../components/VoiceChip'
+import { VoiceOverlay } from '../components/VoiceOverlay'
+import { useVoiceActiveOn, useVoiceConversation } from '../state/voiceConversation'
+import { stopVoiceConversation, toggleVoiceConversation, voiceTargetFor } from '../speech/voice-conversation-live'
 import { NodeLabels } from '../components/kanban/NodeLabels'
 import { Tooltip } from '../components/Tooltip'
 import { useTerminalSearch } from '../terminal/useTerminalSearch'
@@ -1239,7 +1243,11 @@ export function TerminalNode({
   const uploadNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => {
     if (uploadNoteTimer.current) clearTimeout(uploadNoteTimer.current)
-  }, [])
+    // A node leaving the screen — closed, or its project switched away — takes its voice
+    // conversation with it: a microphone must never stay open for a node nobody can see. A no-op
+    // for every node the conversation is not on.
+    stopVoiceConversation(id)
+  }, [id])
   const [naming, setNaming] = useState(false)
   // Is a glyph grid attached RIGHT NOW? Drives the `term-node--glyphgrid` class on the node ROOT,
   // which is what turns the node into a transparent window onto the shared canvas (see styles.css).
@@ -1552,6 +1560,13 @@ export function TerminalNode({
    *  finally reveals the account (see its comment). */
   const accountForReadsRef = useRef(accountForReads)
   accountForReadsRef.current = accountForReads
+  // Voice conversation (docs/VOICE.md): the header toggle + chip, for an agent whose turns we can
+  // hear end AND whose transcript we can read (`canVoiceConverse`, decided in `voiceTargetFor`).
+  // Not on a relay tab: its `speech` namespace is this machine's, and the reply read would answer
+  // from the wrong disk.
+  const voiceTarget = session.source === 'relay' ? null : voiceTargetFor(id, data, observedAccount, claudeAccounts)
+  const voiceOn = useVoiceActiveOn(id)
+  const voiceOverlayHidden = useVoiceConversation((s) => s.overlayHidden)
   // Fan-out (subagent/loop card) visibility + tidy — any agent capable of either kind of card.
   const fanoutCapable = !!agentId && (canSubagent(agentId) || canRecur(agentId))
   const hideFanout = !!data.hideFanout
@@ -5064,6 +5079,8 @@ export function TerminalNode({
             </button>
           )
         )}
+        {/* Voice conversation: the live phase of the one conversation, when it is on THIS node. */}
+        {voiceOn && <VoiceChip nodeId={id} />}
         {/* Dismissed (cron/schedule) entries are retained as a fact but hidden everywhere they
             were shown before — chip included, so the × still does exactly what it always did to
             the screen. See agentStatus's `loop.dismissed`. */}
@@ -5239,6 +5256,29 @@ export function TerminalNode({
             </button>
           </Tooltip>
         )}
+        {/* Voice conversation toggle (agent nodes we can hear AND read — see `voiceTarget`). The
+            same control sits in the kanban card modal header and the node menu; the chip beside
+            the status badges shows where the conversation stands. */}
+        {voiceTarget && !isHidden('voice', hiddenHeaderButtons) && (
+          <Tooltip
+            label={
+              voiceOn
+                ? 'Voice conversation is on — click to stop and release the microphone'
+                : `Voice conversation: talk to ${agentLabel} and hear its replies`
+            }
+          >
+            <button
+              className={`term-node__voice nodrag${voiceOn ? ' term-node__voice--on' : ''}`}
+              aria-pressed={voiceOn}
+              onClick={(e) => {
+                e.stopPropagation()
+                toggleVoiceConversation(voiceTarget, api)
+              }}
+            >
+              <IconHeadset />
+            </button>
+          </Tooltip>
+        )}
         {!isHidden('ai-name', hiddenHeaderButtons) && (
           <Tooltip label="Name with AI (from terminal output)">
             <button className="term-node__ai nodrag" disabled={naming} onClick={nameWithAi}>
@@ -5329,6 +5369,9 @@ export function TerminalNode({
         onDrop={onBodyDrop}
         onPasteCapture={onBodyPaste}
       >
+        {/* Hands-free voice mode: the orb + live text + Pause/Stop over the terminal while the
+            conversation is on this node; "Show on screen" steps it aside (the header chip stays). */}
+        {voiceOn && !voiceOverlayHidden && <VoiceOverlay nodeId={id} />}
         <div
           className={`term-node__xterm nodrag nowheel${co.letterbox ? ' letterboxed' : ''}`}
           ref={bodyRef}

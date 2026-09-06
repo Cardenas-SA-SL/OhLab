@@ -12614,3 +12614,364 @@ body.focus-mode .dock:hover {
 .files-node.collapsed .files-node__header {
   border-bottom: none;
 }
+
+/* ---- Voice conversation (docs/VOICE.md): header toggle + live state chip ---- */
+.term-node__voice {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.term-node__voice:hover {
+  background: rgba(10, 132, 255, 0.18);
+  color: var(--accent-text);
+}
+
+/* On: the same accent fill the other pressed header controls use, so "this node is listening"
+   reads at a glance across a canvas of nodes. */
+.term-node__voice--on {
+  background: var(--accent);
+  color: #fff;
+}
+
+.term-node__voice--on:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* The chip: one per canvas (only one node listens at a time). Colour = phase; the label is
+   ellipsized so a long "Heard …" never widens the header. */
+.term-node__status--voice {
+  color: var(--accent-text);
+  max-width: 240px;
+  min-width: 0;
+}
+
+.term-node__status--voice .term-node__status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.term-node__status--voice-hearing {
+  color: var(--success);
+}
+
+.term-node__status--voice-hearing .term-node__status-dot {
+  animation: nt-pulse 0.5s ease-in-out infinite;
+}
+
+/* Transcribing / thinking share RUNNING's clay: the agent (or whisper) is working for you. */
+.term-node__status--voice-transcribing,
+.term-node__status--voice-thinking {
+  color: #d97757;
+}
+
+.term-node__status--voice-transcribing .term-node__status-dot,
+.term-node__status--voice-thinking .term-node__status-dot,
+.term-node__status--voice-speaking .term-node__status-dot {
+  animation: nt-pulse 1.1s ease-in-out infinite;
+}
+
+.term-node__status--voice-speaking {
+  color: #bf7af0;
+}
+
+.term-node__status--voice-paused,
+.term-node__status--voice-starting,
+.term-node__status--voice-downloading {
+  color: var(--muted);
+}
+
+.term-node__status--voice-error {
+  color: var(--danger);
+}
+
+.voice-chip__pause {
+  flex-shrink: 0;
+  margin-left: 2px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.voice-chip__pause:hover {
+  background: rgba(var(--tint-rgb), 0.12);
+  border-color: rgba(var(--tint-rgb), 0.2);
+}
+
+/* Kanban card modal: the same chip in the board's badge idiom. */
+.kanban-badge--voice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-text);
+  background: rgba(10, 132, 255, 0.12);
+  max-width: 260px;
+  min-width: 0;
+}
+
+.kanban-badge--voice .term-node__status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kanban-badge--voice-hearing {
+  color: var(--success);
+  background: rgba(50, 215, 75, 0.12);
+}
+
+.kanban-badge--voice-transcribing,
+.kanban-badge--voice-thinking {
+  color: #d97757;
+  background: rgba(217, 119, 87, 0.12);
+}
+
+.kanban-badge--voice-speaking {
+  color: #bf7af0;
+  background: rgba(191, 122, 240, 0.12);
+}
+
+.kanban-badge--voice-paused,
+.kanban-badge--voice-starting,
+.kanban-badge--voice-downloading {
+  color: var(--muted);
+  background: rgba(var(--tint-rgb), 0.08);
+}
+
+.kanban-badge--voice-error {
+  color: var(--danger);
+  background: rgba(255, 69, 58, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term-node__status--voice .term-node__status-dot {
+    animation: none;
+  }
+}
+
+/* ---- Voice mode overlay (docs/VOICE.md): the orb, the live text and the big controls ---- */
+.voice-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6; /* above the xterm and the hover guard, below the header */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 28px;
+  text-align: center;
+  color: var(--text);
+  background: rgba(12, 12, 14, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: default;
+}
+
+/* The orb: a core that breathes and two rings whose motion is the phase. Colour per phase via
+   --orb; every animation stops under reduced motion (the colour still says the state). */
+.voice-orb {
+  --orb: var(--accent);
+  position: relative;
+  width: 112px;
+  height: 112px;
+  flex-shrink: 0;
+}
+
+.voice-orb__core,
+.voice-orb__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.voice-orb__core {
+  background: radial-gradient(circle at 38% 34%, rgba(255, 255, 255, 0.75), var(--orb) 55%, color-mix(in srgb, var(--orb) 55%, #000) 100%);
+  box-shadow: 0 0 40px 6px color-mix(in srgb, var(--orb) 55%, transparent);
+  animation: voice-breathe 3.2s ease-in-out infinite;
+}
+
+.voice-orb__ring {
+  border: 2px solid color-mix(in srgb, var(--orb) 70%, transparent);
+  opacity: 0;
+}
+
+.voice-overlay--listening .voice-orb { --orb: var(--accent); }
+.voice-overlay--starting .voice-orb,
+.voice-overlay--downloading .voice-orb,
+.voice-overlay--paused .voice-orb { --orb: #8e8e93; }
+.voice-overlay--hearing .voice-orb { --orb: var(--success); }
+.voice-overlay--transcribing .voice-orb,
+.voice-overlay--thinking .voice-orb { --orb: #d97757; }
+.voice-overlay--speaking .voice-orb { --orb: #bf7af0; }
+.voice-overlay--error .voice-orb { --orb: var(--danger); }
+
+/* Hearing: a quick pulse plus rings rippling outwards — the sound is going in. */
+.voice-overlay--hearing .voice-orb__core { animation: voice-breathe 0.7s ease-in-out infinite; }
+.voice-overlay--hearing .voice-orb__ring { animation: voice-ripple 1.4s ease-out infinite; }
+.voice-overlay--hearing .voice-orb__ring--outer { animation-delay: 0.7s; }
+
+/* Transcribing / thinking: a spinning arc — work in progress. */
+.voice-overlay--transcribing .voice-orb__ring,
+.voice-overlay--thinking .voice-orb__ring {
+  opacity: 1;
+  border-color: transparent;
+  border-top-color: var(--orb);
+  border-right-color: color-mix(in srgb, var(--orb) 40%, transparent);
+  animation: voice-spin 1.1s linear infinite;
+}
+.voice-overlay--transcribing .voice-orb__ring--outer,
+.voice-overlay--thinking .voice-orb__ring--outer {
+  inset: -10px;
+  animation-duration: 1.9s;
+  animation-direction: reverse;
+}
+
+/* Speaking: the core bounces to the voice and the rings ripple — the sound is coming out. */
+.voice-overlay--speaking .voice-orb__core { animation: voice-talk 0.55s ease-in-out infinite; }
+.voice-overlay--speaking .voice-orb__ring { animation: voice-ripple 1.1s ease-out infinite; }
+.voice-overlay--speaking .voice-orb__ring--outer { animation-delay: 0.55s; }
+
+/* Paused / error / setup: still. */
+.voice-overlay--paused .voice-orb__core,
+.voice-overlay--error .voice-orb__core,
+.voice-overlay--starting .voice-orb__core,
+.voice-overlay--downloading .voice-orb__core { animation: none; }
+.voice-overlay--downloading .voice-orb__ring { opacity: 1; border-style: dashed; animation: voice-spin 3s linear infinite; }
+
+@keyframes voice-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+}
+@keyframes voice-talk {
+  0%, 100% { transform: scale(0.96); }
+  50% { transform: scale(1.1); }
+}
+@keyframes voice-ripple {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+@keyframes voice-spin {
+  to { transform: rotate(360deg); }
+}
+
+.voice-overlay__status {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.voice-overlay__text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(92%, 640px);
+  max-height: 38%;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(var(--tint-rgb), 0.85);
+}
+
+.voice-overlay__text p {
+  margin: 0;
+}
+
+.voice-overlay__label {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(var(--tint-rgb), 0.12);
+  color: var(--muted);
+}
+
+.voice-overlay__heard {
+  color: var(--text);
+}
+
+.voice-overlay__reply--past {
+  opacity: 0.6;
+}
+
+.voice-overlay__notice {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.voice-overlay__error {
+  color: var(--danger);
+}
+
+.voice-overlay__controls {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.voice-overlay__btn {
+  min-width: 96px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--tint-rgb), 0.18);
+  background: rgba(var(--tint-rgb), 0.12);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.voice-overlay__btn:hover {
+  background: rgba(var(--tint-rgb), 0.2);
+}
+
+.voice-overlay__btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.voice-overlay__btn--stop {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.voice-overlay__btn--stop:hover {
+  background: #ff5f55;
+}
+
+.voice-overlay__btn--ghost {
+  background: transparent;
+}
+
+.voice-overlay__hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb__core,
+  .voice-orb__ring {
+    animation: none !important;
+  }
+}

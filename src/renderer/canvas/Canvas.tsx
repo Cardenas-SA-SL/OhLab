@@ -113,6 +113,7 @@ import {
   IconNote,
   IconPhone,
   IconProject,
+  IconHeadset,
   IconRemote,
   IconSave,
   IconSelectAll,
@@ -391,6 +392,12 @@ import {
   projectLaunchInfoNow
 } from '../state/projectLaunchInfo'
 import { activeSessionApi, localSessionApi } from '../session/session'
+import {
+  installVoiceTestSeam,
+  toggleVoiceConversation,
+  voiceConversationNodeId,
+  voiceTargetFor
+} from '../speech/voice-conversation-live'
 import {
   agentConfig,
   hasHooks,
@@ -900,6 +907,11 @@ export function Canvas() {
   // For the local session it IS window.nodeTerminal, so every call resolves identically.
   const session = useSession()
   const { api } = session
+  // Dev-instance only (a vite dev build or an NT_MULTI sandbox): the voice-conversation test seam
+  // (`window.__ohlabVoiceTest`). Resolves to a no-op everywhere else.
+  useEffect(() => {
+    void installVoiceTestSeam(api)
+  }, [api])
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([])
   // Persistent context links between Claude nodes (separate from ephemeral subagent/loop edges).
   const [linkEdges, setLinkEdges, onLinkEdgesChange] = useEdgesState<Edge>([])
@@ -7507,7 +7519,24 @@ export function Canvas() {
       'node.zoneLeft': () => snapNodeToZone('left-half'),
       'node.zoneRight': () => snapNodeToZone('right-half'),
       'node.zoneUp': () => snapNodeToZone('top-half'),
-      'node.zoneDown': () => snapNodeToZone('bottom-half')
+      'node.zoneDown': () => snapNodeToZone('bottom-half'),
+      // Voice conversation on the focused/selected agent node (docs/VOICE.md). Declines — so the
+      // chord falls through — when the target is not an agent we can talk to; the same
+      // `voiceTargetFor` gate the header toggle and the node menu use.
+      'speech.voiceConversation': () => {
+        const target = placementTargetNode()
+        if (!target || target.type !== 'terminal' || session.source === 'relay') return false
+        const st = useAgentStatus.getState().byId[target.id]
+        const voiceTarget = voiceTargetFor(
+          target.id,
+          target.data,
+          st?.account,
+          useSettings.getState().settings.claudeAccounts
+        )
+        if (!voiceTarget) return false
+        toggleVoiceConversation(voiceTarget, api)
+        return true
+      }
       // node.close / node.toggleMarkdown: main-process intercepted on desktop; deliberately
       // no renderer handler (the browser owns ⌘W in the Server Edition — see bridge/stubs.ts).
       // terminal.* / scm.commit / speech.dictation: owned by their local listeners.
@@ -7863,6 +7892,28 @@ export function Canvas() {
                   }
                 ])
           ] as MenuItem[])
+        : []),
+      // Voice conversation (single agent node): the node-menu twin of the header toggle. Gated by
+      // the same `voiceTargetFor`, so the row appears exactly where the headset button does.
+      ...(ids.length === 1
+        ? (() => {
+            const n = nodesRef.current.find((x) => x.id === ids[0])
+            if (!n || n.type !== 'terminal' || session.source === 'relay') return []
+            const st = useAgentStatus.getState().byId[ids[0]]
+            const target = voiceTargetFor(ids[0], n.data, st?.account, useSettings.getState().settings.claudeAccounts)
+            if (!target) return []
+            const on = voiceConversationNodeId() === ids[0]
+            return [
+              {
+                label: on ? 'Stop voice conversation' : 'Voice conversation',
+                icon: <IconHeadset />,
+                hint: on
+                  ? 'Stops listening and speaking, and releases the microphone.'
+                  : 'Talk to this agent and hear its replies — on-device Whisper and a system voice.',
+                onClick: () => toggleVoiceConversation(target, api)
+              }
+            ] as MenuItem[]
+          })()
         : []),
       // Restart the agent CLI itself (single selection): quit it and relaunch with `--resume`, so a
       // newly released model appears in its model list with the conversation intact. Unlike "Reload

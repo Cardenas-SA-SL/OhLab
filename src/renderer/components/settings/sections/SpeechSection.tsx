@@ -4,9 +4,15 @@ import {
   hasSpeechModel,
   modelAfterDelete,
   modelAfterDownload,
+  REPLY_RATE_MAX,
+  REPLY_RATE_MIN,
   SPEECH_LANGUAGES,
   SPEECH_MODEL_NONE
 } from '@shared/speech'
+import { pickReplyVoice, replyLanguage, SynthSpeaker, voicesForLanguage } from '@renderer/speech/tts'
+import { phrasesFor } from '@renderer/speech/speakable'
+import { Select } from '@renderer/ui/Select'
+import { Switch } from '@renderer/ui/Switch'
 import {
   speechLanguageSummary,
   speechLanguageWarning
@@ -50,6 +56,23 @@ const ROWS = {
       'no dictation'
     ]
   },
+  voice: {
+    title: 'Voice conversation',
+    keywords: [
+      'voice',
+      'conversation',
+      'talk',
+      'speak',
+      'replies',
+      'read aloud',
+      'tts',
+      'synthesis',
+      'headset',
+      'rate',
+      'speed',
+      'system voice'
+    ]
+  },
   language: {
     title: 'Language',
     // Every language name and endonym is a keyword, DERIVED from the catalogue rather than
@@ -67,6 +90,28 @@ const ROWS = {
   }
 }
 const ENTRIES = Object.values(ROWS)
+
+/** The sentence "Test voice" speaks, per reply language. */
+const VOICE_SAMPLES: Record<'es' | 'en', string> = {
+  es: 'Hola. Soy la voz que leerá las respuestas de tus agentes.',
+  en: 'Hi. I am the voice that will read your agents’ replies.'
+}
+
+/** The system voices, kept current: Chromium fills `getVoices()` asynchronously and announces it
+ *  with `voiceschanged`, so a list read once at mount is often empty. */
+function useSystemVoices(): SpeechSynthesisVoice[] {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() =>
+    typeof speechSynthesis === 'undefined' ? [] : speechSynthesis.getVoices()
+  )
+  useEffect(() => {
+    if (typeof speechSynthesis === 'undefined') return
+    const refresh = (): void => setVoices(speechSynthesis.getVoices())
+    refresh()
+    speechSynthesis.addEventListener('voiceschanged', refresh)
+    return () => speechSynthesis.removeEventListener('voiceschanged', refresh)
+  }, [])
+  return voices
+}
 
 /** `1600` -> `"1.6 GB"`, `142` -> `"142 MB"`. Used for both the approximate (undownloaded) and
  *  real (downloaded) size, so the two read consistently in the same row. */
@@ -98,6 +143,26 @@ export function SpeechSection({
   const dictationChord = useSettings(() => dictationBinding())
 
   const [models, setModels] = useState<SpeechModelInfo[]>([])
+  const voices = useSystemVoices()
+  // The reply language follows the dictation language (or the system's under Auto-detect); the
+  // picker lists that language's voices, falling back to every voice when it has none.
+  const replyLang = replyLanguage(settings.speech.language, navigator.language)
+  const languageVoices = voicesForLanguage(voices, replyLang)
+  const voiceOptions = languageVoices.length ? languageVoices : voices
+  const defaultVoice = pickReplyVoice(voices, '', replyLang)
+  const testVoice = (): void => {
+    if (typeof speechSynthesis === 'undefined') return
+    const base = replyLang.split('-')[0] === 'es' ? 'es' : 'en'
+    new SynthSpeaker(speechSynthesis).speak(
+      {
+        text: VOICE_SAMPLES[base],
+        voice: pickReplyVoice(voices, settings.speech.replyVoice, replyLang),
+        rate: settings.speech.replyRate,
+        lang: replyLang
+      },
+      () => {}
+    )
+  }
   const [progress, setProgress] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [rowError, setRowError] = useState<Record<string, string>>({})
@@ -347,6 +412,96 @@ export function SpeechSection({
             <SpeechLanguageSelect value={settings.speech.language} onChange={setLanguage} />
           }
         />
+      </SearchableRow>
+
+      <SearchableRow {...ROWS.voice}>
+        <div className="space-y-3">
+          <h4 className="text-[13px] font-medium text-text">Voice conversation</h4>
+          <p className="text-[12px] text-muted">
+            Turn it on from an agent node&apos;s header (the headset) or its menu: the node listens, submits
+            what you say when you pause, and reads the reply aloud with a system voice. Whisper and the
+            voices run on-device — nothing leaves this machine. Headphones are recommended so the reply
+            coming out of the speakers is not heard as you talking.
+          </p>
+          <FieldRow
+            label="Speak replies"
+            description="Read the agent's reply aloud when its turn ends. Off, the loop still listens and submits."
+            control={
+              <Switch
+                checked={settings.speech.speakReplies}
+                ariaLabel="Speak replies"
+                onChange={(on) => update({ speech: { ...settings.speech, speakReplies: on } })}
+              />
+            }
+          />
+          <FieldRow
+            label="Answer for speech"
+            description="Prefix each spoken prompt with a short instruction: 1 to 3 short sentences in the reply language, no code, lists or markdown; anything longer is summarized aloud and offered on screen. Off sends your words as-is."
+            control={
+              <Switch
+                checked={settings.speech.voicePromptPrefix}
+                ariaLabel="Prefix spoken prompts with the answer-for-speech instruction"
+                onChange={(on) => update({ speech: { ...settings.speech, voicePromptPrefix: on } })}
+              />
+            }
+          />
+          <FieldRow
+            label="Voice for replies"
+            description={
+              voices.length === 0
+                ? 'No system voices reported yet.'
+                : `Voices for ${replyLang}${languageVoices.length ? '' : ' (none installed — showing every voice)'}. Default picks the best one${defaultVoice ? `: ${defaultVoice.name}` : ''}.`
+            }
+            control={
+              <Select
+                value={settings.speech.replyVoice}
+                aria-label="Voice for replies"
+                onChange={(e) => update({ speech: { ...settings.speech, replyVoice: e.target.value } })}
+              >
+                <option value="">Default</option>
+                {voiceOptions.map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>
+                    {v.name} ({v.lang})
+                  </option>
+                ))}
+                {/* A chosen voice that is no longer installed stays selectable by name, never silently reset. */}
+                {settings.speech.replyVoice && !voices.some((v) => v.voiceURI === settings.speech.replyVoice) ? (
+                  <option value={settings.speech.replyVoice}>{settings.speech.replyVoice} (not installed)</option>
+                ) : null}
+              </Select>
+            }
+          />
+          <FieldRow
+            label="Rate"
+            description="How fast replies are read. 1× is the voice's natural pace."
+            control={
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={REPLY_RATE_MIN}
+                  max={REPLY_RATE_MAX}
+                  step={0.05}
+                  value={settings.speech.replyRate}
+                  aria-label="Reply speaking rate"
+                  onChange={(e) => update({ speech: { ...settings.speech, replyRate: Number(e.target.value) } })}
+                  className="w-40 accent-[var(--accent)]"
+                />
+                <span className="w-12 text-right text-[12px] text-muted tabular-nums">
+                  {settings.speech.replyRate.toFixed(2)}×
+                </span>
+              </div>
+            }
+          />
+          <FieldRow
+            label="Test voice"
+            description={`Speaks a sample in ${phrasesFor(replyLang) === phrasesFor('es') ? 'Spanish' : 'English'} with the voice and rate above.`}
+            control={
+              <Button variant="ghost" onClick={testVoice} disabled={typeof speechSynthesis === 'undefined'}>
+                Test voice
+              </Button>
+            }
+          />
+        </div>
       </SearchableRow>
     </SettingsSection>
   )

@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTopDialog, nextDialogId, popDialog, pushDialog } from '../dialog-stack'
-import { IconChat, IconMic, IconSearch, IconSmiley } from '../icons'
+import { IconChat, IconHeadset, IconMic, IconSearch, IconSmiley } from '../icons'
+import { VoiceChip } from '../VoiceChip'
+import { VoiceOverlay } from '../VoiceOverlay'
+import { useSettings } from '../../state/settings'
+import { useVoiceActiveOn, useVoiceConversation } from '../../state/voiceConversation'
+import { toggleVoiceConversation, voiceTargetFor } from '../../speech/voice-conversation-live'
 import { NodeIconView } from '../NodeIcon'
 import { nodeIconDialog } from '../NodeIconPicker'
 import { applyIconChoice } from '../../lib/nodeIconChoice'
@@ -58,7 +63,7 @@ interface CardModalProps {
  *  canvas under it) stay mounted. Terminal cards carry the node header's actions too:
  *  search / dictate / AI-name / markdown view (the node itself is hidden under the board). */
 export function CardModal({ session, columnTitle, board, onChangeBoard, onClose, onOpenCanvas, onRename, onEditSticky, onBrowserNav, onSetIcon }: CardModalProps) {
-  const { api } = useSession()
+  const { api, source: sessionSource } = useSession()
   const idRef = useRef<string>()
   if (!idRef.current) idRef.current = nextDialogId()
   const id = idRef.current
@@ -75,6 +80,20 @@ export function CardModal({ session, columnTitle, board, onChangeBoard, onClose,
   // session this is, so the account belongs in its header chips, not only two views away.
   const observedAccount = useAgentStatus((st) => st.byId[session.id]?.account)
   const accountChip = useAccountChip(session.spawn.accountId, observedAccount)
+  // Voice conversation: the same toggle + chip as the canvas node header (two views, one session).
+  // Same gate too — `voiceTargetFor` decides capability and the account whose transcript is read.
+  const claudeAccounts = useSettings((s) => s.settings.claudeAccounts)
+  const voiceTarget =
+    session.kind === 'terminal' && sessionSource !== 'relay'
+      ? voiceTargetFor(
+          session.id,
+          { agentId: session.agentId, title: session.title, cwd: session.spawn.cwd, accountId: session.spawn.accountId },
+          observedAccount,
+          claudeAccounts
+        )
+      : null
+  const voiceOn = useVoiceActiveOn(session.id)
+  const voiceOverlayHidden = useVoiceConversation((s) => s.overlayHidden)
   const [naming, setNaming] = useState(false)
   // Comments & activity panel: OPEN by default in the modal; the header 💬 collapses it. The
   // choice is remembered (localStorage) — once collapsed, later cards open collapsed too.
@@ -281,6 +300,7 @@ export function CardModal({ session, columnTitle, board, onChangeBoard, onClose,
           )}
           <span className="kanban-modal__column">{columnTitle ?? 'Ungrouped'}</span>
           {isTerminal && <AccountChip chip={accountChip} />}
+          {voiceOn && <VoiceChip nodeId={session.id} variant="badge" />}
           {/* The driving chip, so a user watching a browser card THROUGH the modal is not
               driving-blind. The lease is keyed by node id (not by webview object), so this shows
               when the node is being driven even though the drive lands on the CANVAS webview, not
@@ -335,6 +355,20 @@ export function CardModal({ session, columnTitle, board, onChangeBoard, onClose,
               >
                 <IconMic />
               </button>
+              {voiceTarget && (
+                <button
+                  className="kanban-modal__action"
+                  title={
+                    voiceOn
+                      ? 'Voice conversation is on — click to stop and release the microphone'
+                      : 'Voice conversation: talk to this agent and hear its replies'
+                  }
+                  aria-pressed={voiceOn}
+                  onClick={() => toggleVoiceConversation(voiceTarget, api)}
+                >
+                  <IconHeadset />
+                </button>
+              )}
               <button
                 className="kanban-modal__action"
                 title="Name with AI (from terminal output)"
@@ -430,6 +464,7 @@ export function CardModal({ session, columnTitle, board, onChangeBoard, onClose,
               )
             ) : (
               <div className="kanban-modal__pane" data-kind={session.kind}>
+                {voiceOn && !voiceOverlayHidden && <VoiceOverlay nodeId={session.id} />}
                 {session.kind === 'terminal' ? (
                   // A live SECOND client on the node's session — keyed by node id so switching cards
                   // remounts a fresh viewer.
